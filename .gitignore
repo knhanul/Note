@@ -1,0 +1,40 @@
+.venv/
+
+# 빌드 결과
+build/
+dist/
+out/
+
+# Qt 관련
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+*.qrc.depends
+*.qmlc
+*.jsc
+
+# Qt Creator / Windsurf
+*.pro.user
+*.pro.user.*
+*.user
+*.autosave
+
+# Python (사용 중이면)
+__pycache__/
+*.pyc
+
+# Node (있다면)
+node_modules/
+
+# 환경파일
+.env
+
+# 로그
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

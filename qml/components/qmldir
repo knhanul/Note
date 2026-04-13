@@ -1,0 +1,9 @@
+module components
+GlassCard 1.0 GlassCard.qml
+AppHeader 1.0 AppHeader.qml
+SidebarSection 1.0 SidebarSection.qml
+NotebookItem 1.0 NotebookItem.qml
+NoteListItem 1.0 NoteListItem.qml
+EditorToolbar 1.0 EditorToolbar.qml
+TagChip 1.0 TagChip.qml
+FolderItem 1.0 FolderItem.qml
