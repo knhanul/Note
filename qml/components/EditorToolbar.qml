@@ -17,7 +17,11 @@ Rectangle {
     signal insertLink()
     signal insertImage()
     signal insertTable()
+    signal insertBulletList()
+    signal insertNumberedList()
+    signal insertQuote()
 
+    width: toolbarRow.implicitWidth + Metrics.md
     height: Metrics.toolbarHeight
     radius: Metrics.radiusFull
     color: Colors.bgSecondary
@@ -25,6 +29,7 @@ Rectangle {
     border.color: Colors.borderLight
 
     RowLayout {
+        id: toolbarRow
         anchors.centerIn: parent
         spacing: Metrics.xs
 
@@ -76,21 +81,51 @@ Rectangle {
             }
 
             ToolButton {
-                icon: ""
+                icon: "🔗"
                 tooltip: "Link"
+                fontSize: 14
                 onClicked: root.insertLink()
             }
 
             ToolButton {
-                icon: ""
+                icon: "🖼️"
                 tooltip: "Image"
+                fontSize: 12
                 onClicked: root.insertImage()
             }
 
             ToolButton {
-                icon: "T"
+                icon: "⊞"
                 tooltip: "Table"
+                fontSize: 14
                 onClicked: root.insertTable()
+            }
+
+            Rectangle {
+                width: 1
+                height: 20
+                color: Colors.borderMedium
+                anchors.verticalCenter: parent.verticalCenter
+            }
+
+            ToolButton {
+                icon: "•"
+                tooltip: "Bullet List"
+                onClicked: root.insertBulletList()
+            }
+
+            ToolButton {
+                icon: "1."
+                tooltip: "Numbered List"
+                fontSize: 10
+                onClicked: root.insertNumberedList()
+            }
+
+            ToolButton {
+                icon: "❝"
+                tooltip: "Quote"
+                fontSize: 14
+                onClicked: root.insertQuote()
             }
         }
     }

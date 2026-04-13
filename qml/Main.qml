@@ -17,7 +17,17 @@ Window {
 
     // Properties for note selection
     property string selectedNoteId: ""
-
+    property var currentNote: null
+    
+    // Load note data when selection changes
+    onSelectedNoteIdChanged: {
+        if (selectedNoteId && noteController) {
+            currentNote = noteController.getNote(selectedNoteId)
+        } else {
+            currentNote = null
+        }
+    }
+    
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -218,8 +228,10 @@ Window {
                                         if (noteController && folderController) {
                                             var newId = noteController.createNote("새 노트", "", folderController.currentFolderId)
                                             window.selectedNoteId = newId
-                                            editorNoteTitle.text = "새 노트"
-                                            editorContent.text = ""
+                                            // Focus the editor title after creation
+                                            if (noteEditor) {
+                                                noteEditor.focusTitle()
+                                            }
                                         }
                                     }
                                 }
@@ -261,17 +273,21 @@ Window {
 
                             delegate: NoteListItem {
                                 width: ListView.view.width
-                                title: modelData.title
-                                preview: modelData.content.substring(0, 100) + (modelData.content.length > 100 ? "..." : "")
-                                date: modelData.updated_at ? modelData.updated_at.substring(0, 10) : ""
-                                tags: modelData.tags || []
-                                isPinned: modelData.is_pinned || false
-                                isSelected: window.selectedNoteId === modelData.id
+                                title: modelData ? modelData.title || "" : ""
+                                preview: modelData && modelData.content ? (modelData.content.substring(0, 80) + (modelData.content.length > 80 ? "..." : "")) : ""
+                                date: modelData && modelData.updated_at ? noteController.formatDate(modelData.updated_at) : ""
+                                tags: modelData && modelData.tags ? modelData.tags : []
+                                isPinned: modelData ? modelData.is_pinned || false : false
+                                isSelected: window.selectedNoteId === (modelData ? modelData.id : "")
 
                                 onClicked: {
-                                    window.selectedNoteId = modelData.id
-                                    editorNoteTitle.text = modelData.title
-                                    editorContent.text = modelData.content
+                                    if (modelData && modelData.id) {
+                                        // Select note through controller
+                                        if (noteController) {
+                                            noteController.selectNote(modelData.id)
+                                        }
+                                        window.selectedNoteId = modelData.id
+                                    }
                                 }
                             }
 
@@ -313,157 +329,134 @@ Window {
                         anchors.margins: Metrics.cardPaddingLg
                         spacing: Metrics.lg
 
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: Metrics.sm
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                height: editorNoteTitle.height
-                                color: "transparent"
-
-                                TextInput {
-                                    id: editorNoteTitle
-                                    anchors.fill: parent
-                                    text: "아침 루틴 정리"
-                                    font.family: Typography.fontPrimary
-                                    font.weight: Typography.weightBold
-                                    font.pixelSize: Typography.h2
-                                    color: Colors.textPrimary
-                                    selectByMouse: true
-                                    verticalAlignment: TextInput.AlignVCenter
-                                }
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: Metrics.md
-
-                                Text {
-                                    text: "2026년 4월 13일 오전 8:39"
-                                    font.family: Typography.fontPrimary
-                                    font.weight: Typography.weightRegular
-                                    font.pixelSize: Typography.caption
-                                    color: Colors.textTertiary
-                                }
-
-                                Row {
-                                    spacing: Metrics.sm
-
-                                    Rectangle {
-                                        width: 60
-                                        height: 24
-                                        radius: Metrics.radiusMd
-                                        color: saveArea.containsMouse ? Colors.primary100 : Colors.bgSecondary
-                                        border.width: 1
-                                        border.color: Colors.borderLight
-
-                                        MouseArea {
-                                            id: saveArea
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                        }
-
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: "Save"
-                                            font.family: Typography.fontPrimary
-                                            font.weight: Typography.weightMedium
-                                            font.pixelSize: Typography.caption
-                                            color: saveArea.containsMouse ? Colors.primary600 : Colors.textSecondary
-                                        }
-                                    }
-
-                                    Rectangle {
-                                        width: 60
-                                        height: 24
-                                        radius: Metrics.radiusMd
-                                        color: exportArea.containsMouse ? Colors.primary100 : Colors.bgSecondary
-                                        border.width: 1
-                                        border.color: Colors.borderLight
-
-                                        MouseArea {
-                                            id: exportArea
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                        }
-
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: "Export"
-                                            font.family: Typography.fontPrimary
-                                            font.weight: Typography.weightMedium
-                                            font.pixelSize: Typography.caption
-                                            color: exportArea.containsMouse ? Colors.primary600 : Colors.textSecondary
-                                        }
-                                    }
-
-                                    Rectangle {
-                                        width: 60
-                                        height: 24
-                                        radius: Metrics.radiusMd
-                                        color: stickyArea.containsMouse ? Colors.accentOrangeLight : Colors.bgSecondary
-                                        border.width: 1
-                                        border.color: stickyArea.containsMouse ? Colors.accentOrange : Colors.borderLight
-
-                                        MouseArea {
-                                            id: stickyArea
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                        }
-
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: "Sticky"
-                                            font.family: Typography.fontPrimary
-                                            font.weight: Typography.weightMedium
-                                            font.pixelSize: Typography.caption
-                                            color: stickyArea.containsMouse ? Colors.accentOrange : Colors.textSecondary
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        EditorToolbar {
-                            Layout.alignment: Qt.AlignLeft
-                        }
-
+                        // Empty state - only visible when no note selected
                         Rectangle {
+                            visible: !window.selectedNoteId
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             color: "transparent"
-                            clip: true
 
-                            Flickable {
-                                id: editorFlickable
-                                anchors.fill: parent
-                                contentWidth: width
-                                contentHeight: editorContent.height
-                                clip: true
+                            ColumnLayout {
+                                anchors.centerIn: parent
+                                spacing: Metrics.md
 
-                                TextEdit {
-                                    id: editorContent
-                                    width: parent.width
-                                    height: implicitHeight
-                                    text: "매일 아침 6시에 일어나서 물 한 잔 마시기.\n스트레칭 10분 하고 명상하기.\n\n아침 식사는 단백질 중심으로 챙기기.\n\n이렇게 하면 하루가 훨씬 생산적으로 시작된다."
+                                Text {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    text: "📝"
+                                    font.pixelSize: 48
+                                }
+
+                                Text {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    text: "노트를 선택하거나 새로 만들어보세요"
                                     font.family: Typography.fontPrimary
-                                    font.weight: Typography.weightRegular
-                                    font.pixelSize: Typography.bodyLarge
-                                    color: Colors.textPrimary
-                                    wrapMode: TextEdit.WordWrap
-                                    selectByMouse: true
+                                    font.weight: Typography.weightMedium
+                                    font.pixelSize: Typography.bodyRegular
+                                    color: Colors.textSecondary
+                                }
+
+                                Rectangle {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    width: 140
+                                    height: 36
+                                    radius: Metrics.radiusLg
+                                    color: createNoteBtnArea.containsMouse ? Colors.primary500 : Colors.primary400
+
+                                    MouseArea {
+                                        id: createNoteBtnArea
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        onClicked: {
+                                            if (noteController && folderController) {
+                                                var newId = noteController.createNote("새 노트", "", folderController.currentFolderId)
+                                                window.selectedNoteId = newId
+                                                if (noteEditor) {
+                                                    noteEditor.focusTitle()
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "새 노트 만들기"
+                                        font.family: Typography.fontPrimary
+                                        font.weight: Typography.weightSemibold
+                                        font.pixelSize: Typography.bodySmall
+                                        color: Colors.textInverse
+                                    }
                                 }
                             }
                         }
 
-                        Text {
-                            Layout.alignment: Qt.AlignRight
-                            text: "Markdown editor with toolbar ready."
-                            font.family: Typography.fontPrimary
-                            font.weight: Typography.weightRegular
-                            font.pixelSize: Typography.caption
-                            color: Colors.textTertiary
+                        // Web-based WYSIWYG Editor - only visible when note selected
+                        WebNoteEditor {
+                            id: noteEditor
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            visible: window.selectedNoteId !== ""
+
+                            noteId: window.selectedNoteId
+                            title: window.currentNote ? (window.currentNote.title || "") : ""
+                            content: window.currentNote ? (window.currentNote.content || "") : ""
+                            saveStatus: noteController ? noteController.saveStatus : "saved"
+
+                            onTitleEdited: (newTitle) => {
+                                if (window.selectedNoteId && noteController) {
+                                    noteController.updateNote(window.selectedNoteId, newTitle, window.currentNote ? window.currentNote.content : "")
+                                }
+                            }
+
+                            onContentEdited: (newContent) => {
+                                if (window.selectedNoteId && noteController) {
+                                    noteController.updateNote(window.selectedNoteId, noteEditor.title, newContent)
+                                }
+                            }
+
+                            onRequestSave: {
+                                if (noteController) {
+                                    noteController.saveCurrentNote()
+                                }
+                            }
+
+                            onImagePasted: (dataUrl) => {
+                                // Save base64 image to file
+                                if (noteController && window.selectedNoteId && dataUrl) {
+                                    // Save the image and get the file path
+                                    var savedPath = noteController.saveBase64Image(window.selectedNoteId, dataUrl)
+                                    if (savedPath) {
+                                        // Update the content with proper markdown link
+                                        // The WebNoteEditor will handle updating the img src
+                                        console.log("Image saved to: " + savedPath)
+                                    }
+                                }
+                            }
+                        }
+
+                        // Bottom status bar
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Metrics.md
+
+                            // Save status chip
+                            SaveStatusChip {
+                                status: noteController ? noteController.saveStatus : "saved"
+                            }
+
+                            Item { Layout.fillWidth: true }
+
+                            // Current note metadata
+                            Text {
+                                visible: window.selectedNoteId && noteController && window.currentNote
+                                text: {
+                                    if (!window.currentNote || !window.currentNote.updated_at) return ""
+                                    return "수정됨: " + noteController.formatDate(window.currentNote.updated_at)
+                                }
+                                font.family: Typography.fontPrimary
+                                font.weight: Typography.weightRegular
+                                font.pixelSize: Typography.caption
+                                color: Colors.textTertiary
+                            }
                         }
                     }
                 }

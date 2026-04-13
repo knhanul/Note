@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nuni Note WYSIWYG Editor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            font-size: 14px;
+            line-height: 1.6;
+            color: #0F172A;
+            background: transparent;
+            padding: 0;
+            overflow-x: hidden;
+        }
+        
+        #editor {
+            min-height: 300px;
+            padding: 16px;
+            outline: none;
+            background: transparent;
+        }
+        
+        #editor:focus {
+            outline: none;
+        }
+        
+        #editor p {
+            margin-bottom: 12px;
+        }
+        
+        #editor h1 {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: #0F172A;
+        }
+        
+        #editor h2 {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: #0F172A;
+        }
+        
+        #editor h3 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #0F172A;
+        }
+        
+        #editor ul, #editor ol {
+            margin-bottom: 12px;
+            padding-left: 24px;
+        }
+        
+        #editor li {
+            margin-bottom: 4px;
+        }
+        
+        #editor blockquote {
+            border-left: 3px solid #3B82F6;
+            padding-left: 16px;
+            margin: 16px 0;
+            color: #475569;
+            font-style: italic;
+        }
+        
+        #editor code {
+            background: #F1F5F9;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 12px;
+        }
+        
+        #editor pre {
+            background: #F1F5F9;
+            padding: 16px;
+            border-radius: 8px;
+            margin: 16px 0;
+            overflow-x: auto;
+        }
+        
+        #editor pre code {
+            background: none;
+            padding: 0;
+        }
+        
+        #editor img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            margin: 16px 0;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        
+        #editor a {
+            color: #3B82F6;
+            text-decoration: none;
+        }
+        
+        #editor a:hover {
+            text-decoration: underline;
+        }
+        
+        #editor hr {
+            border: none;
+            border-top: 1px solid #E2E8F0;
+            margin: 24px 0;
+        }
+        
+        #editor table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 16px 0;
+        }
+        
+        #editor th, #editor td {
+            border: 1px solid #E2E8F0;
+            padding: 8px 12px;
+            text-align: left;
+        }
+        
+        #editor th {
+            background: #F8FAFC;
+            font-weight: 600;
+        }
+        
+        .image-container {
+            position: relative;
+            display: inline-block;
+            margin: 16px 0;
+        }
+        
+        .image-caption {
+            text-align: center;
+            font-size: 12px;
+            color: #64748B;
+            margin-top: 8px;
+        }
+        
+        /* Selection color */
+        ::selection {
+            background: #BFDBFE;
+            color: #0F172A;
+        }
+        
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: #CBD5E1;
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94A3B8;
+        }
+    </style>
+</head>
+<body>
+    <div id="editor" contenteditable="true" spellcheck="false">
+        <p>여기에 내용을 입력하세요...</p>
+    </div>
+    
+    <script>
+        // Editor API for Python bridge
+        window.editorAPI = {
+            // Set content
+            setContent: function(html) {
+                document.getElementById('editor').innerHTML = html || '<p><br></p>';
+            },
+            
+            // Get content as HTML
+            getContent: function() {
+                return document.getElementById('editor').innerHTML;
+            },
+            
+            // Get content as plain text
+            getText: function() {
+                return document.getElementById('editor').innerText;
+            },
+            
+            // Get content as Markdown (basic conversion)
+            getMarkdown: function() {
+                return htmlToMarkdown(document.getElementById('editor').innerHTML);
+            },
+            
+            // Set content from Markdown
+            setMarkdown: function(md) {
+                document.getElementById('editor').innerHTML = markdownToHtml(md);
+            },
+            
+            // Focus editor
+            focus: function() {
+                document.getElementById('editor').focus();
+            },
+            
+            // Check if editor is empty
+            isEmpty: function() {
+                const text = document.getElementById('editor').innerText.trim();
+                return text === '' || text === '여기에 내용을 입력하세요...';
+            },
+            
+            // Format commands
+            formatBold: function() {
+                document.execCommand('bold', false, null);
+            },
+            
+            formatItalic: function() {
+                document.execCommand('italic', false, null);
+            },
+            
+            formatHeading: function() {
+                document.execCommand('formatBlock', false, 'H2');
+            },
+            
+            formatCode: function() {
+                document.execCommand('formatBlock', false, 'PRE');
+            },
+            
+            insertLink: function() {
+                const editor = document.getElementById('editor');
+                const sel = window.getSelection();
+                
+                // Save selection state before dialog opens
+                const savedRange = sel.rangeCount > 0 ? sel.getRangeAt(0).cloneRange() : null;
+                const hasSelection = sel.rangeCount > 0 && !sel.isCollapsed;
+                
+                this.showInputDialog('링크 URL을 입력하세요:', 'https://', function(url) {
+                    if (!url) return;
+                    
+                    editor.focus();
+                    const selection = window.getSelection();
+                    
+                    // Restore saved selection
+                    let range;
+                    if (savedRange) {
+                        range = savedRange;
+                        selection.removeAllRanges();
+                        selection.addRange(range);
+                    } else {
+                        range = document.createRange();
+                        range.selectNodeContents(editor);
+                        range.collapse(false);
+                    }
+                    
+                    if (hasSelection) {
+                        // If text was selected, apply link to selection
+                        document.execCommand('createLink', false, url);
+                    } else {
+                        // If no selection, create a link with URL as text
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.textContent = url;
+                        range.deleteContents();
+                        range.insertNode(link);
+                        
+                        // Move cursor after link
+                        range.setStartAfter(link);
+                        range.collapse(true);
+                        selection.removeAllRanges();
+                        selection.addRange(range);
+                    }
+                });
+            },
+            
+            showInputDialog: function(message, defaultValue, callback) {
+                // Remove any existing dialog
+                var existing = document.getElementById('editor-dialog');
+                if (existing) existing.remove();
+                
+                var dialog = document.createElement('div');
+                dialog.id = 'editor-dialog';
+                dialog.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:white;padding:20px;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.3);z-index:1000;min-width:300px;';
+                
+                var label = document.createElement('div');
+                label.textContent = message;
+                label.style.cssText = 'margin-bottom:10px;font-family:sans-serif;';
+                
+                var input = document.createElement('input');
+                input.type = 'text';
+                input.value = defaultValue || '';
+                input.style.cssText = 'width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;margin-bottom:15px;box-sizing:border-box;';
+                
+                var btnContainer = document.createElement('div');
+                btnContainer.style.cssText = 'display:flex;gap:10px;justify-content:flex-end;';
+                
+                var cancelBtn = document.createElement('button');
+                cancelBtn.textContent = '취소';
+                cancelBtn.style.cssText = 'padding:6px 12px;border:1px solid #ddd;background:#f5f5f5;border-radius:4px;cursor:pointer;';
+                
+                var okBtn = document.createElement('button');
+                okBtn.textContent = '확인';
+                okBtn.style.cssText = 'padding:6px 12px;border:none;background:#3B82F6;color:white;border-radius:4px;cursor:pointer;';
+                
+                cancelBtn.onclick = function() {
+                    dialog.remove();
+                    overlay.remove();
+                    callback(null);
+                };
+                
+                okBtn.onclick = function() {
+                    var value = input.value.trim();
+                    dialog.remove();
+                    overlay.remove();
+                    callback(value);
+                };
+                
+                input.onkeydown = function(e) {
+                    if (e.key === 'Enter') {
+                        okBtn.click();
+                    } else if (e.key === 'Escape') {
+                        cancelBtn.click();
+                    }
+                };
+                
+                btnContainer.appendChild(cancelBtn);
+                btnContainer.appendChild(okBtn);
+                dialog.appendChild(label);
+                dialog.appendChild(input);
+                dialog.appendChild(btnContainer);
+                
+                var overlay = document.createElement('div');
+                overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:999;';
+                overlay.onclick = function() {
+                    dialog.remove();
+                    overlay.remove();
+                    callback(null);
+                };
+                
+                document.body.appendChild(overlay);
+                document.body.appendChild(dialog);
+                input.focus();
+                input.select();
+            },
+            
+            insertImage: function(src) {
+                if (src) {
+                    document.execCommand('insertImage', false, src);
+                    return;
+                }
+                var self = this;
+                this.showInputDialog('이미지 URL을 입력하세요:', 'https://', function(url) {
+                    if (url) {
+                        document.execCommand('insertImage', false, url);
+                    }
+                });
+            },
+            
+            insertBulletList: function() {
+                document.execCommand('insertUnorderedList', false, null);
+            },
+            
+            insertNumberedList: function() {
+                document.execCommand('insertOrderedList', false, null);
+            },
+            
+            insertHorizontalRule: function() {
+                document.execCommand('insertHorizontalRule', false, null);
+            },
+            
+            insertQuote: function() {
+                document.execCommand('formatBlock', false, 'BLOCKQUOTE');
+            },
+            
+            insertTable: function() {
+                var self = this;
+                const editor = document.getElementById('editor');
+                
+                // Save current selection before dialog opens
+                const savedRange = (function() {
+                    const sel = window.getSelection();
+                    if (sel.rangeCount > 0) {
+                        return sel.getRangeAt(0).cloneRange();
+                    }
+                    return null;
+                })();
+                
+                console.log("[editorAPI] Saved selection before dialog:", savedRange ? "yes" : "no");
+                
+                // Single dialog for both dimensions using a simple format
+                this.showInputDialog('표 크기 (행x열):', '3x3', function(input) {
+                    if (!input) return;
+                    
+                    // Parse input like "3x3" or "3 x 3" or "3,3"
+                    var parts = input.match(/(\d+)\s*[xX,×]\s*(\d+)/) || 
+                                input.match(/(\d+)\s+(\d+)/);
+                    
+                    if (!parts) {
+                        console.log("[editorAPI] Invalid table size format: " + input);
+                        return;
+                    }
+                    
+                    var rows = parseInt(parts[1]);
+                    var cols = parseInt(parts[2]);
+                    
+                    if (isNaN(rows) || isNaN(cols) || rows < 1 || cols < 1) return;
+                    
+                    editor.focus();
+                    
+                    const selection = window.getSelection();
+                    let range;
+                    
+                    // Restore saved range or create new one at end
+                    if (savedRange) {
+                        range = savedRange;
+                        selection.removeAllRanges();
+                        selection.addRange(range);
+                        console.log("[editorAPI] Restored saved selection");
+                    } else {
+                        range = document.createRange();
+                        range.selectNodeContents(editor);
+                        range.collapse(false);
+                        console.log("[editorAPI] Created new range at end");
+                    }
+                    
+                    // Create table element at current cursor position
+                    const table = document.createElement('table');
+                    table.style.cssText = 'border-collapse: collapse; width: 100%; margin: 10px 0; border: 1px solid #ddd;';
+                    
+                    for (let i = 0; i < rows; i++) {
+                        const tr = document.createElement('tr');
+                        for (let j = 0; j < cols; j++) {
+                            const td = document.createElement('td');
+                            td.style.cssText = 'border: 1px solid #ccc; padding: 8px; min-width: 50px;';
+                            td.innerHTML = '<br>'; // Empty cell with line break for editing
+                            tr.appendChild(td);
+                        }
+                        table.appendChild(tr);
+                    }
+                    
+                    // Insert table at cursor position
+                    range.deleteContents();
+                    range.insertNode(table);
+                    
+                    // Add paragraph after table
+                    const p = document.createElement('p');
+                    p.innerHTML = '<br>';
+                    table.parentNode.insertBefore(p, table.nextSibling);
+                    
+                    // Move cursor to first cell of the table
+                    const firstCell = table.querySelector('td');
+                    if (firstCell) {
+                        range.selectNodeContents(firstCell);
+                        range.collapse(true);
+                        selection.removeAllRanges();
+                        selection.addRange(range);
+                    }
+                    
+                    self.onContentChanged();
+                });
+            },
+            
+            insertImageFromDataUrl: function(dataUrl, alt) {
+                console.log("[editorAPI] insertImageFromDataUrl called, dataUrl length: " + (dataUrl ? dataUrl.length : 0));
+                
+                const editor = document.getElementById('editor');
+                editor.focus();
+                
+                const img = document.createElement('img');
+                img.src = dataUrl;
+                img.alt = alt || 'image';
+                img.style.maxWidth = '100%';
+                img.style.display = 'block';
+                img.style.margin = '10px 0';
+                
+                // Handle image load error
+                img.onerror = function() {
+                    console.log("[editorAPI] Image failed to load from data URL");
+                };
+                
+                img.onload = function() {
+                    console.log("[editorAPI] Image loaded successfully, size: " + img.naturalWidth + "x" + img.naturalHeight);
+                };
+                
+                const selection = window.getSelection();
+                let range;
+                
+                if (selection.rangeCount > 0) {
+                    range = selection.getRangeAt(0);
+                    range.deleteContents();
+                } else {
+                    range = document.createRange();
+                    range.selectNodeContents(editor);
+                    range.collapse(false);
+                }
+                
+                range.insertNode(img);
+                console.log("[editorAPI] Image inserted into editor");
+                
+                // Move cursor after image
+                range.setStartAfter(img);
+                range.collapse(true);
+                selection.removeAllRanges();
+                selection.addRange(range);
+                
+                // Add paragraph after image
+                const p = document.createElement('p');
+                p.innerHTML = '<br>';
+                img.parentNode.insertBefore(p, img.nextSibling);
+                
+                console.log("[editorAPI] Paragraph added after image");
+            },
+            
+            // Base application path for resolving relative image paths
+            _appBasePath: 'file:///E:/Pjt/Note2/app_data/',
+            
+            // Insert markdown text at cursor position
+            insertMarkdownAtCursor: function(markdown) {
+                console.log("[editorAPI] Inserting markdown: " + markdown.substring(0, 50) + "...");
+                
+                const editor = document.getElementById('editor');
+                editor.focus();
+                
+                const selection = window.getSelection();
+                let range;
+                
+                if (selection.rangeCount > 0) {
+                    range = selection.getRangeAt(0);
+                } else {
+                    // Create range at end of editor
+                    range = document.createRange();
+                    range.selectNodeContents(editor);
+                    range.collapse(false);
+                }
+                
+                // Convert markdown to HTML with relative path resolution
+                var self = this;
+                var html = markdown
+                    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function(match, alt, src) {
+                        // Convert relative path to absolute file URL
+                        if (src && !src.match(/^https?:\/\//) && !src.match(/^data:/)) {
+                            // It's a relative path, convert to absolute
+                            src = self._appBasePath + src;
+                        }
+                        return '<img src="' + src + '" alt="' + alt + '" style="max-width:100%;" />';
+                    })
+                    .replace(/\n/g, '<br>');
+                
+                console.log("[editorAPI] Converted to HTML: " + html.substring(0, 100) + "...");
+                
+                try {
+                    // Insert HTML
+                    var fragment = document.createRange().createContextualFragment(html);
+                    range.deleteContents();
+                    range.insertNode(fragment);
+                    
+                    // Move cursor after insertion
+                    range.collapse(false);
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                    
+                    console.log("[editorAPI] Insertion successful");
+                } catch (e) {
+                    console.log("[editorAPI] Insertion error: " + e);
+                    // Fallback: append to end
+                    editor.innerHTML += html;
+                }
+            },
+            
+            // Notify Python of content change via console.log
+            onContentChanged: function() {
+                var markdown = this.getMarkdown();
+                console.log("EDITOR_CONTENT_CHANGED:" + markdown);
+            }
+        };
+        
+        // Content change detection
+        let contentChangeTimeout;
+        document.getElementById('editor').addEventListener('input', function() {
+            clearTimeout(contentChangeTimeout);
+            contentChangeTimeout = setTimeout(function() {
+                window.editorAPI.onContentChanged();
+            }, 300);
+        });
+        
+        // Handle paste for images
+        document.getElementById('editor').addEventListener('paste', function(e) {
+            console.log("[editor] Paste event detected");
+            const items = e.clipboardData.items;
+            console.log("[editor] Clipboard items count: " + items.length);
+            
+            for (let i = 0; i < items.length; i++) {
+                console.log("[editor] Item " + i + " type: " + items[i].type);
+                if (items[i].type.indexOf('image') !== -1) {
+                    console.log("[editor] Image item found, processing...");
+                    e.preventDefault();
+                    const blob = items[i].getAsFile();
+                    const reader = new FileReader();
+                    
+                    reader.onload = function(event) {
+                        const dataUrl = event.target.result;
+                        console.log("[editor] Image loaded as data URL, length: " + dataUrl.length);
+                        console.log("[editor] Calling insertImageFromDataUrl...");
+                        window.editorAPI.insertImageFromDataUrl(dataUrl, 'pasted-image');
+                        
+                        // Notify Python to save the image via console.log
+                        console.log("EDITOR_IMAGE_PASTED:" + dataUrl);
+                        
+                        window.editorAPI.onContentChanged();
+                    };
+                    
+                    reader.onerror = function(error) {
+                        console.log("[editor] FileReader error: " + error);
+                    };
+                    
+                    reader.readAsDataURL(blob);
+                    return;
+                }
+            }
+        });
+        
+        // Handle Enter key in code blocks to exit after double Enter
+        let lastKeyWasEnter = false;
+        document.getElementById('editor').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                const selection = window.getSelection();
+                if (selection.rangeCount === 0) return;
+                
+                const node = selection.anchorNode;
+                // Check if we're inside a PRE (code block) or BLOCKQUOTE
+                let parent = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+                while (parent && parent.id !== 'editor') {
+                    if (parent.tagName === 'PRE' || parent.tagName === 'BLOCKQUOTE') {
+                        // Check if this is the second Enter press
+                        if (lastKeyWasEnter) {
+                            e.preventDefault();
+                            lastKeyWasEnter = false;
+                            
+                            // Exit the code block
+                            const p = document.createElement('p');
+                            p.innerHTML = '<br>';
+                            parent.parentNode.insertBefore(p, parent.nextSibling);
+                            
+                            // Move cursor to new paragraph
+                            const range = document.createRange();
+                            range.setStart(p, 0);
+                            range.collapse(true);
+                            selection.removeAllRanges();
+                            selection.addRange(range);
+                            
+                            window.editorAPI.onContentChanged();
+                            return;
+                        }
+                        lastKeyWasEnter = true;
+                        return;
+                    }
+                    parent = parent.parentElement;
+                }
+                lastKeyWasEnter = true;
+            } else {
+                lastKeyWasEnter = false;
+            }
+        });
+        
+        // Simple HTML to Markdown converter
+        function htmlToMarkdown(html) {
+            // First, handle tables specially - convert to markdown table format
+            let md = html
+                // Convert tables to markdown format
+                .replace(/<table[^>]*>([\s\S]*?)<\/table>/gi, function(match, tableContent) {
+                    // Extract rows
+                    let rows = [];
+                    let rowMatch;
+                    let rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+                    while ((rowMatch = rowRegex.exec(tableContent)) !== null) {
+                        let cells = [];
+                        let cellMatch;
+                        let cellRegex = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi;
+                        while ((cellMatch = cellRegex.exec(rowMatch[1])) !== null) {
+                            // Get text content from cell
+                            let cellText = cellMatch[1]
+                                .replace(/<[^>]+>/g, '')
+                                .replace(/\s+/g, ' ')
+                                .trim();
+                            cells.push(cellText || ' ');
+                        }
+                        if (cells.length > 0) {
+                            rows.push(cells);
+                        }
+                    }
+                    
+                    if (rows.length === 0) return '';
+                    
+                    // Build markdown table
+                    let mdTable = '';
+                    const colCount = rows[0].length;
+                    
+                    // Header row (first row)
+                    mdTable += '| ' + rows[0].join(' | ') + ' |\n';
+                    // Separator
+                    mdTable += '|' + Array(colCount).fill(' --- ').join('|') + '|\n';
+                    // Data rows
+                    for (let i = 1; i < rows.length; i++) {
+                        mdTable += '| ' + rows[i].join(' | ') + ' |\n';
+                    }
+                    
+                    return mdTable + '\n';
+                })
+                // Continue with other conversions
+                .replace(/<h1>(.*?)<\/h1>/gi, '# $1\n\n')
+                .replace(/<h2>(.*?)<\/h2>/gi, '## $1\n\n')
+                .replace(/<h3>(.*?)<\/h3>/gi, '### $1\n\n')
+                .replace(/<p>(.*?)<\/p>/gi, '$1\n\n')
+                .replace(/<strong>(.*?)<\/strong>/gi, '**$1**')
+                .replace(/<b>(.*?)<\/b>/gi, '**$1**')
+                .replace(/<em>(.*?)<\/em>/gi, '*$1*')
+                .replace(/<i>(.*?)<\/i>/gi, '*$1*')
+                .replace(/<code>(.*?)<\/code>/gi, '`$1`')
+                .replace(/<pre>(.*?)<\/pre>/gi, '```\n$1\n```\n\n')
+                .replace(/<img[^>]+src="([^"]+)"[^>]*>/gi, '![]($1)')
+                .replace(/<a[^>]+href="([^"]+)"[^>]*>(.*?)<\/a>/gi, '[$2]($1)')
+                .replace(/<br\s*\/?>/gi, '\n')
+                .replace(/<\/p>/gi, '\n\n')
+                .replace(/<[^>]+>/g, '');
+            
+            return md.trim();
+        }
+        
+        // Simple Markdown to HTML converter
+        function markdownToHtml(md) {
+            let html = md
+                // Convert markdown tables to HTML tables first
+                .replace(/(\|[^\n]+\|\n\|[-:\s|]+\|\n)(?:\|[^\n]+\|\n?)+/g, function(match) {
+                    let lines = match.trim().split('\n');
+                    if (lines.length < 2) return match;
+                    
+                    let html = '<table style="border-collapse: collapse; width: 100%; margin: 10px 0; border: 1px solid #ddd;">';
+                    
+                    // First line is header
+                    let headerCells = lines[0].split('|').slice(1, -1).map(c => c.trim());
+                    html += '<tr>';
+                    headerCells.forEach(cell => {
+                        html += '<th style="border: 1px solid #ccc; padding: 8px; background: #f5f5f5;">' + cell + '</th>';
+                    });
+                    html += '</tr>';
+                    
+                    // Skip separator line (index 1)
+                    // Remaining lines are data rows
+                    for (let i = 2; i < lines.length; i++) {
+                        if (!lines[i].trim()) continue;
+                        let cells = lines[i].split('|').slice(1, -1).map(c => c.trim());
+                        html += '<tr>';
+                        cells.forEach(cell => {
+                            html += '<td style="border: 1px solid #ccc; padding: 8px;">' + (cell || '<br>') + '</td>';
+                        });
+                        html += '</tr>';
+                    }
+                    
+                    html += '</table>';
+                    return html;
+                })
+                // Continue with other conversions
+                .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+                .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+                .replace(/^# (.*$)/gim, '<h1>$1</h1>')
+                .replace(/\*\*(.*)\*\*/gim, '<strong>$1</strong>')
+                .replace(/\*(.*)\*/gim, '<em>$1</em>')
+                .replace(/`([^`]+)`/gim, '<code>$1</code>')
+                .replace(/```([\s\S]*?)```/gim, '<pre><code>$1</code></pre>')
+                .replace(/!\[([^\]]*)\]\(([^)]+)\)/gim, '<img src="$2" alt="$1" />')
+                .replace(/\[([^\]]+)\]\(([^)]+)\)/gim, '<a href="$2">$1</a>')
+                .replace(/\n/gim, '<br>');
+            
+            return html;
+        }
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log("EDITOR_LOADED");
+        });
+    </script>
+</body>
+</html>

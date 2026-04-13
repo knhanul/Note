@@ -7,3 +7,6 @@ NoteListItem 1.0 NoteListItem.qml
 EditorToolbar 1.0 EditorToolbar.qml
 TagChip 1.0 TagChip.qml
 FolderItem 1.0 FolderItem.qml
+NoteEditor 1.0 NoteEditor.qml
+SaveStatusChip 1.0 SaveStatusChip.qml
+WebNoteEditor 1.0 WebNoteEditor.qml

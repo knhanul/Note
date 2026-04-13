@@ -48,6 +48,8 @@ def main():
     os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
     os.environ["QT_SCALE_FACTOR_ROUNDING_POLICY"] = "RoundPreferFloor"
     
+    # WebEngine is initialized automatically when QWebEngineView is created
+    
     # Create application
     app = QApplication(sys.argv)
     app.setApplicationName("Nuni Note")
