@@ -5,6 +5,7 @@ import uuid
 
 from services.database import Database
 from services.folder_service import FolderService
+from services.library_service import LibraryService
 
 
 class FolderController(QObject):
@@ -16,20 +17,53 @@ class FolderController(QObject):
     folderAdded = pyqtSignal(str)  # folder_id
     folderRemoved = pyqtSignal(str)  # folder_id
     folderRenamed = pyqtSignal(str, str)  # folder_id, new_name
+    libraryChanged = pyqtSignal()  # Emitted when library changes
     
-    def __init__(self, parent=None):
+    def __init__(self, library_service: LibraryService, parent=None):
         super().__init__(parent)
         self._current_folder_id: Optional[str] = None
+        self._library_service = library_service
         
-        # Initialize database
-        self._db = Database()
-        self._db.init_schema()
+        print(f"[FolderController] Initializing...")
         
-        # Initialize service
-        self._folder_service = FolderService(self._db)
+        # Connect to library changes
+        try:
+            self._library_service.currentLibraryChanged.connect(self._on_library_changed)
+            print(f"[FolderController] Connected to library changes")
+        except Exception as e:
+            print(f"[FolderController] Error connecting signal: {e}")
         
-        # Load or create default folders
-        self._load_folders()
+        # Initialize with current library
+        try:
+            self._on_library_changed()
+            print(f"[FolderController] Initialization complete")
+        except Exception as e:
+            print(f"[FolderController] Error in initial load: {e}")
+    
+    def _on_library_changed(self):
+        """Handle library change - reload folders from new database."""
+        print(f"[FolderController] Library changed, reloading folders...")
+        db = self._library_service.get_current_database()
+        if db:
+            self._db = db
+            self._folder_service = FolderService(self._db)
+            self._current_folder_id = None
+            self._load_folders()
+            self.libraryChanged.emit()
+            self.foldersChanged.emit()
+            self.currentFolderChanged.emit()
+            print(f"[FolderController] Folders reloaded, count: {len(self.folders)}")
+        
+    def _get_db(self) -> Database:
+        """Get current database, refreshing if needed."""
+        db = self._library_service.get_current_database()
+        if db:
+            return db
+        return self._db  # Fallback
+    
+    def get_db(self) -> Database:
+        """Get current database for other controllers."""
+        return self._get_db()
     
     def _load_folders(self):
         """Load folders from database or create defaults."""
@@ -59,6 +93,9 @@ class FolderController(QObject):
     def folders(self):
         """Get all folders as list of dicts for QML."""
         folders = self._folder_service.get_all()
+        folder_names = [f['name'] for f in folders]
+        print(f"[FolderController] DB: {self._db.db_path}")
+        print(f"[FolderController] Folders: {folder_names}")
         # Add note count to each folder
         for folder in folders:
             folder['note_count'] = self._folder_service.get_note_count(folder['id'])
@@ -103,11 +140,15 @@ class FolderController(QObject):
     @pyqtSlot(str, result=bool)
     def deleteFolder(self, folder_id: str) -> bool:
         """Delete a folder by ID."""
+        print(f"[FolderController] deleteFolder called: {folder_id}")
         if not self._folder_service.exists(folder_id):
+            print(f"[FolderController] delete failed: folder not found")
             return False
         
         # Delete from database (cascades to notes)
-        if self._folder_service.delete(folder_id):
+        result = self._folder_service.delete(folder_id)
+        print(f"[FolderController] delete result: {result}")
+        if result:
             # Update current folder if deleted
             if self._current_folder_id == folder_id:
                 folders = self._folder_service.get_all()
@@ -123,10 +164,14 @@ class FolderController(QObject):
     @pyqtSlot(str, str, result=bool)
     def renameFolder(self, folder_id: str, new_name: str) -> bool:
         """Rename a folder."""
+        print(f"[FolderController] renameFolder called: {folder_id} -> {new_name}")
         if not new_name.strip():
+            print(f"[FolderController] rename failed: empty name")
             return False
         
-        if self._folder_service.update(folder_id, name=new_name.strip()):
+        result = self._folder_service.update(folder_id, name=new_name.strip())
+        print(f"[FolderController] rename result: {result}")
+        if result:
             self.foldersChanged.emit()
             self.folderRenamed.emit(folder_id, new_name)
             return True

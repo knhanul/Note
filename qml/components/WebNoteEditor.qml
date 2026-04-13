@@ -43,7 +43,7 @@ ColumnLayout {
             console.log("[WebNoteEditor] noteController: " + (noteController ? "available" : "not available"))
             
             if (noteController && root.noteId && filePath) {
-                // Save image to storage
+                // Convert image to data URL (stored in note content / DB)
                 var savedPath = noteController.saveLocalImage(root.noteId, filePath)
                 console.log("[WebNoteEditor] Saved path: " + savedPath)
                 

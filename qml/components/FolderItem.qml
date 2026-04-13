@@ -13,6 +13,15 @@ Rectangle {
     property bool isSelected: false
     property bool isEditing: false
 
+    onIsEditingChanged: {
+        if (isEditing) {
+            Qt.callLater(function() {
+                editInput.forceActiveFocus()
+                editInput.selectAll()
+            })
+        }
+    }
+
     // Signals
     signal clicked()
     signal renameRequested(string newName)
@@ -124,16 +133,19 @@ Rectangle {
                         root.isEditing = false
                     }
 
+                    onActiveFocusChanged: {
+                        if (!activeFocus && root.isEditing) {
+                            if (text.trim() !== "") {
+                                root.renameRequested(text.trim())
+                            }
+                            root.isEditing = false
+                        }
+                    }
+
                     Keys.onEscapePressed: {
                         root.isEditing = false
                     }
 
-                    Component.onCompleted: {
-                        if (root.isEditing) {
-                            forceActiveFocus()
-                            selectAll()
-                        }
-                    }
                 }
             }
         }
@@ -168,6 +180,7 @@ Rectangle {
             height: 20
             radius: Metrics.radiusFull
             color: deleteArea.containsMouse ? Colors.accentRoseLight : "transparent"
+            z: 2
 
             Text {
                 anchors.centerIn: parent
@@ -182,7 +195,10 @@ Rectangle {
                 id: deleteArea
                 anchors.fill: parent
                 hoverEnabled: true
-                onClicked: root.deleteRequested()
+                onClicked: (mouse) => {
+                    mouse.accepted = true
+                    root.deleteRequested()
+                }
             }
         }
     }
@@ -191,7 +207,9 @@ Rectangle {
     MouseArea {
         id: hoverArea
         anchors.fill: parent
+        z: -1
         hoverEnabled: true
+        enabled: !root.isEditing
         acceptedButtons: Qt.LeftButton | Qt.RightButton
 
         onClicked: (mouse) => {

@@ -12,10 +12,9 @@ class Database:
     def __init__(self, db_path: Optional[str] = None):
         """Initialize database with optional custom path."""
         if db_path is None:
-            # Store in app_data directory
-            app_dir = Path(__file__).parent.parent / "app_data"
-            app_dir.mkdir(exist_ok=True)
-            db_path = app_dir / "nuni_note.db"
+            # Store in program directory (where main.py is located)
+            prog_dir = Path(__file__).parent.parent
+            db_path = prog_dir / "nuni_note.db"
         
         self.db_path = str(db_path)
         self._connection: Optional[sqlite3.Connection] = None
@@ -90,11 +89,26 @@ class Database:
                 FOREIGN KEY (tag_id) REFERENCES tags (id) ON DELETE CASCADE
             )
         """)
+
+        # Note images table (stores image payloads separately from notes.content)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS note_images (
+                id TEXT PRIMARY KEY,
+                note_id TEXT NOT NULL,
+                mime_type TEXT NOT NULL,
+                data_base64 TEXT NOT NULL,
+                checksum TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (note_id) REFERENCES notes (id) ON DELETE CASCADE
+            )
+        """)
         
         # Create indexes for performance
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_notes_folder ON notes (folder_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_notes_updated ON notes (updated_at)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_notes_deleted ON notes (deleted_at)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_note_images_note ON note_images (note_id)")
+        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_note_images_note_checksum ON note_images (note_id, checksum)")
         
         conn.commit()
         print(f"[Database] Schema initialized at {self.db_path}")

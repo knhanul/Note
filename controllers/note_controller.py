@@ -4,10 +4,13 @@ from PyQt6.QtCore import QObject, pyqtSignal, pyqtProperty, pyqtSlot, QTimer, QV
 from PyQt6.QtGui import QClipboard, QImage
 from PyQt6.QtWidgets import QApplication
 import uuid
+import re
+import hashlib
 
 from services.database import Database
 from services.note_service import NoteService
 from services.image_service import ImageService
+from services.library_service import LibraryService
 
 
 class NoteController(QObject):
@@ -20,14 +23,20 @@ class NoteController(QObject):
     noteRemoved = pyqtSignal(str)  # note_id
     noteUpdated = pyqtSignal(str)  # note_id
     saveStatusChanged = pyqtSignal()  # For save status updates
+    libraryChanged = pyqtSignal()  # Emitted when library changes
+
+    _DATA_URL_PATTERN = re.compile(r"data:(image/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=\r\n]+)")
+    _TOKEN_PATTERN = re.compile(r"note-image://([a-zA-Z0-9_-]+)")
     
-    def __init__(self, folder_controller, parent=None):
+    def __init__(self, library_service: LibraryService, folder_controller, parent=None):
         super().__init__(parent)
         self._folder_controller = folder_controller
+        self._library_service = library_service
         
-        # Get database from folder controller
-        self._db = folder_controller.get_db()
-        self._note_service = NoteService(self._db)
+        print(f"[NoteController] Initializing...")
+        
+        # Services will be initialized when library is set
+        self._note_service: Optional[NoteService] = None
         self._image_service = ImageService()
         
         # Current state
@@ -41,11 +50,37 @@ class NoteController(QObject):
         self._auto_save_timer.setSingleShot(True)
         self._auto_save_timer.timeout.connect(self._perform_auto_save)
         
-        # Connect to folder changes
-        self._folder_controller.currentFolderChanged.connect(self._on_folder_changed)
+        # Connect to signals
+        try:
+            self._folder_controller.currentFolderChanged.connect(self._on_folder_changed)
+            self._library_service.currentLibraryChanged.connect(self._on_library_changed)
+            self._folder_controller.libraryChanged.connect(self._on_folder_changed)
+            print(f"[NoteController] Connected to signals")
+        except Exception as e:
+            print(f"[NoteController] Error connecting signals: {e}")
         
-        # Initialize default notes if needed
-        self._initialize_default_notes()
+        # Initialize with current library
+        try:
+            self._on_library_changed()
+            print(f"[NoteController] Initialization complete")
+        except Exception as e:
+            print(f"[NoteController] Error in initial load: {e}")
+    
+    def _on_library_changed(self):
+        """Handle library change - reload notes from new database."""
+        print(f"[NoteController] Library changed, reloading...")
+        db = self._library_service.get_current_database()
+        if db:
+            self._note_service = NoteService(db)
+            self._current_note_id = None
+            self._is_dirty = False
+            self._save_status = "saved"
+            self.notesChanged.emit()  # Clear notes view immediately
+            self.filteredNotesChanged.emit()
+            self._on_folder_changed()  # Reload notes for current folder
+            self.libraryChanged.emit()
+            self.saveStatusChanged.emit()
+            print(f"[NoteController] Library change handled, notes refreshed")
     
     def _initialize_default_notes(self):
         """Initialize with default notes if database is empty."""
@@ -94,6 +129,40 @@ class NoteController(QObject):
         self._is_saving = False
         self._save_status = "saved"
         self.saveStatusChanged.emit()
+
+    def _extract_tokens(self, content: str) -> List[str]:
+        return [m.group(1) for m in self._TOKEN_PATTERN.finditer(content or "")]
+
+    def _store_data_urls_and_tokenize(self, note_id: str, content: str) -> str:
+        """Replace data URLs in markdown with note-image:// tokens and persist payloads."""
+        if not content:
+            return content
+
+        def _replace(match):
+            mime_type = match.group(1)
+            data_base64 = match.group(2).replace("\n", "").replace("\r", "")
+            checksum = hashlib.sha256(f"{mime_type}:{data_base64}".encode("utf-8")).hexdigest()
+            image_id = self._note_service.upsert_note_image(note_id, mime_type, data_base64, checksum)
+            return f"note-image://{image_id}"
+
+        tokenized = self._DATA_URL_PATTERN.sub(_replace, content)
+        keep_ids = list(dict.fromkeys(self._extract_tokens(tokenized)))
+        self._note_service.delete_unused_note_images(note_id, keep_ids)
+        return tokenized
+
+    def _hydrate_image_tokens(self, content: str) -> str:
+        """Replace note-image:// tokens with data URLs for editor rendering."""
+        if not content:
+            return content
+
+        def _replace(match):
+            image_id = match.group(1)
+            row = self._note_service.get_note_image(image_id)
+            if not row:
+                return ""
+            return f"data:{row['mime_type']};base64,{row['data_base64']}"
+
+        return self._TOKEN_PATTERN.sub(_replace, content)
     
     # Properties
     @pyqtProperty(list, notify=notesChanged)
@@ -145,7 +214,9 @@ class NoteController(QObject):
         
         note_id = str(uuid.uuid4())[:8]
         
-        if self._note_service.create(note_id, folder_id, title, content):
+        initial_content = self._store_data_urls_and_tokenize(note_id, content)
+
+        if self._note_service.create(note_id, folder_id, title, initial_content):
             self._current_note_id = note_id
             self._is_dirty = False
             self._save_status = "saved"
@@ -179,8 +250,10 @@ class NoteController(QObject):
         if not note_id:
             return False
         
+        tokenized_content = self._store_data_urls_and_tokenize(note_id, content)
+
         # Perform immediate update to database
-        if self._note_service.update(note_id, title=title, content=content):
+        if self._note_service.update(note_id, title=title, content=tokenized_content):
             self._current_note_id = note_id
             self._is_dirty = True
             self._save_status = "dirty"
@@ -221,6 +294,7 @@ class NoteController(QObject):
         """Get a single note by ID."""
         note = self._note_service.get_by_id(note_id)
         if note:
+            note['content'] = self._hydrate_image_tokens(note.get('content', ''))
             return QVariant(note)
         return QVariant()
     
@@ -299,9 +373,9 @@ class NoteController(QObject):
         if image.isNull():
             return False
         
-        # Save image
-        image_path = self._image_service.save_clipboard_image(image, note_id)
-        if not image_path:
+        # Convert image to data URL so it is stored directly in DB content
+        image_data_url = self._image_service.get_image_data_url(image)
+        if not image_data_url:
             return False
         
         # Get current note content
@@ -312,23 +386,11 @@ class NoteController(QObject):
         # Insert markdown image at end of content
         content = note.get('content', '')
         new_content = self._image_service.insert_image_markdown(
-            content, len(content), image_path, "이미지"
+            content, len(content), image_data_url, "이미지"
         )
         
-        # Update note with new content
-        if self._note_service.update(note_id, content=new_content):
-            self._current_note_id = note_id
-            self._is_dirty = False
-            self._save_status = "saved"
-            
-            self.notesChanged.emit()
-            self.filteredNotesChanged.emit()
-            self.noteUpdated.emit(note_id)
-            self.saveStatusChanged.emit()
-            
-            return True
-        
-        return False
+        # Reuse update pipeline (tokenize image payload into note_images table)
+        return self.updateNote(note_id, note.get('title', ''), new_content)
     
     @pyqtSlot(str, result=str)
     def getImageDataUrl(self, image_path: str) -> str:
@@ -338,6 +400,10 @@ class NoteController(QObject):
         """
         if not image_path:
             return ""
+
+        # If already data URL, return as-is (DB-stored image format)
+        if image_path.startswith("data:image"):
+            return image_path
         
         from pathlib import Path
         
@@ -361,25 +427,21 @@ class NoteController(QObject):
     
     @pyqtSlot(str, str, result=str)
     def saveBase64Image(self, note_id: str, base64_data: str) -> str:
-        """Save base64 image data and return the file path."""
+        """Normalize base64 image data and return data URL for DB storage."""
         if not note_id or not base64_data:
             return ""
         
         try:
-            # Parse base64 data
-            if "," in base64_data:
-                base64_data = base64_data.split(",")[1]
-            
-            # Decode base64
+            # Keep DB format as data URL
+            if base64_data.startswith("data:image"):
+                return base64_data
+
+            # Support raw base64 payloads by normalizing to data URL
             from PyQt6.QtCore import QByteArray
             byte_array = QByteArray.fromBase64(base64_data.encode())
-            
-            # Create QImage from data
             image = QImage()
             if image.loadFromData(byte_array):
-                # Save image
-                image_path = self._image_service.save_clipboard_image(image, note_id)
-                return image_path if image_path else ""
+                return self._image_service.get_image_data_url(image)
         except Exception as e:
             print(f"[NoteController] Save base64 image error: {e}")
         
@@ -387,25 +449,12 @@ class NoteController(QObject):
     
     @pyqtSlot(str, str, result=str)
     def saveLocalImage(self, note_id: str, file_path: str) -> str:
-        """Save a local image file to note storage and return the relative path."""
+        """Convert local image file to data URL for DB storage and return it."""
         if not note_id or not file_path:
             return ""
         
         try:
-            from pathlib import Path
-            
-            # Load image from file path
-            path_obj = Path(file_path)
-            if not path_obj.exists():
-                return ""
-            
-            image = QImage(str(path_obj))
-            if image.isNull():
-                return ""
-            
-            # Save to note storage
-            image_path = self._image_service.save_clipboard_image(image, note_id)
-            return image_path if image_path else ""
+            return self._image_service.load_image_file_as_data_url(file_path)
         except Exception as e:
             print(f"[NoteController] Save local image error: {e}")
         

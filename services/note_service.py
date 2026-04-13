@@ -1,5 +1,6 @@
 """Note service for database operations."""
 from typing import Optional, List, Dict, Any
+import uuid
 from .database import Database
 
 
@@ -172,3 +173,39 @@ class NoteService:
         if len(text) <= max_length:
             return text
         return text[:max_length].rsplit(' ', 1)[0] + '...'
+
+    # Note image APIs
+    def upsert_note_image(self, note_id: str, mime_type: str, data_base64: str, checksum: str) -> str:
+        """Insert note image payload or reuse existing one by checksum."""
+        existing = self.db.fetch_one(
+            "SELECT id FROM note_images WHERE note_id = ? AND checksum = ?",
+            (note_id, checksum)
+        )
+        if existing:
+            return existing['id']
+
+        image_id = str(uuid.uuid4())[:16]
+        self.db.execute(
+            """INSERT INTO note_images (id, note_id, mime_type, data_base64, checksum, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (image_id, note_id, mime_type, data_base64, checksum, Database.now_iso())
+        )
+        self.db.commit()
+        return image_id
+
+    def get_note_image(self, image_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch note image by image id."""
+        return self.db.fetch_one(
+            "SELECT id, note_id, mime_type, data_base64, checksum FROM note_images WHERE id = ?",
+            (image_id,)
+        )
+
+    def delete_unused_note_images(self, note_id: str, keep_image_ids: List[str]) -> None:
+        """Delete note images not referenced by current note content."""
+        keep_set = set(keep_image_ids)
+        rows = self.db.fetch_all("SELECT id FROM note_images WHERE note_id = ?", (note_id,))
+        for row in rows:
+            image_id = row['id']
+            if image_id not in keep_set:
+                self.db.execute("DELETE FROM note_images WHERE id = ?", (image_id,))
+        self.db.commit()

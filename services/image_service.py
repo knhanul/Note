@@ -11,10 +11,17 @@ from PyQt6.QtCore import QBuffer, QByteArray, QIODevice
 class ImageService:
     """Handles image operations including clipboard paste and file storage."""
     
-    def __init__(self, base_path: Optional[str] = None):
+    def __init__(self, base_path: Optional[str] = None, library_id: Optional[str] = None):
         """Initialize image service with storage path."""
+        prog_dir = Path(__file__).parent.parent
+        
         if base_path is None:
-            base_path = Path(__file__).parent.parent / "app_data" / "images"
+            if library_id:
+                # Library-specific images folder
+                base_path = prog_dir / "libraries" / f"{library_id}_images"
+            else:
+                # Default images folder in program directory
+                base_path = prog_dir / "images"
         
         self.images_dir = Path(base_path)
         self.images_dir.mkdir(parents=True, exist_ok=True)
@@ -49,11 +56,22 @@ class ImageService:
         # Get base64
         base64_data = buffer.data().toBase64().data().decode()
         return f"data:image/png;base64,{base64_data}"
+
+    def load_image_file_as_data_url(self, file_path: str) -> str:
+        """Load a local image file and return as data URL."""
+        if not file_path:
+            return ""
+
+        image = QImage(file_path)
+        if image.isNull():
+            return ""
+
+        return self.get_image_data_url(image)
     
-    def insert_image_markdown(self, content: str, cursor_pos: int, 
-                              image_path: str, alt_text: str = "image") -> str:
+    def insert_image_markdown(self, content: str, cursor_pos: int,
+                              image_src: str, alt_text: str = "image") -> str:
         """Insert markdown image tag at cursor position."""
-        markdown = f"\n![{alt_text}]({image_path})\n"
+        markdown = f"\n![{alt_text}]({image_src})\n"
         
         if cursor_pos < 0 or cursor_pos > len(content):
             cursor_pos = len(content)

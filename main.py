@@ -19,6 +19,7 @@ from PyQt6.QtQml import QQmlApplicationEngine, qmlRegisterSingletonType
 from PyQt6.QtCore import QUrl, QObject, pyqtSignal, pyqtProperty, QTimer
 from PyQt6.QtGui import QFontDatabase, QFont
 
+from services.library_service import LibraryService
 from controllers.folder_controller import FolderController
 from controllers.note_controller import NoteController
 
@@ -62,9 +63,12 @@ def main():
     # Create QML engine first
     engine = QQmlApplicationEngine()
     
-    # Create controllers with engine as parent so they stay alive
-    folder_controller = FolderController(engine)
-    note_controller = NoteController(folder_controller, engine)
+    # Create library service first (manages multiple databases)
+    library_service = LibraryService(engine)
+    
+    # Create controllers with library service and engine as parent
+    folder_controller = FolderController(library_service, engine)
+    note_controller = NoteController(library_service, folder_controller, engine)
     
     # Get the directory containing this script
     current_dir = Path(__file__).parent.resolve()
@@ -74,6 +78,7 @@ def main():
     engine.addImportPath(str(qml_dir))
     
     # Set context properties for controllers BEFORE loading QML
+    engine.rootContext().setContextProperty("libraryService", library_service)
     engine.rootContext().setContextProperty("folderController", folder_controller)
     engine.rootContext().setContextProperty("noteController", note_controller)
     

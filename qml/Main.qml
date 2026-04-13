@@ -19,6 +19,29 @@ Window {
     property string selectedNoteId: ""
     property var currentNote: null
     
+    // Library change handling - force refresh
+    Connections {
+        target: folderController
+        function onLibraryChanged() {
+            console.log("[QML] Library changed, refreshing folders...")
+            // Force folders ListView to refresh
+            foldersListView.model = null
+            foldersListView.model = folderController ? folderController.folders : []
+        }
+    }
+    
+    Connections {
+        target: noteController
+        function onLibraryChanged() {
+            console.log("[QML] Library changed, refreshing notes...")
+            // Force notes ListView to refresh
+            notesListView.model = null
+            notesListView.model = noteController ? noteController.filteredNotes : []
+            // Clear selection
+            window.selectedNoteId = ""
+        }
+    }
+    
     // Load note data when selection changes
     onSelectedNoteIdChanged: {
         if (selectedNoteId && noteController) {
@@ -60,6 +83,165 @@ Window {
                         anchors.fill: parent
                         anchors.margins: Metrics.cardPadding
                         spacing: Metrics.lg
+
+                        // Library Selector
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: Metrics.sm
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: Metrics.md
+
+                                Text {
+                                    text: "서재"
+                                    font.family: Typography.fontPrimary
+                                    font.weight: Typography.weightSemibold
+                                    font.pixelSize: Typography.caption
+                                    color: Colors.textTertiary
+                                    font.letterSpacing: Typography.letterSpacingWide
+                                }
+
+                                Item { Layout.fillWidth: true }
+
+                                // Add library button (visible next to header)
+                                Rectangle {
+                                    width: 24
+                                    height: 24
+                                    radius: Metrics.radiusFull
+                                    color: addLibHeaderMouse.containsMouse ? Colors.primary100 : "transparent"
+                                    border.width: 1
+                                    border.color: addLibHeaderMouse.containsMouse ? Colors.primary200 : "transparent"
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "+"
+                                        font.pixelSize: 16
+                                        color: addLibHeaderMouse.containsMouse ? Colors.primary600 : Colors.primary500
+                                    }
+
+                                    MouseArea {
+                                        id: addLibHeaderMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        onClicked: newLibraryDialog.open()
+                                    }
+                                }
+                            }
+
+                            // Library dropdown / selector
+                            Rectangle {
+                                Layout.fillWidth: true
+                                height: 36
+                                radius: Metrics.radiusLg
+                                color: libraryDropdown.opened ? Colors.bgTertiary : Colors.bgSecondary
+                                border.color: libraryDropdown.opened ? Colors.primary200 : "transparent"
+                                border.width: 1
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: Metrics.md
+                                    anchors.rightMargin: Metrics.md
+                                    spacing: Metrics.sm
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: libraryService ? libraryService.currentLibraryName : "내 서재"
+                                        font.family: Typography.fontPrimary
+                                        font.weight: Typography.weightMedium
+                                        font.pixelSize: Typography.body
+                                        color: Colors.textPrimary
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Text {
+                                        text: libraryDropdown.opened ? "▲" : "▼"
+                                        font.pixelSize: 10
+                                        color: Colors.textSecondary
+                                    }
+                                }
+
+                                MouseArea {
+                                    id: libraryDropdown
+                                    property bool opened: false
+                                    anchors.fill: parent
+                                    onClicked: opened = !opened
+                                }
+
+                                // Library dropdown menu
+                                Rectangle {
+                                    visible: libraryDropdown.opened
+                                    anchors.top: parent.bottom
+                                    anchors.topMargin: Metrics.xs
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    height: libraryMenuContent.height + 2 * Metrics.sm
+                                    radius: Metrics.radiusLg
+                                    color: Colors.bgSecondary
+                                    border.color: Colors.border
+                                    border.width: 1
+                                    z: 100
+
+                                    ColumnLayout {
+                                        id: libraryMenuContent
+                                        anchors.fill: parent
+                                        anchors.margins: Metrics.sm
+                                        spacing: Metrics.xs
+
+                                        Repeater {
+                                            model: libraryService ? libraryService.getAllLibraries() : []
+
+                                            delegate: Rectangle {
+                                                Layout.fillWidth: true
+                                                height: 32
+                                                radius: Metrics.radiusMd
+                                                color: libraryMouse.containsMouse ? Colors.bgTertiary : "transparent"
+
+                                                RowLayout {
+                                                    anchors.fill: parent
+                                                    anchors.leftMargin: Metrics.sm
+                                                    anchors.rightMargin: Metrics.sm
+                                                    spacing: Metrics.sm
+
+                                                    Text {
+                                                        Layout.fillWidth: true
+                                                        text: modelData.name
+                                                        font.family: Typography.fontPrimary
+                                                        font.weight: libraryService && libraryService.currentLibraryId === modelData.id ? Typography.weightSemibold : Typography.weightRegular
+                                                        font.pixelSize: Typography.body
+                                                        color: libraryService && libraryService.currentLibraryId === modelData.id ? Colors.primary500 : Colors.textPrimary
+                                                    }
+
+                                                    Text {
+                                                        text: "●"
+                                                        font.pixelSize: 8
+                                                        color: Colors.primary500
+                                                        visible: libraryService && libraryService.currentLibraryId === modelData.id
+                                                    }
+                                                }
+
+                                                MouseArea {
+                                                    id: libraryMouse
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    onClicked: {
+                                                        libraryService.setCurrentLibrary(modelData.id)
+                                                        libraryDropdown.opened = false
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Divider
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 1
+                            color: Colors.border
+                        }
 
                         // Header for Folders section with Add button
                         RowLayout {
@@ -420,14 +602,12 @@ Window {
                             }
 
                             onImagePasted: (dataUrl) => {
-                                // Save base64 image to file
+                                // Normalize image data for DB storage
                                 if (noteController && window.selectedNoteId && dataUrl) {
-                                    // Save the image and get the file path
-                                    var savedPath = noteController.saveBase64Image(window.selectedNoteId, dataUrl)
-                                    if (savedPath) {
-                                        // Update the content with proper markdown link
-                                        // The WebNoteEditor will handle updating the img src
-                                        console.log("Image saved to: " + savedPath)
+                                    // Keep as data URL so note content stores image in DB
+                                    var storedDataUrl = noteController.saveBase64Image(window.selectedNoteId, dataUrl)
+                                    if (storedDataUrl) {
+                                        console.log("Image stored in DB content (data URL)")
                                     }
                                 }
                             }
@@ -462,5 +642,191 @@ Window {
                 }
             }
         }
+    }
+
+    // New Library Dialog (custom implementation)
+    Rectangle {
+        id: newLibraryDialog
+        visible: false
+        anchors.centerIn: parent
+        width: 400
+        height: 280
+        radius: Metrics.radiusXxl
+        color: Colors.bgSecondary
+        border.color: Colors.border
+        border.width: 1
+        z: 1000
+
+        property string libraryName: ""
+        property string libraryDescription: ""
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: Metrics.xl
+            spacing: Metrics.md
+
+            // Title
+            Text {
+                text: "새 서재 만들기"
+                font.family: Typography.fontPrimary
+                font.weight: Typography.weightSemibold
+                font.pixelSize: Typography.h4
+                color: Colors.textPrimary
+            }
+
+            // Name input
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: Metrics.xs
+
+                Text {
+                    text: "서재 이름"
+                    font.family: Typography.fontPrimary
+                    font.weight: Typography.weightMedium
+                    font.pixelSize: Typography.body
+                    color: Colors.textPrimary
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 40
+                    radius: Metrics.radiusMd
+                    color: Colors.bgTertiary
+                    border.color: nameInput.activeFocus ? Colors.primary300 : "transparent"
+                    border.width: 1
+
+                    TextInput {
+                        id: nameInput
+                        anchors.fill: parent
+                        anchors.margins: Metrics.md
+                        font.family: Typography.fontPrimary
+                        font.pixelSize: Typography.body
+                        color: Colors.textPrimary
+                        verticalAlignment: TextInput.AlignVCenter
+                        onTextChanged: newLibraryDialog.libraryName = text
+                    }
+                }
+            }
+
+            // Description input
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: Metrics.xs
+
+                Text {
+                    text: "설명 (선택사항)"
+                    font.family: Typography.fontPrimary
+                    font.weight: Typography.weightMedium
+                    font.pixelSize: Typography.body
+                    color: Colors.textPrimary
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 40
+                    radius: Metrics.radiusMd
+                    color: Colors.bgTertiary
+                    border.color: descInput.activeFocus ? Colors.primary300 : "transparent"
+                    border.width: 1
+
+                    TextInput {
+                        id: descInput
+                        anchors.fill: parent
+                        anchors.margins: Metrics.md
+                        font.family: Typography.fontPrimary
+                        font.pixelSize: Typography.body
+                        color: Colors.textPrimary
+                        verticalAlignment: TextInput.AlignVCenter
+                        onTextChanged: newLibraryDialog.libraryDescription = text
+                    }
+                }
+            }
+
+            // Buttons
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Metrics.md
+
+                Item { Layout.fillWidth: true }
+
+                Rectangle {
+                    width: 80
+                    height: 36
+                    radius: Metrics.radiusMd
+                    color: cancelBtnArea.containsMouse ? Colors.bgTertiary : "transparent"
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "취소"
+                        font.family: Typography.fontPrimary
+                        font.weight: Typography.weightMedium
+                        font.pixelSize: Typography.body
+                        color: Colors.textSecondary
+                    }
+
+                    MouseArea {
+                        id: cancelBtnArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: {
+                            newLibraryDialog.close()
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: 80
+                    height: 36
+                    radius: Metrics.radiusMd
+                    color: okBtnArea.containsMouse ? Colors.primary600 : Colors.primary500
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "만들기"
+                        font.family: Typography.fontPrimary
+                        font.weight: Typography.weightSemibold
+                        font.pixelSize: Typography.body
+                        color: "white"
+                    }
+
+                    MouseArea {
+                        id: okBtnArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: {
+                            if (newLibraryDialog.libraryName.trim() !== "" && libraryService) {
+                                libraryService.createLibrary(newLibraryDialog.libraryName.trim(), newLibraryDialog.libraryDescription.trim())
+                                newLibraryDialog.close()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Overlay for closing
+        MouseArea {
+            id: dialogOverlay
+            visible: newLibraryDialog.visible
+            anchors.fill: parent
+            anchors.margins: -10000  // Cover entire screen
+            z: -1
+            onClicked: newLibraryDialog.close()
+        }
+
+        function open() {
+            visible = true
+            libraryName = ""
+            libraryDescription = ""
+            nameInput.text = ""
+            descInput.text = ""
+            nameInput.forceActiveFocus()
+        }
+
+        function close() {
+            visible = false
+        }
+
+        Keys.onEscapePressed: close()
     }
 }
