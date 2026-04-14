@@ -29,7 +29,7 @@ Window {
             foldersListView.model = folderController ? folderController.folders : []
         }
     }
-    
+
     Connections {
         target: noteController
         function onLibraryChanged() {
@@ -39,6 +39,19 @@ Window {
             notesListView.model = noteController ? noteController.filteredNotes : []
             // Clear selection
             window.selectedNoteId = ""
+        }
+    }
+
+    Connections {
+        target: libraryService
+        function onLibrariesChanged() {
+            console.log("[QML] Libraries list changed, refreshing dropdown...")
+            // Force library dropdown Repeater to refresh
+            if (libraryRepeater) {
+                var currentModel = libraryRepeater.model
+                libraryRepeater.model = null
+                libraryRepeater.model = currentModel
+            }
         }
     }
     
@@ -88,6 +101,7 @@ Window {
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: Metrics.sm
+                            z: 100
 
                             RowLayout {
                                 Layout.fillWidth: true
@@ -137,6 +151,7 @@ Window {
                                 color: libraryDropdown.opened ? Colors.bgTertiary : Colors.bgSecondary
                                 border.color: libraryDropdown.opened ? Colors.primary200 : "transparent"
                                 border.width: 1
+                                z: 10  // Ensure dropdown renders above folders list
 
                                 RowLayout {
                                     anchors.fill: parent
@@ -149,7 +164,7 @@ Window {
                                         text: libraryService ? libraryService.currentLibraryName : "내 서재"
                                         font.family: Typography.fontPrimary
                                         font.weight: Typography.weightMedium
-                                        font.pixelSize: Typography.body
+                                        font.pixelSize: 14
                                         color: Colors.textPrimary
                                         elide: Text.ElideRight
                                     }
@@ -175,12 +190,36 @@ Window {
                                     anchors.topMargin: Metrics.xs
                                     anchors.left: parent.left
                                     anchors.right: parent.right
-                                    height: libraryMenuContent.height + 2 * Metrics.sm
+                                    property var libraries: libraryService ? libraryService.getAllLibraries() : []
+                                    property int libraryCount: libraries.length
+                                    property int totalHeight: {
+                                        var h = 2 * Metrics.sm; // top/bottom margins
+                                        for (var i = 0; i < libraryCount; i++) {
+                                            h += (libraries[i].description ? 48 : 32);
+                                            if (i < libraryCount - 1) h += Metrics.xs; // spacing between items
+                                        }
+                                        return h;
+                                    }
+                                    height: totalHeight
                                     radius: Metrics.radiusLg
-                                    color: Colors.bgSecondary
-                                    border.color: Colors.border
+                                    color: "white"
+                                    border.color: Colors.borderLight
                                     border.width: 1
-                                    z: 100
+                                    opacity: 1.0
+                                    z: 1000  // Very high z to render above everything
+                                    clip: false
+
+                                    // Close dropdown when clicking outside
+                                    MouseArea {
+                                        id: dropdownOverlay
+                                        visible: libraryDropdown.opened
+                                        anchors.fill: parent
+                                        anchors.margins: -10000  // Cover entire screen
+                                        z: -1  // Below the dropdown content but above other UI
+                                        onClicked: {
+                                            libraryDropdown.opened = false
+                                        }
+                                    }
 
                                     ColumnLayout {
                                         id: libraryMenuContent
@@ -189,13 +228,15 @@ Window {
                                         spacing: Metrics.xs
 
                                         Repeater {
+                                            id: libraryRepeater
                                             model: libraryService ? libraryService.getAllLibraries() : []
 
                                             delegate: Rectangle {
                                                 Layout.fillWidth: true
-                                                height: 32
+                                                height: modelData.description ? 48 : 32
                                                 radius: Metrics.radiusMd
                                                 color: libraryMouse.containsMouse ? Colors.bgTertiary : "transparent"
+                                                property int noteCount: libraryService ? libraryService.getLibraryNoteCount(modelData.id) : 0
 
                                                 RowLayout {
                                                     anchors.fill: parent
@@ -203,26 +244,92 @@ Window {
                                                     anchors.rightMargin: Metrics.sm
                                                     spacing: Metrics.sm
 
-                                                    Text {
+                                                    ColumnLayout {
                                                         Layout.fillWidth: true
-                                                        text: modelData.name
-                                                        font.family: Typography.fontPrimary
-                                                        font.weight: libraryService && libraryService.currentLibraryId === modelData.id ? Typography.weightSemibold : Typography.weightRegular
-                                                        font.pixelSize: Typography.body
-                                                        color: libraryService && libraryService.currentLibraryId === modelData.id ? Colors.primary500 : Colors.textPrimary
+                                                        spacing: 0
+
+                                                        Text {
+                                                            Layout.fillWidth: true
+                                                            text: modelData.name
+                                                            font.family: Typography.fontPrimary
+                                                            font.weight: libraryService && libraryService.currentLibraryId === modelData.id ? Typography.weightSemibold : Typography.weightRegular
+                                                            font.pixelSize: 14
+                                                            color: libraryService && libraryService.currentLibraryId === modelData.id ? Colors.primary500 : Colors.textPrimary
+                                                        }
+
+                                                        Text {
+                                                            Layout.fillWidth: true
+                                                            text: modelData.description || ""
+                                                            font.family: Typography.fontPrimary
+                                                            font.weight: Typography.weightRegular
+                                                            font.pixelSize: Typography.caption
+                                                            color: Colors.textTertiary
+                                                            visible: modelData.description
+                                                            elide: Text.ElideRight
+                                                        }
                                                     }
 
                                                     Text {
                                                         text: "●"
                                                         font.pixelSize: 8
-                                                        color: Colors.primary500
+                                                        color: "#3B82F6"
                                                         visible: libraryService && libraryService.currentLibraryId === modelData.id
+                                                    }
+
+                                                    Rectangle {
+                                                        width: 18
+                                                        height: 18
+                                                        radius: Metrics.radiusFull
+                                                        color: editLibArea.containsMouse ? Colors.primary100 : "transparent"
+
+                                                        Text {
+                                                            anchors.centerIn: parent
+                                                            text: "✎"
+                                                            font.pixelSize: 10
+                                                            color: Colors.textSecondary
+                                                        }
+
+                                                        MouseArea {
+                                                            id: editLibArea
+                                                            anchors.fill: parent
+                                                            hoverEnabled: true
+                                                            onClicked: {
+                                                                newLibraryDialog.openForEdit(modelData.id, modelData.name, modelData.description || "")
+                                                                libraryDropdown.opened = false
+                                                            }
+                                                        }
+                                                    }
+
+                                                    Rectangle {
+                                                        width: 18
+                                                        height: 18
+                                                        radius: Metrics.radiusFull
+                                                        color: deleteLibArea.containsMouse ? Colors.accentRoseLight : "transparent"
+                                                        opacity: noteCount === 0 ? 1.0 : 0.5
+
+                                                        Text {
+                                                            anchors.centerIn: parent
+                                                            text: "x"
+                                                            font.pixelSize: 10
+                                                            color: noteCount === 0 ? Colors.accentRose : Colors.textTertiary
+                                                        }
+
+                                                        MouseArea {
+                                                            id: deleteLibArea
+                                                            anchors.fill: parent
+                                                            hoverEnabled: true
+                                                            onClicked: {
+                                                                deleteLibraryDialog.openForLibrary(modelData.id, modelData.name)
+                                                                libraryDropdown.opened = false
+                                                            }
+                                                        }
                                                     }
                                                 }
 
                                                 MouseArea {
                                                     id: libraryMouse
                                                     anchors.fill: parent
+                                                    anchors.rightMargin: 52
                                                     hoverEnabled: true
                                                     onClicked: {
                                                         libraryService.setCurrentLibrary(modelData.id)
@@ -240,7 +347,8 @@ Window {
                         Rectangle {
                             Layout.fillWidth: true
                             height: 1
-                            color: Colors.border
+                            color: Colors.borderLight
+                            z: 0
                         }
 
                         // Header for Folders section with Add button
@@ -301,6 +409,7 @@ Window {
                             id: foldersListView
                             Layout.fillWidth: true
                             Layout.fillHeight: true
+                            z: 0
                             model: folderController ? folderController.folders : []
                             spacing: Metrics.xs
                             clip: true
@@ -533,7 +642,7 @@ Window {
                                     text: "노트를 선택하거나 새로 만들어보세요"
                                     font.family: Typography.fontPrimary
                                     font.weight: Typography.weightMedium
-                                    font.pixelSize: Typography.bodyRegular
+                                    font.pixelSize: 14
                                     color: Colors.textSecondary
                                 }
 
@@ -652,13 +761,15 @@ Window {
         width: 400
         height: 280
         radius: Metrics.radiusXxl
-        color: Colors.bgSecondary
-        border.color: Colors.border
+        color: "#F1F5F9"
+        border.color: "#CBD5E1"
         border.width: 1
         z: 1000
 
         property string libraryName: ""
         property string libraryDescription: ""
+        property bool isEditMode: false
+        property string editingLibraryId: ""
 
         ColumnLayout {
             anchors.fill: parent
@@ -667,7 +778,7 @@ Window {
 
             // Title
             Text {
-                text: "새 서재 만들기"
+                text: newLibraryDialog.isEditMode ? "서재 수정" : "새 서재 만들기"
                 font.family: Typography.fontPrimary
                 font.weight: Typography.weightSemibold
                 font.pixelSize: Typography.h4
@@ -683,7 +794,7 @@ Window {
                     text: "서재 이름"
                     font.family: Typography.fontPrimary
                     font.weight: Typography.weightMedium
-                    font.pixelSize: Typography.body
+                    font.pixelSize: 14
                     color: Colors.textPrimary
                 }
 
@@ -700,10 +811,11 @@ Window {
                         anchors.fill: parent
                         anchors.margins: Metrics.md
                         font.family: Typography.fontPrimary
-                        font.pixelSize: Typography.body
+                        font.pixelSize: 14
                         color: Colors.textPrimary
                         verticalAlignment: TextInput.AlignVCenter
                         onTextChanged: newLibraryDialog.libraryName = text
+                        KeyNavigation.tab: descInput
                     }
                 }
             }
@@ -717,7 +829,7 @@ Window {
                     text: "설명 (선택사항)"
                     font.family: Typography.fontPrimary
                     font.weight: Typography.weightMedium
-                    font.pixelSize: Typography.body
+                    font.pixelSize: 14
                     color: Colors.textPrimary
                 }
 
@@ -734,10 +846,11 @@ Window {
                         anchors.fill: parent
                         anchors.margins: Metrics.md
                         font.family: Typography.fontPrimary
-                        font.pixelSize: Typography.body
+                        font.pixelSize: 14
                         color: Colors.textPrimary
                         verticalAlignment: TextInput.AlignVCenter
                         onTextChanged: newLibraryDialog.libraryDescription = text
+                        KeyNavigation.tab: okBtnArea
                     }
                 }
             }
@@ -760,7 +873,7 @@ Window {
                         text: "취소"
                         font.family: Typography.fontPrimary
                         font.weight: Typography.weightMedium
-                        font.pixelSize: Typography.body
+                        font.pixelSize: 14
                         color: Colors.textSecondary
                     }
 
@@ -782,10 +895,10 @@ Window {
 
                     Text {
                         anchors.centerIn: parent
-                        text: "만들기"
+                        text: newLibraryDialog.isEditMode ? "저장" : "만들기"
                         font.family: Typography.fontPrimary
                         font.weight: Typography.weightSemibold
-                        font.pixelSize: Typography.body
+                        font.pixelSize: 14
                         color: "white"
                     }
 
@@ -795,7 +908,15 @@ Window {
                         hoverEnabled: true
                         onClicked: {
                             if (newLibraryDialog.libraryName.trim() !== "" && libraryService) {
-                                libraryService.createLibrary(newLibraryDialog.libraryName.trim(), newLibraryDialog.libraryDescription.trim())
+                                if (newLibraryDialog.isEditMode) {
+                                    libraryService.updateLibrary(
+                                        newLibraryDialog.editingLibraryId,
+                                        newLibraryDialog.libraryName.trim(),
+                                        newLibraryDialog.libraryDescription.trim()
+                                    )
+                                } else {
+                                    libraryService.createLibrary(newLibraryDialog.libraryName.trim(), newLibraryDialog.libraryDescription.trim())
+                                }
                                 newLibraryDialog.close()
                             }
                         }
@@ -804,23 +925,155 @@ Window {
             }
         }
 
-        // Overlay for closing
-        MouseArea {
-            id: dialogOverlay
-            visible: newLibraryDialog.visible
-            anchors.fill: parent
-            anchors.margins: -10000  // Cover entire screen
-            z: -1
-            onClicked: newLibraryDialog.close()
-        }
-
         function open() {
             visible = true
+            isEditMode = false
+            editingLibraryId = ""
             libraryName = ""
             libraryDescription = ""
             nameInput.text = ""
             descInput.text = ""
             nameInput.forceActiveFocus()
+        }
+
+        function openForEdit(libraryId, name, description) {
+            visible = true
+            isEditMode = true
+            editingLibraryId = libraryId
+            libraryName = name || ""
+            libraryDescription = description || ""
+            nameInput.text = libraryName
+            descInput.text = libraryDescription
+            nameInput.forceActiveFocus()
+            nameInput.selectAll()
+        }
+
+        function close() {
+            visible = false
+        }
+
+        Keys.onEscapePressed: close()
+    }
+
+    Rectangle {
+        id: deleteLibraryDialog
+        visible: false
+        anchors.centerIn: parent
+        width: 420
+        height: 240
+        radius: Metrics.radiusXxl
+        color: "#F1F5F9"
+        border.color: "#CBD5E1"
+        border.width: 1
+        z: 1001
+
+        property string targetLibraryId: ""
+        property string targetLibraryName: ""
+        property int noteCount: 0
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: Metrics.xl
+            spacing: Metrics.md
+
+            Text {
+                text: "서재 삭제"
+                font.family: Typography.fontPrimary
+                font.weight: Typography.weightSemibold
+                font.pixelSize: Typography.h5
+                color: Colors.textPrimary
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: "'" + deleteLibraryDialog.targetLibraryName + "' 서재를 삭제하시겠습니까?"
+                wrapMode: Text.WordWrap
+                font.family: Typography.fontPrimary
+                font.pixelSize: 14
+                color: Colors.textPrimary
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: deleteLibraryDialog.noteCount > 0
+                      ? "삭제 불가: 이 서재에 노트 " + deleteLibraryDialog.noteCount + "개가 있습니다."
+                      : "삭제 가능: 이 서재에는 노트가 없습니다."
+                wrapMode: Text.WordWrap
+                font.family: Typography.fontPrimary
+                font.pixelSize: Typography.caption
+                color: deleteLibraryDialog.noteCount > 0 ? Colors.error : Colors.success
+            }
+
+            Item { Layout.fillHeight: true }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Metrics.md
+
+                Item { Layout.fillWidth: true }
+
+                Rectangle {
+                    width: 80
+                    height: 36
+                    radius: Metrics.radiusMd
+                    color: cancelDeleteArea.containsMouse ? Colors.bgTertiary : "transparent"
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "취소"
+                        font.family: Typography.fontPrimary
+                        font.weight: Typography.weightMedium
+                        font.pixelSize: 14
+                        color: Colors.textSecondary
+                    }
+
+                    MouseArea {
+                        id: cancelDeleteArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: deleteLibraryDialog.close()
+                    }
+                }
+
+                Rectangle {
+                    width: 80
+                    height: 36
+                    radius: Metrics.radiusMd
+                    color: confirmDeleteArea.containsMouse ? Colors.accentRose : Colors.accentRoseLight
+                    opacity: deleteLibraryDialog.noteCount === 0 ? 1.0 : 0.5
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "삭제"
+                        font.family: Typography.fontPrimary
+                        font.weight: Typography.weightSemibold
+                        font.pixelSize: 14
+                        color: "white"
+                    }
+
+                    MouseArea {
+                        id: confirmDeleteArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        enabled: deleteLibraryDialog.noteCount === 0
+                        onClicked: {
+                            if (libraryService && deleteLibraryDialog.targetLibraryId) {
+                                var ok = libraryService.deleteLibrary(deleteLibraryDialog.targetLibraryId)
+                                if (ok) {
+                                    deleteLibraryDialog.close()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        function openForLibrary(libraryId, libraryName) {
+            targetLibraryId = libraryId
+            targetLibraryName = libraryName || ""
+            noteCount = libraryService ? libraryService.getLibraryNoteCount(libraryId) : 0
+            visible = true
         }
 
         function close() {

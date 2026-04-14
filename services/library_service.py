@@ -128,6 +128,10 @@ class LibraryService(QObject):
         library = self.get_library(library_id)
         if not library:
             return False
+
+        # Library can be deleted only when it has no active notes
+        if self._get_library_note_count(library) > 0:
+            return False
         
         # Don't allow deleting the last library
         libraries = self.get_all_libraries()
@@ -166,6 +170,7 @@ class LibraryService(QObject):
         
         self.librariesChanged.emit()
         self.libraryRemoved.emit(library_id)
+        self.currentLibraryChanged.emit()
         return True
     
     def rename_library(self, library_id: str, new_name: str) -> bool:
@@ -182,7 +187,45 @@ class LibraryService(QObject):
         
         self.librariesChanged.emit()
         self.libraryRenamed.emit(library_id, new_name)
+        if self._current_library_id == library_id:
+            self.currentLibraryChanged.emit()
         return True
+
+    def update_library(self, library_id: str, new_name: str, new_description: str = "") -> bool:
+        """Update library name and description."""
+        if not new_name.strip():
+            return False
+
+        now = datetime.now().isoformat()
+        self._meta_db.execute(
+            "UPDATE libraries SET name = ?, description = ?, updated_at = ? WHERE id = ?",
+            (new_name.strip(), (new_description or "").strip(), now, library_id)
+        )
+        self._meta_db.commit()
+
+        self.librariesChanged.emit()
+        self.libraryRenamed.emit(library_id, new_name.strip())
+        if self._current_library_id == library_id:
+            self.currentLibraryChanged.emit()
+        return True
+
+    def _get_library_note_count(self, library: Dict[str, Any]) -> int:
+        """Count active notes in the target library DB."""
+        db = Database(library['db_path'])
+        try:
+            row = db.fetch_one("SELECT COUNT(*) as count FROM notes WHERE deleted_at IS NULL")
+            return int(row['count']) if row else 0
+        except Exception:
+            return 0
+        finally:
+            db.close()
+
+    def get_library_note_count(self, library_id: str) -> int:
+        """Get active note count for a library."""
+        library = self.get_library(library_id)
+        if not library:
+            return 0
+        return self._get_library_note_count(library)
     
     def set_current_library(self, library_id: str) -> bool:
         """Set the current active library."""
@@ -238,6 +281,21 @@ class LibraryService(QObject):
     def renameLibrary(self, library_id: str, new_name: str) -> bool:
         """QML accessible: Rename a library."""
         return self.rename_library(library_id, new_name)
+
+    @pyqtSlot(str, str, str, result=bool)
+    def updateLibrary(self, library_id: str, new_name: str, new_description: str) -> bool:
+        """QML accessible: Update library name and description."""
+        return self.update_library(library_id, new_name, new_description)
+
+    @pyqtSlot(str, result=int)
+    def getLibraryNoteCount(self, library_id: str) -> int:
+        """QML accessible: Get active note count for a library."""
+        return self.get_library_note_count(library_id)
+
+    @pyqtSlot(str, result=bool)
+    def canDeleteLibrary(self, library_id: str) -> bool:
+        """QML accessible: Whether library can be deleted."""
+        return self.get_library_note_count(library_id) == 0
     
     @pyqtSlot(str, result=bool)
     def setCurrentLibrary(self, library_id: str) -> bool:
