@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Window
 import QtQuick.Layouts
+import QtQuick.Controls
 import theme
 import components
 
@@ -28,6 +29,12 @@ Window {
             foldersListView.model = null
             foldersListView.model = folderController ? folderController.folders : []
         }
+        function onFoldersChanged() {
+            console.log("[QML] Folders changed, refreshing list...")
+            // Refresh folders ListView when folders are created/deleted/renamed
+            foldersListView.model = null
+            foldersListView.model = folderController ? folderController.folders : []
+        }
     }
 
     Connections {
@@ -40,17 +47,27 @@ Window {
             // Clear selection
             window.selectedNoteId = ""
         }
+        function onFilteredNotesChanged() {
+            console.log("[QML] Filtered notes changed, selection=" + window.selectedNoteId)
+            // Don't clear selection when folder changes
+            // The ListView will refresh but keep the selection
+        }
     }
 
     Connections {
         target: libraryService
         function onLibrariesChanged() {
             console.log("[QML] Libraries list changed, refreshing dropdown...")
-            // Force library dropdown Repeater to refresh
-            if (libraryRepeater) {
-                var currentModel = libraryRepeater.model
-                libraryRepeater.model = null
-                libraryRepeater.model = currentModel
+            // Force library dropdown Repeater to refresh with new data
+            if (libraryRepeater && libraryService) {
+                libraryRepeater.model = libraryService.getAllLibraries()
+            }
+        }
+        function onLibraryAdded(libraryId) {
+            console.log("[QML] Library added:", libraryId, "- refreshing list...")
+            // Refresh the repeater model when a new library is added
+            if (libraryRepeater && libraryService) {
+                libraryRepeater.model = libraryService.getAllLibraries()
             }
         }
     }
@@ -84,6 +101,21 @@ Window {
                 Layout.preferredWidth: Metrics.sidebarWidth
                 Layout.fillHeight: true
                 color: "transparent"
+                z: 3000
+
+                MouseArea {
+                    anchors.fill: parent
+                    visible: folderAddMenu.visible
+                    z: 4999
+                    onClicked: function(mouse) {
+                        if (mouse.x < folderAddMenu.x ||
+                            mouse.x > folderAddMenu.x + folderAddMenu.width ||
+                            mouse.y < folderAddMenu.y ||
+                            mouse.y > folderAddMenu.y + folderAddMenu.height) {
+                            folderAddMenu.close()
+                        }
+                    }
+                }
 
                 GlassCard {
                     anchors.fill: parent
@@ -190,17 +222,26 @@ Window {
                                     anchors.topMargin: Metrics.xs
                                     anchors.left: parent.left
                                     anchors.right: parent.right
-                                    property var libraries: libraryService ? libraryService.getAllLibraries() : []
-                                    property int libraryCount: libraries.length
+                                    // Calculate height dynamically based on actual Repeater content
                                     property int totalHeight: {
+                                        if (!libraryRepeater || !libraryRepeater.count) {
+                                            return 2 * Metrics.sm + 32; // min height for empty state
+                                        }
                                         var h = 2 * Metrics.sm; // top/bottom margins
-                                        for (var i = 0; i < libraryCount; i++) {
-                                            h += (libraries[i].description ? 48 : 32);
-                                            if (i < libraryCount - 1) h += Metrics.xs; // spacing between items
+                                        // Repeater count reflects actual library count
+                                        for (var i = 0; i < libraryRepeater.count; i++) {
+                                            // Use itemAt to get actual delegate and check its height or modelData
+                                            var item = libraryRepeater.itemAt(i);
+                                            if (item && item.modelData) {
+                                                h += (item.modelData.description ? 48 : 32);
+                                            } else {
+                                                h += 32; // default height
+                                            }
+                                            if (i < libraryRepeater.count - 1) h += Metrics.xs;
                                         }
                                         return h;
                                     }
-                                    height: totalHeight
+                                    height: Math.min(totalHeight, 400) // cap at 400px, scroll if more
                                     radius: Metrics.radiusLg
                                     color: "white"
                                     border.color: Colors.borderLight
@@ -221,17 +262,24 @@ Window {
                                         }
                                     }
 
-                                    ColumnLayout {
-                                        id: libraryMenuContent
+                                    // Scrollable content area
+                                    Flickable {
                                         anchors.fill: parent
                                         anchors.margins: Metrics.sm
-                                        spacing: Metrics.xs
+                                        contentHeight: libraryMenuContent.height
+                                        clip: true
+                                        interactive: contentHeight > height
 
-                                        Repeater {
-                                            id: libraryRepeater
-                                            model: libraryService ? libraryService.getAllLibraries() : []
+                                        ColumnLayout {
+                                            id: libraryMenuContent
+                                            width: parent.width
+                                            spacing: Metrics.xs
 
-                                            delegate: Rectangle {
+                                            Repeater {
+                                                id: libraryRepeater
+                                                model: libraryService ? libraryService.getAllLibraries() : []
+
+                                                delegate: Rectangle {
                                                 Layout.fillWidth: true
                                                 height: modelData.description ? 48 : 32
                                                 radius: Metrics.radiusMd
@@ -342,6 +390,7 @@ Window {
                                 }
                             }
                         }
+                    }
 
                         // Divider
                         Rectangle {
@@ -356,6 +405,7 @@ Window {
                             Layout.fillWidth: true
                             Layout.leftMargin: Metrics.lg
                             Layout.rightMargin: Metrics.lg
+                            z: 2100
 
                             Text {
                                 text: "폴더"
@@ -370,8 +420,10 @@ Window {
 
                             // Add folder button
                             Rectangle {
+                                id: addFolderButton
                                 width: 20
                                 height: 20
+                                z: 2101
                                 radius: Metrics.radiusFull
                                 color: addFolderArea.containsMouse ? Colors.primary100 : "transparent"
                                 border.width: 1
@@ -385,11 +437,9 @@ Window {
                                     id: addFolderArea
                                     anchors.fill: parent
                                     hoverEnabled: true
-                                    onClicked: {
-                                        // Create new folder with default name
-                                        if (folderController) {
-                                            var newId = folderController.createFolder("새 폴더", Colors.primary500)
-                                        }
+                                    onClicked: function(mouse) {
+                                        // Show folder creation menu
+                                        folderAddMenu.open(mouse.x, mouse.y)
                                     }
                                 }
 
@@ -400,6 +450,242 @@ Window {
                                     font.weight: Typography.weightSemibold
                                     font.pixelSize: 14
                                     color: addFolderArea.containsMouse ? Colors.primary600 : Colors.textTertiary
+                                }
+
+                                // Folder creation menu
+                                Rectangle {
+                                    id: folderAddMenu
+                                    parent: sidebar
+                                    visible: false
+                                    property string baseFolderId: ""
+                                    x: 0
+                                    y: 0
+                                    width: 180
+                                    height: menuBackground.implicitHeight + (2 * Metrics.sm)
+                                    radius: Metrics.radiusMd
+                                    color: "#FFFFFF"
+                                    border.color: Colors.borderMedium
+                                    border.width: 1
+                                    z: 5000  // Very high to render above everything including note list
+
+                                    // Drop shadow using multiple rectangles
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        anchors.margins: -6
+                                        color: "transparent"
+                                        radius: Metrics.radiusMd + 6
+                                        z: -3
+
+                                        Rectangle {
+                                            anchors.fill: parent
+                                            anchors.margins: 6
+                                            color: "#20000000"
+                                            radius: Metrics.radiusMd
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        anchors.margins: -4
+                                        color: "transparent"
+                                        radius: Metrics.radiusMd + 4
+                                        z: -2
+
+                                        Rectangle {
+                                            anchors.fill: parent
+                                            anchors.margins: 4
+                                            color: "#30000000"
+                                            radius: Metrics.radiusMd
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        anchors.margins: -2
+                                        color: "transparent"
+                                        radius: Metrics.radiusMd + 2
+                                        z: -1
+
+                                        Rectangle {
+                                            anchors.fill: parent
+                                            anchors.margins: 2
+                                            color: "#40000000"
+                                            radius: Metrics.radiusMd
+                                        }
+                                    }
+
+                                    function open(mouseX, mouseY) {
+                                        var currentId = (folderController && folderController.currentFolderId) ? folderController.currentFolderId : ""
+                                        baseFolderId = (folderController && folderController.isSmartFolder(currentId)) ? "" : currentId
+                                        var p = addFolderArea.mapToItem(sidebar, mouseX, mouseY)
+                                        x = p.x + Metrics.xs
+                                        y = p.y
+                                        visible = true
+                                    }
+
+                                    function parentIdOf(folderId) {
+                                        if (!folderController || !folderId) return ""
+                                        if (folderController.isSmartFolder(folderId)) return ""
+                                        var list = folderController.folders
+                                        for (var i = 0; i < list.length; i++) {
+                                            if (list[i].id === folderId) {
+                                                return list[i].parent_id ? list[i].parent_id : ""
+                                            }
+                                        }
+                                        return ""
+                                    }
+
+                                    function depthOf(folderId) {
+                                        if (!folderController || !folderId) return 0
+                                        if (folderController.isSmartFolder(folderId)) return -1
+                                        var list = folderController.folders
+                                        for (var i = 0; i < list.length; i++) {
+                                            if (list[i].id === folderId) {
+                                                return list[i].depth || 0
+                                            }
+                                        }
+                                        return 0
+                                    }
+
+                                    function canCreateChild() {
+                                        if (!baseFolderId) return false
+                                        var d = depthOf(baseFolderId)
+                                        return d < 2  // Root (0) and child (1) folders can have children, grandchild (2) cannot
+                                    }
+
+                                    function close() {
+                                        visible = false
+                                    }
+
+                                    // Solid white background container
+                                    Rectangle {
+                                        id: menuBackground
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.top: parent.top
+                                        anchors.margins: Metrics.sm
+                                        implicitHeight: folderAddColumn.implicitHeight + 8
+                                        height: implicitHeight
+                                        color: "#FFFFFF"
+                                        radius: Metrics.radiusSm
+
+                                        Column {
+                                            id: folderAddColumn
+                                            anchors.fill: parent
+                                            anchors.margins: 4
+                                            spacing: 2
+
+                                        // Same level option
+                                        Rectangle {
+                                            width: parent.width
+                                            height: 28
+                                            radius: Metrics.radiusSm
+                                            color: sameLevelArea.containsMouse ? Colors.primary100 : "#FFFFFF"
+
+                                            Row {
+                                                anchors.fill: parent
+                                                anchors.leftMargin: 8
+                                                spacing: 6
+
+                                                // Icon placeholder
+                                                Rectangle {
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    width: 16
+                                                    height: 16
+                                                    color: "transparent"
+
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        text: "📁"
+                                                        font.pixelSize: 12
+                                                    }
+                                                }
+
+                                                Text {
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    text: "같은 레벨에 생성"
+                                                    font.family: Typography.fontPrimary
+                                                    font.weight: Typography.weightMedium
+                                                    font.pixelSize: 12
+                                                    color: Colors.textPrimary
+                                                }
+                                            }
+
+                                            MouseArea {
+                                                id: sameLevelArea
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                onClicked: {
+                                                    folderAddMenu.close()
+                                                    if (folderController) {
+                                                        var parentId = folderAddMenu.parentIdOf(folderAddMenu.baseFolderId)
+                                                        folderController.createFolder("새 폴더", String(Colors.primary500), parentId)
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        // Divider
+                                        Rectangle {
+                                            width: parent.width - 16
+                                            height: 1
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            color: Colors.borderLight
+                                        }
+
+                                        // Child folder option
+                                        Rectangle {
+                                            width: parent.width
+                                            height: 28
+                                            radius: Metrics.radiusSm
+                                            color: childArea.containsMouse ? Colors.primary100 : "#FFFFFF"
+                                            opacity: folderAddMenu.canCreateChild() ? 1.0 : 0.5
+
+                                            Row {
+                                                anchors.fill: parent
+                                                anchors.leftMargin: 8
+                                                spacing: 6
+
+                                                // Icon placeholder
+                                                Rectangle {
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    width: 16
+                                                    height: 16
+                                                    color: "transparent"
+
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        text: "📂"
+                                                        font.pixelSize: 12
+                                                    }
+                                                }
+
+                                                Text {
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    text: "하위 폴더로 생성"
+                                                    font.family: Typography.fontPrimary
+                                                    font.weight: Typography.weightMedium
+                                                    font.pixelSize: 12
+                                                    color: folderAddMenu.canCreateChild() ? Colors.textPrimary : Colors.textTertiary
+                                                }
+                                            }
+
+                                            MouseArea {
+                                                id: childArea
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                enabled: folderAddMenu.canCreateChild()
+                                                onClicked: {
+                                                    folderAddMenu.close()
+                                                    if (folderController && folderAddMenu.baseFolderId !== "") {
+                                                        folderController.createFolder("새 폴더", String(Colors.primary500), folderAddMenu.baseFolderId)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
                                 }
                             }
                         }
@@ -413,30 +699,54 @@ Window {
                             model: folderController ? folderController.folders : []
                             spacing: Metrics.xs
                             clip: true
+                            ScrollBar.vertical: ScrollBar {
+                                policy: ScrollBar.AsNeeded
+                            }
 
                             delegate: FolderItem {
                                 width: ListView.view.width
                                 folderId: modelData ? modelData.id : ""
                                 folderName: modelData ? modelData.name : ""
-                                folderColor: modelData ? modelData.color : Colors.primary500
+                                folderColor: {
+                                    if (modelData && modelData.is_smart) {
+                                        return modelData.color || Colors.primary400
+                                    }
+                                    var d = modelData ? (modelData.depth || 0) : 0
+                                    if (d === 0) return Colors.primary500
+                                    if (d === 1) return Colors.primary300
+                                    if (d >= 2) return Colors.primary200
+                                    return Colors.primary500
+                                }
                                 noteCount: modelData ? modelData.note_count : 0
+                                depth: modelData ? (modelData.depth || 0) : 0
+                                hasChildren: modelData ? (modelData.has_children || false) : false
+                                isSmart: modelData ? (modelData.is_smart || false) : false
+                                isExpanded: folderController && modelData ? !folderController.isFolderCollapsed(modelData.id) : true
                                 isSelected: folderController && modelData && folderController.currentFolderId === modelData.id
+
+                                Component.onCompleted: {
+                                    console.log("[QML] FolderItem rendered: " + folderName + " (depth=" + depth + ")")
+                                }
 
                                 onClicked: {
                                     if (folderController && modelData) folderController.selectFolder(modelData.id)
                                 }
 
+                                onToggleExpanded: {
+                                    if (folderController && modelData && !(modelData.is_smart || false)) folderController.toggleFolderExpanded(modelData.id)
+                                }
+
                                 onRenameRequested: (newName) => {
-                                    if (folderController && modelData) folderController.renameFolder(modelData.id, newName)
+                                    if (folderController && modelData && !(modelData.is_smart || false)) folderController.renameFolder(modelData.id, newName)
                                 }
 
                                 onDeleteRequested: {
-                                    if (folderController && modelData) folderController.deleteFolder(modelData.id)
+                                    if (folderController && modelData && !(modelData.is_smart || false)) folderController.deleteFolder(modelData.id)
                                 }
                             }
                         }
 
-                        Item { Layout.fillHeight: true }
+                        Item { Layout.preferredHeight: Metrics.sm }
 
                         Rectangle {
                             Layout.fillWidth: true
@@ -545,6 +855,7 @@ Window {
                             Layout.fillHeight: true
                             spacing: Metrics.sm
                             clip: true
+                            reuseItems: false  // Prevent delegate recycling issues
 
                             // Use filtered notes from noteController
                             model: noteController ? noteController.filteredNotes : []
@@ -563,21 +874,65 @@ Window {
                             }
 
                             delegate: NoteListItem {
+                                id: noteItem
                                 width: ListView.view.width
-                                title: modelData ? modelData.title || "" : ""
-                                preview: modelData && modelData.content ? (modelData.content.substring(0, 80) + (modelData.content.length > 80 ? "..." : "")) : ""
-                                date: modelData && modelData.updated_at ? noteController.formatDate(modelData.updated_at) : ""
-                                tags: modelData && modelData.tags ? modelData.tags : []
-                                isPinned: modelData ? modelData.is_pinned || false : false
-                                isSelected: window.selectedNoteId === (modelData ? modelData.id : "")
+
+                                // Strong binding for noteId
+                                property var modelRef: modelData
+                                property string noteId: modelRef && modelRef.id ? modelRef.id : ""
+
+                                title: modelRef ? modelRef.title || "" : ""
+                                preview: modelRef && modelRef.content ? (modelRef.content.substring(0, 80) + (modelRef.content.length > 80 ? "..." : "")) : ""
+                                date: modelRef && modelRef.updated_at ? noteController.formatDate(modelRef.updated_at) : ""
+                                tags: modelRef && modelRef.tags ? modelRef.tags : []
+                                isPinned: noteItem.pinState
+                                isSelected: {
+                                    var selected = window.selectedNoteId === noteItem.noteId
+                                    console.log("[QML] isSelected check: selectedNoteId=" + window.selectedNoteId + ", noteId=" + noteItem.noteId + ", result=" + selected)
+                                    return selected
+                                }
+
+                                // Internal pin state source for NoteListItem.isPinned
+                                property bool pinState: false
+
+                                function updateIsPinned() {
+                                    if (noteItem.noteId && noteController) {
+                                        pinState = noteController.isNotePinned(noteItem.noteId)
+                                    } else {
+                                        pinState = false
+                                    }
+                                }
+
+                                Component.onCompleted: updateIsPinned()
+                                onNoteIdChanged: updateIsPinned()
+
+                                // Refresh when notes change
+                                Connections {
+                                    target: noteController
+                                    function onNotesChanged() {
+                                        noteItem.updateIsPinned()
+                                    }
+                                }
 
                                 onClicked: {
-                                    if (modelData && modelData.id) {
-                                        // Select note through controller
+                                    if (noteItem.noteId) {
+                                        console.log("[QML] Note clicked:", noteItem.noteId)
                                         if (noteController) {
-                                            noteController.selectNote(modelData.id)
+                                            noteController.selectNote(noteItem.noteId)
                                         }
-                                        window.selectedNoteId = modelData.id
+                                        window.selectedNoteId = noteItem.noteId
+                                    }
+                                }
+
+                                onPinClicked: {
+                                    console.log("[QML] Pin clicked for note:", noteItem.noteId, "model id:", modelRef ? modelRef.id : "null")
+                                    if (noteItem.noteId) {
+                                        // Select the note first so it's highlighted
+                                        window.selectedNoteId = noteItem.noteId
+                                        if (noteController) {
+                                            noteController.selectNote(noteItem.noteId)
+                                            noteController.togglePinned(noteItem.noteId)
+                                        }
                                     }
                                 }
                             }

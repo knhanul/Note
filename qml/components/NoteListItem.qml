@@ -47,18 +47,10 @@ Item {
                     maximumLineCount: 1
                 }
 
-                Rectangle {
-                    visible: root.isPinned
-                    width: 20
-                    height: 20
-                    radius: Metrics.radiusFull
-                    color: root.isSelected ? Qt.rgba(1, 1, 1, 0.2) : Colors.accentOrangeLight
-                    opacity: root.isPinned ? 1 : 0
-
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: root.pinClicked()
-                    }
+                // Spacer for star button (star button is at root level)
+                Item {
+                    width: 24
+                    height: 24
                 }
             }
 
@@ -136,12 +128,37 @@ Item {
         }
     }
 
+    // Main click area - covers the card but lets star button handle its own clicks
     MouseArea {
         anchors.fill: parent
         hoverEnabled: true
         onEntered: root.isHovered = true
         onExited: root.isHovered = false
         onClicked: root.clicked()
+    }
+
+    // Star button at root level - above the main MouseArea
+    Rectangle {
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.margins: Metrics.lg + Metrics.sm
+        width: 24
+        height: 24
+        radius: Metrics.radiusFull
+        color: root.isSelected ? Qt.rgba(1, 1, 1, 0.2) : (root.isPinned ? Colors.accentOrangeLight : Colors.bgTertiary)
+        z: 10
+
+        Text {
+            anchors.centerIn: parent
+            text: root.isPinned ? "★" : "☆"
+            font.pixelSize: 14
+            color: root.isPinned ? Colors.accentOrange : (root.isSelected ? Colors.textInverse : Colors.textTertiary)
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            onClicked: root.pinClicked()
+        }
     }
 
     Component.onCompleted: {

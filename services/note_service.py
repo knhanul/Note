@@ -23,9 +23,40 @@ class NoteService:
         if not include_deleted:
             query += " AND deleted_at IS NULL"
         
-        query += " ORDER BY is_pinned DESC, updated_at DESC"
+        query += " ORDER BY updated_at DESC"
         
         return self.db.fetch_all(query, tuple(params))
+
+    def get_pinned(self, ensure_note_id: str = None) -> List[Dict[str, Any]]:
+        """Get all pinned, non-deleted notes."""
+        print(f"[NoteService] get_pinned called, ensure_note_id={ensure_note_id}")
+        result = self.db.fetch_all(
+            """SELECT * FROM notes
+               WHERE is_pinned = 1 AND deleted_at IS NULL
+               ORDER BY updated_at DESC"""
+        )
+        print(f"[NoteService] get_pinned: found {len(result)} pinned notes")
+        for note in result:
+            print(f"[NoteService]   - {note['id']}: {note['title'][:30] if note['title'] else 'Untitled'}")
+        
+        # If ensure_note_id is provided and not in results, fetch and prepend it
+        if ensure_note_id and not any(n['id'] == ensure_note_id for n in result):
+            note = self.get_by_id(ensure_note_id)
+            if note and not note.get('deleted_at'):
+                print(f"[NoteService] Adding ensured note: {ensure_note_id}")
+                result.insert(0, note)
+        
+        return result
+
+    def get_recent(self, days: int = 7) -> List[Dict[str, Any]]:
+        """Get notes updated within the last N days (non-deleted)."""
+        return self.db.fetch_all(
+            """SELECT * FROM notes
+               WHERE deleted_at IS NULL
+                 AND datetime(updated_at) >= datetime('now', ?)
+               ORDER BY updated_at DESC""",
+            (f"-{days} days",)
+        )
     
     def get_by_id(self, note_id: str) -> Optional[Dict[str, Any]]:
         """Get note by ID."""
@@ -130,11 +161,15 @@ class NoteService:
     def set_pinned(self, note_id: str, is_pinned: bool) -> bool:
         """Set note pinned status."""
         try:
+            pinned_val = 1 if is_pinned else 0
+            print(f"[NoteService] set_pinned: note_id={note_id}, is_pinned={pinned_val}")
+            # Don't update updated_at to preserve note order
             cursor = self.db.execute(
-                "UPDATE notes SET is_pinned = ?, updated_at = ? WHERE id = ?",
-                (1 if is_pinned else 0, Database.now_iso(), note_id)
+                "UPDATE notes SET is_pinned = ? WHERE id = ?",
+                (pinned_val, note_id)
             )
             self.db.commit()
+            print(f"[NoteService] set_pinned: updated {cursor.rowcount} rows")
             return cursor.rowcount > 0
         except Exception as e:
             print(f"[NoteService] Set pinned error: {e}")
@@ -153,6 +188,26 @@ class NoteService:
             params.append(folder_id)
         
         sql += " ORDER BY updated_at DESC"
+        
+        return self.db.fetch_all(sql, tuple(params))
+
+    def search_by_terms(self, terms: List[str]) -> List[Dict[str, Any]]:
+        """Search notes by multiple terms (OR condition)."""
+        if not terms:
+            return []
+        
+        # Build OR conditions for each term
+        conditions = []
+        params = []
+        for term in terms:
+            search_term = f"%{term}%"
+            conditions.append("(title LIKE ? OR content LIKE ?)")
+            params.extend([search_term, search_term])
+        
+        sql = f"""SELECT DISTINCT * FROM notes 
+                    WHERE ({' OR '.join(conditions)})
+                    AND deleted_at IS NULL
+                    ORDER BY updated_at DESC"""
         
         return self.db.fetch_all(sql, tuple(params))
     

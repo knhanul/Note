@@ -12,6 +12,10 @@ Rectangle {
     property int noteCount: 0
     property bool isSelected: false
     property bool isEditing: false
+    property int depth: 0  // Hierarchy depth (0 = root, 1 = child, etc.)
+    property bool hasChildren: false  // Whether this folder has child folders
+    property bool isExpanded: true  // Whether children are visible (only valid if hasChildren)
+    property bool isSmart: false
 
     onIsEditingChanged: {
         if (isEditing) {
@@ -26,6 +30,7 @@ Rectangle {
     signal clicked()
     signal renameRequested(string newName)
     signal deleteRequested()
+    signal toggleExpanded()  // Request to toggle expand/collapse state
 
     // Layout
     height: 40
@@ -68,9 +73,39 @@ Rectangle {
     // Content row
     RowLayout {
         anchors.fill: parent
-        anchors.leftMargin: Metrics.xl
+        anchors.leftMargin: Metrics.md + (root.depth * 12)  // Indent based on depth
         anchors.rightMargin: Metrics.lg
         spacing: Metrics.sm
+
+        // Expand/collapse button (only visible if has children)
+        Rectangle {
+            visible: root.hasChildren && !root.isSmart
+            width: 16
+            height: 16
+            radius: Metrics.radiusFull
+            color: expandArea.containsMouse ? Colors.primary100 : "transparent"
+
+            Text {
+                anchors.centerIn: parent
+                text: root.isExpanded ? "▼" : "▶"
+                font.pixelSize: 10
+                color: Colors.textTertiary
+            }
+
+            MouseArea {
+                id: expandArea
+                anchors.fill: parent
+                hoverEnabled: true
+                onClicked: root.toggleExpanded()
+            }
+        }
+
+        // Spacer for alignment when no expand button
+        Item {
+            visible: !root.hasChildren || root.isSmart
+            width: 16
+            height: 16
+        }
 
         // Color indicator (folder icon)
         Rectangle {
@@ -175,7 +210,7 @@ Rectangle {
 
         // Delete button (shown on hover when selected)
         Rectangle {
-            visible: (root.isSelected || hoverArea.containsMouse) && !root.isEditing
+            visible: (root.isSelected || hoverArea.containsMouse) && !root.isEditing && !root.isSmart
             width: 20
             height: 20
             radius: Metrics.radiusFull
@@ -214,8 +249,10 @@ Rectangle {
 
         onClicked: (mouse) => {
             if (mouse.button === Qt.RightButton) {
-                // Right click starts edit mode
-                root.isEditing = true
+                // Right click starts edit mode for regular folders only
+                if (!root.isSmart) {
+                    root.isEditing = true
+                }
             } else {
                 // Left click selects
                 root.clicked()
@@ -223,8 +260,10 @@ Rectangle {
         }
 
         onDoubleClicked: {
-            // Double click also starts edit mode
-            root.isEditing = true
+            // Double click also starts edit mode for regular folders only
+            if (!root.isSmart) {
+                root.isEditing = true
+            }
         }
 
         onPressed: root.scale = 0.98

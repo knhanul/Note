@@ -8,6 +8,21 @@ class FolderService:
     
     def __init__(self, database: Database):
         self.db = database
+
+    def _get_descendant_ids(self, folder_id: str) -> List[str]:
+        """Get all descendant folder IDs in post-order (children before parent)."""
+        descendants: List[str] = []
+        children = self.db.fetch_all(
+            "SELECT id FROM folders WHERE parent_id = ?",
+            (folder_id,)
+        )
+
+        for child in children:
+            child_id = child["id"]
+            descendants.extend(self._get_descendant_ids(child_id))
+            descendants.append(child_id)
+
+        return descendants
     
     def get_all(self) -> List[Dict[str, Any]]:
         """Get all folders ordered by sort_order."""
@@ -22,14 +37,14 @@ class FolderService:
             (folder_id,)
         )
     
-    def create(self, folder_id: str, name: str, color: str = "#3B82F6") -> bool:
+    def create(self, folder_id: str, name: str, color: str = "#3B82F6", parent_id: Optional[str] = None) -> bool:
         """Create a new folder."""
         try:
             now = Database.now_iso()
             cursor = self.db.execute(
-                """INSERT INTO folders (id, name, color, created_at, updated_at, sort_order)
-                   VALUES (?, ?, ?, ?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM folders))""",
-                (folder_id, name, color, now, now)
+                """INSERT INTO folders (id, name, color, created_at, updated_at, sort_order, parent_id)
+                   VALUES (?, ?, ?, ?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM folders), ?)""",
+                (folder_id, name, color, now, now, parent_id)
             )
             self.db.commit()
             return cursor.rowcount > 0
@@ -67,8 +82,16 @@ class FolderService:
             return False
     
     def delete(self, folder_id: str) -> bool:
-        """Delete a folder (cascades to notes via FK)."""
+        """Delete a folder and all descendants (notes cascade via FK)."""
         try:
+            descendant_ids = self._get_descendant_ids(folder_id)
+
+            for child_id in descendant_ids:
+                self.db.execute(
+                    "DELETE FROM folders WHERE id = ?",
+                    (child_id,)
+                )
+
             cursor = self.db.execute(
                 "DELETE FROM folders WHERE id = ?",
                 (folder_id,)

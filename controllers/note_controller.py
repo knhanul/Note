@@ -15,6 +15,9 @@ from services.library_service import LibraryService
 
 class NoteController(QObject):
     """Controller for note management with SQLite persistence and QML integration."""
+
+    SMART_ALL = "smart:all"
+    SMART_FAVORITES = "smart:favorites"
     
     # Signals
     notesChanged = pyqtSignal()
@@ -174,6 +177,10 @@ class NoteController(QObject):
     def filteredNotes(self):
         """Get notes filtered by current folder."""
         current_folder_id = self._folder_controller.currentFolderId
+        if current_folder_id == self.SMART_ALL:
+            return self._note_service.get_all()
+        if current_folder_id == self.SMART_FAVORITES:
+            return self._note_service.get_pinned(ensure_note_id=self._current_note_id)
         return self._note_service.get_all(folder_id=current_folder_id or None)
     
     @pyqtProperty(str, notify=filteredNotesChanged)
@@ -208,6 +215,10 @@ class NoteController(QObject):
         # Use current folder if not specified
         if not folder_id:
             folder_id = self._folder_controller.currentFolderId
+
+        # Smart folders are virtual, so fallback to first regular folder
+        if self._folder_controller.isSmartFolder(folder_id):
+            folder_id = self._folder_controller.getFirstRegularFolderId()
         
         if not folder_id:
             return ""
@@ -301,6 +312,7 @@ class NoteController(QObject):
     @pyqtSlot(str, result=bool)
     def selectNote(self, note_id: str) -> bool:
         """Select a note (set as current)."""
+        print(f"[NoteController] selectNote called: {note_id}, current={self._current_note_id}")
         # Save current note if dirty before switching
         if self._is_dirty and self._current_note_id and self._current_note_id != note_id:
             self.saveCurrentNote()
@@ -310,14 +322,50 @@ class NoteController(QObject):
             self._current_note_id = note_id
             self._is_dirty = False
             self._save_status = "saved"
+            print(f"[NoteController] Note selected: {note_id}")
             self.notesChanged.emit()
             self.saveStatusChanged.emit()
             return True
+        print(f"[NoteController] Note not found: {note_id}")
         return False
+    
+    @pyqtSlot(str, result=bool)
+    def togglePinned(self, note_id: str) -> bool:
+        """Toggle pinned status for a note."""
+        print(f"[NoteController] togglePinned called for note_id: {note_id}")
+        note = self._note_service.get_by_id(note_id)
+        if not note:
+            print(f"[NoteController] Note not found: {note_id}")
+            return False
+        
+        current_pinned = note.get('is_pinned', 0) == 1
+        new_pinned = not current_pinned
+        print(f"[NoteController] Toggling pinned: {note_id} from {current_pinned} to {new_pinned}")
+        
+        if self._note_service.set_pinned(note_id, new_pinned):
+            print(f"[NoteController] Pinned status updated, emitting signals")
+            self.notesChanged.emit()
+            self.filteredNotesChanged.emit()
+            return True
+        return False
+    
+    @pyqtSlot(str, result=bool)
+    def isNotePinned(self, note_id: str) -> bool:
+        """Check if a note is pinned."""
+        note = self._note_service.get_by_id(note_id)
+        result = False
+        if note:
+            result = note.get('is_pinned', 0) == 1
+        print(f"[NoteController] isNotePinned({note_id}) = {result}")
+        return result
     
     @pyqtSlot(str, result=int)
     def getNoteCountForFolder(self, folder_id: str) -> int:
         """Get note count for a specific folder."""
+        if folder_id == self.SMART_ALL:
+            return len(self._note_service.get_all())
+        if folder_id == self.SMART_FAVORITES:
+            return len(self._note_service.get_pinned())
         return len(self._note_service.get_all(folder_id=folder_id))
     
     @pyqtSlot(result=int)
