@@ -101,6 +101,109 @@
             border-radius: 8px;
             margin: 16px 0;
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            cursor: pointer;
+            display: inline-block;
+        }
+        
+        #editor img.resizing {
+            outline: 2px solid #3B82F6;
+        }
+        
+        #editor img:hover {
+            outline: 1px dashed #94A3B8;
+        }
+        
+        /* Image resize handle */
+        .resize-handle {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            background: #3B82F6;
+            border: 2px solid white;
+            border-radius: 50%;
+            z-index: 1000;
+            cursor: nwse-resize;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        /* Table resizing */
+        #editor table {
+            position: relative;
+        }
+        
+        #editor td, #editor th {
+            position: relative;
+            min-width: 30px;
+        }
+        
+        .table-col-resize-handle {
+            position: absolute;
+            right: -3px;
+            top: 0;
+            bottom: 0;
+            width: 6px;
+            cursor: col-resize;
+            z-index: 10;
+            background: transparent;
+        }
+        
+        .table-col-resize-handle:hover,
+        .table-col-resize-handle.active {
+            background: #3B82F6;
+        }
+        
+        .table-resizing {
+            cursor: col-resize;
+            user-select: none;
+        }
+        
+        /* Table wrapper for overall resize */
+        .table-wrapper {
+            position: relative;
+            display: inline-block;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            overflow: visible;
+            min-width: 100px;
+            min-height: 50px;
+        }
+        
+        .table-wrapper table {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            border: none;
+        }
+        
+        .table-wrapper td, .table-wrapper th {
+            border: 1px solid #ccc;
+            padding: 8px;
+        }
+        
+        /* Table overall resize handle */
+        .table-resize-handle {
+            position: absolute;
+            right: -8px;
+            bottom: -8px;
+            width: 16px;
+            height: 16px;
+            background: #3B82F6;
+            border: 2px solid white;
+            border-radius: 50%;
+            cursor: nwse-resize;
+            z-index: 100;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            display: none;
+        }
+        
+        .table-wrapper:hover .table-resize-handle,
+        .table-wrapper.resizing .table-resize-handle {
+            display: block;
+        }
+        
+        .table-wrapper.resizing {
+            outline: 2px solid #3B82F6;
         }
         
         #editor a {
@@ -171,11 +274,12 @@
         ::-webkit-scrollbar-thumb:hover {
             background: #94A3B8;
         }
+        
     </style>
 </head>
 <body>
     <div id="editor" contenteditable="true" spellcheck="false">
-        <p>여기에 내용을 입력하세요...</p>
+        <p><br></p>
     </div>
     
     <script>
@@ -430,29 +534,40 @@
                         console.log("[editorAPI] Created new range at end");
                     }
                     
-                    // Create table element at current cursor position
+                    // Create wrapper div for table resize
+                    const wrapper = document.createElement('div');
+                    wrapper.className = 'table-wrapper';
+                    wrapper.style.width = '100%';
+                    wrapper.style.height = 'auto';
+                    
+                    // Create table element inside wrapper
                     const table = document.createElement('table');
-                    table.style.cssText = 'border-collapse: collapse; width: 100%; margin: 10px 0; border: 1px solid #ddd;';
+                    table.style.cssText = 'border-collapse: collapse; width: 100%; height: 100%;';
                     
                     for (let i = 0; i < rows; i++) {
                         const tr = document.createElement('tr');
                         for (let j = 0; j < cols; j++) {
                             const td = document.createElement('td');
-                            td.style.cssText = 'border: 1px solid #ccc; padding: 8px; min-width: 50px;';
                             td.innerHTML = '<br>'; // Empty cell with line break for editing
                             tr.appendChild(td);
                         }
                         table.appendChild(tr);
                     }
                     
-                    // Insert table at cursor position
+                    wrapper.appendChild(table);
+                    
+                    // Add resize handle to wrapper
+                    createTableResizeHandle(wrapper);
+                    createColResizeHandles(table);
+                    
+                    // Insert wrapper at cursor position
                     range.deleteContents();
-                    range.insertNode(table);
+                    range.insertNode(wrapper);
                     
                     // Add paragraph after table
                     const p = document.createElement('p');
                     p.innerHTML = '<br>';
-                    table.parentNode.insertBefore(p, table.nextSibling);
+                    wrapper.parentNode.insertBefore(p, wrapper.nextSibling);
                     
                     // Move cursor to first cell of the table
                     const firstCell = table.querySelector('td');
@@ -582,9 +697,368 @@
             }
         };
         
-        // Content change detection
+        // Editor reference
+        const editor = document.getElementById('editor');
+        
+        // ==================== Image Resize Functionality ====================
+        let activeResizeHandle = null;
+        let resizingImage = null;
+        let resizeStartX = 0;
+        let resizeStartY = 0;
+        let resizeStartWidth = 0;
+        let resizeStartHeight = 0;
+        let imageAspectRatio = 1;
+        
+        function createResizeHandle(img) {
+            // Remove existing handle
+            const existing = document.querySelector('.resize-handle');
+            if (existing) existing.remove();
+            
+            const handle = document.createElement('div');
+            handle.className = 'resize-handle';
+            handle.style.display = 'none';
+            document.body.appendChild(handle);
+            return handle;
+        }
+        
+        function updateResizeHandlePosition(img, handle) {
+            const rect = img.getBoundingClientRect();
+            handle.style.left = (rect.right - 5) + 'px';
+            handle.style.top = (rect.bottom - 5) + 'px';
+            handle.style.display = 'block';
+        }
+        
+        function initImageResize(img) {
+            const handle = createResizeHandle(img);
+            
+            // Show handle on image click/select
+            img.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                resizingImage = img;
+                img.classList.add('resizing');
+                updateResizeHandlePosition(img, handle);
+            });
+            
+            // Start resizing
+            handle.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                activeResizeHandle = handle;
+                resizingImage = img;
+                resizeStartX = e.clientX;
+                resizeStartY = e.clientY;
+                resizeStartWidth = img.offsetWidth;
+                resizeStartHeight = img.offsetHeight;
+                imageAspectRatio = resizeStartWidth / resizeStartHeight;
+                
+                document.addEventListener('mousemove', onImageResize);
+                document.addEventListener('mouseup', stopImageResize);
+            });
+        }
+        
+        function onImageResize(e) {
+            if (!activeResizeHandle || !resizingImage) return;
+            
+            const dx = e.clientX - resizeStartX;
+            const newWidth = Math.max(50, resizeStartWidth + dx);
+            const newHeight = newWidth / imageAspectRatio;
+            
+            resizingImage.style.width = newWidth + 'px';
+            resizingImage.style.maxWidth = 'none';
+            resizingImage.style.height = 'auto';
+            
+            updateResizeHandlePosition(resizingImage, activeResizeHandle);
+        }
+        
+        function stopImageResize(e) {
+            if (activeResizeHandle && resizingImage) {
+                window.editorAPI.onContentChanged();
+            }
+            document.removeEventListener('mousemove', onImageResize);
+            document.removeEventListener('mouseup', stopImageResize);
+            activeResizeHandle = null;
+            if (resizingImage) {
+                resizingImage.classList.remove('resizing');
+                resizingImage = null;
+            }
+        }
+        
+        // Hide resize handle when clicking outside
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('#editor img') && !e.target.classList.contains('resize-handle')) {
+                const handle = document.querySelector('.resize-handle');
+                if (handle) handle.style.display = 'none';
+                const imgs = document.querySelectorAll('#editor img.resizing');
+                imgs.forEach(img => img.classList.remove('resizing'));
+            }
+        });
+        
+        // Initialize resize for existing images
+        function initExistingImages() {
+            const imgs = document.querySelectorAll('#editor img');
+            imgs.forEach(initImageResize);
+        }
+        
+        // ==================== Table Overall Resize Functionality ====================
+        let activeTableResize = null;
+        let resizingTableWrapper = null;
+        let tableResizeStartX = 0;
+        let tableResizeStartY = 0;
+        let tableResizeStartWidth = 0;
+        let tableResizeStartHeight = 0;
+        
+        function createTableResizeHandle(wrapper) {
+            // Remove existing handle
+            const existing = wrapper.querySelector('.table-resize-handle');
+            if (existing) existing.remove();
+            
+            const handle = document.createElement('div');
+            handle.className = 'table-resize-handle';
+            wrapper.appendChild(handle);
+            
+            // Show handle on wrapper hover
+            wrapper.addEventListener('mouseenter', function() {
+                handle.style.display = 'block';
+            });
+            
+            wrapper.addEventListener('mouseleave', function() {
+                if (!wrapper.classList.contains('resizing')) {
+                    handle.style.display = 'none';
+                }
+            });
+            
+            // Start resizing
+            handle.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                activeTableResize = handle;
+                resizingTableWrapper = wrapper;
+                tableResizeStartX = e.clientX;
+                tableResizeStartY = e.clientY;
+                tableResizeStartWidth = wrapper.offsetWidth;
+                tableResizeStartHeight = wrapper.offsetHeight;
+                
+                wrapper.classList.add('resizing');
+                document.body.classList.add('table-resizing');
+                
+                document.addEventListener('mousemove', onTableResize);
+                document.addEventListener('mouseup', stopTableResize);
+            });
+        }
+        
+        function onTableResize(e) {
+            if (!activeTableResize || !resizingTableWrapper) return;
+            
+            const dx = e.clientX - tableResizeStartX;
+            const dy = e.clientY - tableResizeStartY;
+            
+            const newWidth = Math.max(100, tableResizeStartWidth + dx);
+            const newHeight = Math.max(50, tableResizeStartHeight + dy);
+            
+            resizingTableWrapper.style.width = newWidth + 'px';
+            resizingTableWrapper.style.height = newHeight + 'px';
+            
+            // Update table dimensions
+            const table = resizingTableWrapper.querySelector('table');
+            if (table) {
+                table.style.width = '100%';
+                table.style.height = '100%';
+            }
+        }
+        
+        function stopTableResize(e) {
+            if (activeTableResize && resizingTableWrapper) {
+                window.editorAPI.onContentChanged();
+            }
+            document.removeEventListener('mousemove', onTableResize);
+            document.removeEventListener('mouseup', stopTableResize);
+            document.body.classList.remove('table-resizing');
+            if (resizingTableWrapper) {
+                resizingTableWrapper.classList.remove('resizing');
+                const handle = resizingTableWrapper.querySelector('.table-resize-handle');
+                if (handle && !resizingTableWrapper.matches(':hover')) {
+                    handle.style.display = 'none';
+                }
+            }
+            activeTableResize = null;
+            resizingTableWrapper = null;
+        }
+        
+        // ==================== Table Column Resize Functionality ====================
+        let activeColResize = null;
+        let resizeColCell = null;
+        let resizeColStartX = 0;
+        let resizeColStartWidth = 0;
+        let resizeColNextWidth = 0;
+        let resizeColNextCell = null;
+        
+        function createColResizeHandles(table) {
+            // Remove existing handles
+            table.querySelectorAll('.table-col-resize-handle').forEach(h => h.remove());
+            
+            const rows = table.querySelectorAll('tr');
+            if (rows.length === 0) return;
+            
+            const firstRow = rows[0];
+            const cells = firstRow.querySelectorAll('td, th');
+            
+            cells.forEach((cell, index) => {
+                if (index < cells.length - 1) { // Don't add handle to last column
+                    const handle = document.createElement('div');
+                    handle.className = 'table-col-resize-handle';
+                    cell.appendChild(handle);
+                    
+                    handle.addEventListener('mousedown', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        startColResize(e, cell, cells[index + 1]);
+                    });
+                }
+            });
+        }
+        
+        function startColResize(e, cell, nextCell) {
+            activeColResize = true;
+            resizeColCell = cell;
+            resizeColNextCell = nextCell;
+            resizeColStartX = e.clientX;
+            resizeColStartWidth = cell.offsetWidth;
+            resizeColNextWidth = nextCell ? nextCell.offsetWidth : 0;
+            
+            document.body.classList.add('table-resizing');
+            e.target.classList.add('active');
+            
+            document.addEventListener('mousemove', onColResize);
+            document.addEventListener('mouseup', stopColResize);
+        }
+        
+        function onColResize(e) {
+            if (!activeColResize || !resizeColCell) return;
+            
+            const dx = e.clientX - resizeColStartX;
+            const newWidth = Math.max(30, resizeColStartWidth + dx);
+            
+            resizeColCell.style.width = newWidth + 'px';
+            resizeColCell.style.minWidth = newWidth + 'px';
+            
+            // Adjust next column to maintain table width
+            if (resizeColNextCell) {
+                const newNextWidth = Math.max(30, resizeColNextWidth - dx);
+                resizeColNextCell.style.width = newNextWidth + 'px';
+                resizeColNextCell.style.minWidth = newNextWidth + 'px';
+            }
+        }
+        
+        function stopColResize(e) {
+            if (activeColResize) {
+                window.editorAPI.onContentChanged();
+            }
+            document.removeEventListener('mousemove', onColResize);
+            document.removeEventListener('mouseup', stopColResize);
+            document.body.classList.remove('table-resizing');
+            document.querySelectorAll('.table-col-resize-handle.active').forEach(h => h.classList.remove('active'));
+            activeColResize = null;
+            resizeColCell = null;
+            resizeColNextCell = null;
+        }
+        
+        // Initialize resize handles for existing tables
+        function initExistingTables() {
+            const tables = document.querySelectorAll('#editor table');
+            tables.forEach(function(table) {
+                // Check if already wrapped
+                if (table.parentElement && table.parentElement.classList.contains('table-wrapper')) {
+                    const wrapper = table.parentElement;
+                    createTableResizeHandle(wrapper);
+                    createColResizeHandles(table);
+                } else {
+                    // Wrap existing table in wrapper
+                    const wrapper = document.createElement('div');
+                    wrapper.className = 'table-wrapper';
+                    wrapper.style.width = '100%';
+                    wrapper.style.height = 'auto';
+                    table.style.width = '100%';
+                    table.style.height = '100%';
+                    table.parentNode.insertBefore(wrapper, table);
+                    wrapper.appendChild(table);
+                    createTableResizeHandle(wrapper);
+                    createColResizeHandles(table);
+                }
+            });
+        }
+        
+        // ==================== Mutation Observer for new elements ====================
+        const resizeObserver = new MutationObserver(function(mutations) {
+            mutations.forEach(function(mutation) {
+                mutation.addedNodes.forEach(function(node) {
+                    if (node.nodeType === 1) { // Element node
+                        if (node.tagName === 'IMG') {
+                            initImageResize(node);
+                        } else if (node.tagName === 'TABLE') {
+                            // Wrap table if not already wrapped
+                            if (!node.parentElement || !node.parentElement.classList.contains('table-wrapper')) {
+                                const wrapper = document.createElement('div');
+                                wrapper.className = 'table-wrapper';
+                                wrapper.style.width = '100%';
+                                wrapper.style.height = 'auto';
+                                node.style.width = '100%';
+                                node.style.height = '100%';
+                                node.parentNode.insertBefore(wrapper, node);
+                                wrapper.appendChild(node);
+                                createTableResizeHandle(wrapper);
+                                createColResizeHandles(node);
+                            }
+                        } else if (node.classList && node.classList.contains('table-wrapper')) {
+                            // Table wrapper was added directly
+                            const table = node.querySelector('table');
+                            if (table) {
+                                createTableResizeHandle(node);
+                                createColResizeHandles(table);
+                            }
+                        }
+                        // Check children
+                        const imgs = node.querySelectorAll ? node.querySelectorAll('img') : [];
+                        imgs.forEach(initImageResize);
+                        const tables = node.querySelectorAll ? node.querySelectorAll('table') : [];
+                        tables.forEach(function(table) {
+                            if (!table.parentElement || !table.parentElement.classList.contains('table-wrapper')) {
+                                const wrapper = document.createElement('div');
+                                wrapper.className = 'table-wrapper';
+                                wrapper.style.width = '100%';
+                                wrapper.style.height = 'auto';
+                                table.style.width = '100%';
+                                table.style.height = '100%';
+                                table.parentNode.insertBefore(wrapper, table);
+                                wrapper.appendChild(table);
+                                createTableResizeHandle(wrapper);
+                            }
+                            createColResizeHandles(table);
+                        });
+                        const wrappers = node.querySelectorAll ? node.querySelectorAll('.table-wrapper') : [];
+                        wrappers.forEach(function(wrapper) {
+                            const table = wrapper.querySelector('table');
+                            if (table) {
+                                createTableResizeHandle(wrapper);
+                                createColResizeHandles(table);
+                            }
+                        });
+                    }
+                });
+            });
+        });
+        
+        resizeObserver.observe(editor, { childList: true, subtree: true });
+        
+        // Initialize on load
+        setTimeout(function() {
+            initExistingImages();
+            initExistingTables();
+        }, 100);
+        
+        // ==================== Content change detection
         let contentChangeTimeout;
-        document.getElementById('editor').addEventListener('input', function() {
+        editor.addEventListener('input', function() {
             clearTimeout(contentChangeTimeout);
             contentChangeTimeout = setTimeout(function() {
                 window.editorAPI.onContentChanged();
@@ -672,9 +1146,27 @@
         
         // Simple HTML to Markdown converter
         function htmlToMarkdown(html) {
-            // First, handle tables specially - convert to markdown table format
+            // First, handle table wrappers - unwrap them to process tables inside
             let md = html
-                // Convert tables to markdown format
+                // Handle table-wrapper with dimensions - preserve dimensions as HTML comment before table
+                .replace(/<div[^>]*class=["']table-wrapper["'][^>]*>([\s\S]*?)<\/div>/gi, function(match, content) {
+                    // Extract dimensions from wrapper style
+                    let width = '';
+                    let height = '';
+                    let styleMatch = match.match(/style=["'][^"']*width:\s*([^;"']+)/i);
+                    if (styleMatch) width = styleMatch[1].trim();
+                    styleMatch = match.match(/style=["'][^"']*height:\s*([^;"']+)/i);
+                    if (styleMatch) height = styleMatch[1].trim();
+                    
+                    // Build dimension comment - save if width is not 100% OR height is specified
+                    let dimComment = '';
+                    if ((width && width !== '100%') || (height && height !== 'auto')) {
+                        dimComment = '<!-- table-dims:' + (width || '100%') + 'x' + (height || 'auto') + ' -->\n';
+                    }
+                    
+                    return dimComment + content;
+                })
+                // Convert tables to markdown format (keep dimension comments before tables)
                 .replace(/<table[^>]*>([\s\S]*?)<\/table>/gi, function(match, tableContent) {
                     // Extract rows
                     let rows = [];
@@ -715,6 +1207,10 @@
                     return mdTable + '\n';
                 })
                 // Continue with other conversions
+                // IMPORTANT: Handle <br> BEFORE block elements to preserve line breaks
+                .replace(/<br\s*\/?>/gi, '\n')
+                // Handle <div> as single line break (browsers use div for new lines in contenteditable)
+                .replace(/<div[^>]*>(.*?)<\/div>/gi, '$1\n')
                 .replace(/<h1>(.*?)<\/h1>/gi, '# $1\n\n')
                 .replace(/<h2>(.*?)<\/h2>/gi, '## $1\n\n')
                 .replace(/<h3>(.*?)<\/h3>/gi, '### $1\n\n')
@@ -725,47 +1221,108 @@
                 .replace(/<i>(.*?)<\/i>/gi, '*$1*')
                 .replace(/<code>(.*?)<\/code>/gi, '`$1`')
                 .replace(/<pre>(.*?)<\/pre>/gi, '```\n$1\n```\n\n')
-                .replace(/<img[^>]+src="([^"]+)"[^>]*>/gi, '![]($1)')
+                .replace(/<img[^>]+src="([^"]+)"[^>]*>/gi, function(match, src) {
+                    // Extract width and height from style attribute
+                    let width = '';
+                    let height = '';
+                    let styleMatch = match.match(/style=["'][^"']*width:\s*(\d+)px/);
+                    if (styleMatch) width = styleMatch[1];
+                    styleMatch = match.match(/style=["'][^"']*height:\s*(\d+)px/);
+                    if (styleMatch) height = styleMatch[1];
+                    // Also check for width/height attributes
+                    let widthAttr = match.match(/width=["']([^"']+)["']/);
+                    if (widthAttr && !width) width = widthAttr[1];
+                    let heightAttr = match.match(/height=["']([^"']+)["']/);
+                    if (heightAttr && !height) height = heightAttr[1];
+                    
+                    // Store dimensions as comment before markdown image
+                    if (width || height) {
+                        return '<!-- img-dims:' + (width || 'auto') + 'x' + (height || 'auto') + ' -->![](' + src + ')';
+                    }
+                    // No dimensions, use standard markdown
+                    return '![](' + src + ')';
+                })
                 .replace(/<a[^>]+href="([^"]+)"[^>]*>(.*?)<\/a>/gi, '[$2]($1)')
-                .replace(/<br\s*\/?>/gi, '\n')
                 .replace(/<\/p>/gi, '\n\n')
-                .replace(/<[^>]+>/g, '');
-            
+                // Remove remaining HTML tags but preserve img/table comments and img markdown
+                .replace(/<[^>]+>/g, function(match) {
+                    // Preserve img dimension comments
+                    if (match.match(/<!--\s*img-dims:/)) return match;
+                    // Preserve table dimension comments
+                    if (match.match(/<!--\s*table-dims:/)) return match;
+                    // Remove all other tags
+                    return '';
+                })
+                // Normalize multiple consecutive newlines to max 2 (single blank line between paragraphs)
+                .replace(/\n{3,}/g, '\n\n');
+
             return md.trim();
         }
         
         // Simple Markdown to HTML converter
         function markdownToHtml(md) {
             let html = md
-                // Convert markdown tables to HTML tables first
+                // Handle img dimension comments before converting images
+                .replace(/<!--\s*img-dims:([^\s]+)\s*-->!\[([^\]]*)\]\(([^)]+)\)/gi, function(match, dims, alt, src) {
+                    let dimParts = dims.split('x');
+                    let width = dimParts[0];
+                    let height = dimParts[1];
+                    
+                    // Build style attribute
+                    let style = 'max-width: 100%; height: auto; border-radius: 8px; margin: 16px 0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); cursor: pointer; display: inline-block;';
+                    if (width && width !== 'auto') {
+                        style = 'width: ' + width + 'px; height: auto; border-radius: 8px; margin: 16px 0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); cursor: pointer; display: inline-block;';
+                    }
+                    if (height && height !== 'auto') {
+                        style = 'width: ' + (width && width !== 'auto' ? width + 'px' : 'auto') + '; height: ' + height + 'px; border-radius: 8px; margin: 16px 0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); cursor: pointer; display: inline-block;';
+                    }
+                    
+                    return '<img src="' + src + '" alt="' + alt + '" style="' + style + '" />';
+                })
+                // Handle table dimension comments with closing tag
+                .replace(/<!--\s*table-dims:([^\s]+)\s*-->\s*<table[^>]*>([\s\S]*?)<\/table>/gi, function(match, dims, tableContent) {
+                    let dimParts = dims.split('x');
+                    let width = dimParts[0] || '100%';
+                    let height = dimParts[1] || 'auto';
+                    
+                    // Create wrapper with dimensions
+                    let wrapperStyle = 'width: ' + width + '; height: ' + height + ';';
+                    return '<div class="table-wrapper" style="' + wrapperStyle + '"><table style="border-collapse: collapse; width: 100%; height: 100%;">' + tableContent + '</table></div>';
+                })
+                // Convert markdown tables to HTML tables (wrap with resizable wrapper)
                 .replace(/(\|[^\n]+\|\n\|[-:\s|]+\|\n)(?:\|[^\n]+\|\n?)+/g, function(match) {
                     let lines = match.trim().split('\n');
                     if (lines.length < 2) return match;
                     
-                    let html = '<table style="border-collapse: collapse; width: 100%; margin: 10px 0; border: 1px solid #ddd;">';
+                    let tableHtml = '<table style="border-collapse: collapse; width: 100%; height: 100%;">';
                     
                     // First line is header
                     let headerCells = lines[0].split('|').slice(1, -1).map(c => c.trim());
-                    html += '<tr>';
+                    tableHtml += '<tr>';
                     headerCells.forEach(cell => {
-                        html += '<th style="border: 1px solid #ccc; padding: 8px; background: #f5f5f5;">' + cell + '</th>';
+                        tableHtml += '<th>' + cell + '</th>';
                     });
-                    html += '</tr>';
+                    tableHtml += '</tr>';
                     
                     // Skip separator line (index 1)
                     // Remaining lines are data rows
                     for (let i = 2; i < lines.length; i++) {
                         if (!lines[i].trim()) continue;
                         let cells = lines[i].split('|').slice(1, -1).map(c => c.trim());
-                        html += '<tr>';
+                        tableHtml += '<tr>';
                         cells.forEach(cell => {
-                            html += '<td style="border: 1px solid #ccc; padding: 8px;">' + (cell || '<br>') + '</td>';
+                            tableHtml += '<td>' + (cell || '<br>') + '</td>';
                         });
-                        html += '</tr>';
+                        tableHtml += '</tr>';
                     }
                     
-                    html += '</table>';
-                    return html;
+                    tableHtml += '</table>';
+                    
+                    // Wrap in resizable container
+                    let wrapperOpen = '<div class="table-wrapper" style="width: 100%;">';
+                    let wrapperClose = '</div>';
+                    
+                    return wrapperOpen + tableHtml + wrapperClose;
                 })
                 // Continue with other conversions
                 .replace(/^### (.*$)/gim, '<h3>$1</h3>')
@@ -775,7 +1332,27 @@
                 .replace(/\*(.*)\*/gim, '<em>$1</em>')
                 .replace(/`([^`]+)`/gim, '<code>$1</code>')
                 .replace(/```([\s\S]*?)```/gim, '<pre><code>$1</code></pre>')
-                .replace(/!\[([^\]]*)\]\(([^)]+)\)/gim, '<img src="$2" alt="$1" />')
+                // Keep existing HTML img tags with dimensions
+                .replace(/<img[^>]+src="([^"]+)"[^>]*>/gi, function(match, src) {
+                    // Extract width and height if present
+                    let widthMatch = match.match(/width=["']([^"']+)["']/);
+                    let heightMatch = match.match(/height=["']([^"']+)["']/);
+                    let width = widthMatch ? widthMatch[1] : '';
+                    let height = heightMatch ? heightMatch[1] : '';
+                    
+                    // Build style attribute
+                    let style = 'max-width: 100%; height: auto;';
+                    if (width) style = 'width: ' + width + 'px; height: auto;';
+                    if (height) style = 'width: ' + (width ? width + 'px' : 'auto') + '; height: ' + height + 'px;';
+                    
+                    // Get alt text
+                    let altMatch = match.match(/alt=["']([^"']*)["']/);
+                    let alt = altMatch ? altMatch[1] : '';
+                    
+                    return '<img src="' + src + '" alt="' + alt + '" style="' + style + ' border-radius: 8px; margin: 16px 0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); cursor: pointer; display: inline-block;" />';
+                })
+                // Convert markdown image syntax
+                .replace(/!\[([^\]]*)\]\(([^)]+)\)/gim, '<img src="$2" alt="$1" style="max-width: 100%; height: auto; border-radius: 8px; margin: 16px 0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); cursor: pointer; display: inline-block;" />')
                 .replace(/\[([^\]]+)\]\(([^)]+)\)/gim, '<a href="$2">$1</a>')
                 .replace(/\n/gim, '<br>');
             

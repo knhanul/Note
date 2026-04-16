@@ -116,66 +116,9 @@ ColumnLayout {
         }
     }
     
-    // Title input
-    Rectangle {
-        id: titleContainer
-        Layout.fillWidth: true
-        Layout.preferredHeight: 48
-        color: "transparent"
-        
-        TextInput {
-            id: titleInput
-            anchors.fill: parent
-            anchors.verticalCenter: parent.verticalCenter
-            
-            text: root.title
-            
-            font.family: Typography.fontPrimary
-            font.weight: Typography.weightSemibold
-            font.pixelSize: 24
-            color: Colors.textPrimary
-            selectByMouse: true
-            verticalAlignment: TextInput.AlignVCenter
-            
-            onTextChanged: {
-                if (text !== root.title) {
-                    root.titleEdited(text)
-                }
-            }
-            
-            onActiveFocusChanged: {
-                if (!activeFocus && text !== root.title) {
-                    root.requestSave()
-                }
-            }
-            
-            onFocusChanged: {
-                if (focus) {
-                    selectAll()
-                }
-            }
-        }
-        
-        // Placeholder
-        Text {
-            visible: titleInput.text === "" && !titleInput.activeFocus
-            anchors.fill: parent
-            anchors.verticalCenter: parent.verticalCenter
-            text: "제목 없는 노트"
-            font.family: Typography.fontPrimary
-            font.weight: Typography.weightSemibold
-            font.pixelSize: 24
-            color: Colors.textTertiary
-            verticalAlignment: Text.AlignVCenter
-        }
-    }
+    // Title is now extracted from first line of content
+    // No separate title input field
     
-    // Divider
-    Rectangle {
-        Layout.fillWidth: true
-        Layout.preferredHeight: 1
-        color: Colors.borderLight
-    }
     
     // Web-based WYSIWYG Editor
     Rectangle {
@@ -211,6 +154,11 @@ ColumnLayout {
                 if (msg.indexOf("EDITOR_CONTENT_CHANGED:") === 0) {
                     var content = msg.substring(23)
                     root.contentEdited(content)
+                    // Extract first line as title
+                    var firstLine = extractFirstLine(content)
+                    if (firstLine !== root.title) {
+                        root.titleEdited(firstLine)
+                    }
                 } else if (msg.indexOf("EDITOR_IMAGE_PASTED:") === 0) {
                     var dataUrl = msg.substring(20)
                     root.imagePasted(dataUrl)
@@ -293,21 +241,38 @@ ColumnLayout {
         webView.runJavaScript("if (window.editorAPI) { window.editorAPI.insertQuote(); }")
     }
     
+    // Extract first line from markdown content as title
+    function extractFirstLine(content) {
+        if (!content || content.trim() === "") {
+            return "제목 없는 노트"
+        }
+        // Split by newline and get first non-empty line
+        var lines = content.split('\n')
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i].trim()
+            // Skip markdown headings and empty lines
+            if (line !== "" && !line.match(/^#{1,6}\s/)) {
+                // Remove markdown formatting
+                line = line.replace(/\*\*/g, '').replace(/\*/g, '').replace(/`/g, '').replace(/\[|\]/g, '').replace(/\(|\)/g, '')
+                // Limit to 50 characters
+                if (line.length > 50) {
+                    line = line.substring(0, 50) + "..."
+                }
+                return line
+            }
+        }
+        return "제목 없는 노트"
+    }
+    
     // Focus management
     function focusTitle() {
-        titleInput.forceActiveFocus()
-        titleInput.selectAll()
+        // Title is now extracted from content, focus content editor instead
+        focusContent()
     }
     
     function focusContent() {
         webView.forceActiveFocus()
         webView.runJavaScript("if (window.editorAPI) { window.editorAPI.focus(); }")
-    }
-    
-    onTitleChanged: {
-        if (root.title !== titleInput.text) {
-            titleInput.text = root.title
-        }
     }
     
     onContentChanged: {

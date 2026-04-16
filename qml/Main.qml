@@ -733,6 +733,12 @@ Window {
                                 depth: modelData ? (modelData.depth || 0) : 0
                                 hasChildren: modelData ? (modelData.has_children || false) : false
                                 isSmart: modelData ? (modelData.is_smart || false) : false
+                                isLastSmart: {
+                                    if (!modelData || !modelData.is_smart) return false
+                                    var idx = index
+                                    var listModel = foldersListView.model
+                                    return (idx === listModel.length - 1) || !(listModel[idx + 1] && listModel[idx + 1].is_smart)
+                                }
                                 isExpanded: folderController && modelData ? !folderController.isFolderCollapsed(modelData.id) : true
                                 isSelected: folderController && modelData && folderController.currentFolderId === modelData.id
 

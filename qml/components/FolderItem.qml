@@ -16,6 +16,7 @@ Rectangle {
     property bool hasChildren: false  // Whether this folder has child folders
     property bool isExpanded: true  // Whether children are visible (only valid if hasChildren)
     property bool isSmart: false
+    property bool isLastSmart: false  // True if this is the last smart folder before regular folders
 
     onIsEditingChanged: {
         if (isEditing) {
@@ -73,7 +74,7 @@ Rectangle {
     // Content row
     RowLayout {
         anchors.fill: parent
-        anchors.leftMargin: Metrics.md + (root.depth * 12)  // Indent based on depth
+        anchors.leftMargin: root.isSmart ? 0 : Metrics.md + (root.depth * 12)  // Smart folders: no margin
         anchors.rightMargin: Metrics.lg
         spacing: Metrics.sm
 
@@ -108,7 +109,27 @@ Rectangle {
         }
 
         // Color indicator (folder icon)
+        // Smart folder icons
         Rectangle {
+            visible: root.isSmart && root.folderName === "전체 노트"
+            width: 14
+            height: 14
+            radius: 7
+            color: root.folderColor
+            Layout.alignment: Qt.AlignVCenter
+        }
+
+        Text {
+            visible: root.isSmart && root.folderName === "즐겨 찾기"
+            text: "★"
+            font.pixelSize: 16
+            color: root.folderColor
+            Layout.alignment: Qt.AlignVCenter
+        }
+
+        // Regular folder icon
+        Rectangle {
+            visible: !root.isSmart
             width: 16
             height: 12
             radius: 2
@@ -268,6 +289,18 @@ Rectangle {
 
         onPressed: root.scale = 0.98
         onReleased: root.scale = 1.0
+    }
+
+    // Divider between smart folders and regular folders
+    Rectangle {
+        visible: root.isLastSmart
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: 1
+        color: Colors.borderLight
+        anchors.leftMargin: Metrics.md
+        anchors.rightMargin: Metrics.md
     }
 
 }
