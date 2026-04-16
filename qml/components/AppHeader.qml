@@ -6,7 +6,9 @@ Rectangle {
     id: root
 
     property bool sidebarHidden: false
+    property bool noteListHidden: false
     signal toggleSidebar()
+    signal toggleNoteList()
 
     height: Metrics.headerHeight
     color: "transparent"
@@ -51,19 +53,64 @@ Rectangle {
                     width: 16
                     height: 2
                     radius: 1
-                    color: Colors.textPrimary
+                    color: root.sidebarHidden ? Colors.textTertiary : Colors.textPrimary
                 }
                 Rectangle {
-                    width: 16
+                    width: root.sidebarHidden ? 10 : 16
                     height: 2
                     radius: 1
-                    color: Colors.textPrimary
+                    color: root.sidebarHidden ? Colors.textTertiary : Colors.textPrimary
+                    Behavior on width { NumberAnimation { duration: Metrics.durationFast } }
                 }
                 Rectangle {
-                    width: 12
+                    width: root.sidebarHidden ? 6 : 12
                     height: 2
                     radius: 1
-                    color: Colors.textPrimary
+                    color: root.sidebarHidden ? Colors.textTertiary : Colors.textPrimary
+                    Behavior on width { NumberAnimation { duration: Metrics.durationFast } }
+                }
+            }
+        }
+
+        // Note list toggle button
+        Rectangle {
+            id: noteListBtn
+            width: 36
+            height: 36
+            radius: Metrics.radiusMd
+            color: noteListArea.containsMouse ? Colors.primary100 : (root.noteListHidden ? Colors.bgSecondary : "transparent")
+            border.width: 1
+            border.color: noteListArea.containsMouse ? Colors.primary200 : (root.noteListHidden ? Colors.borderLight : "transparent")
+
+            Behavior on color {
+                ColorAnimation { duration: Metrics.durationFast }
+            }
+
+            MouseArea {
+                id: noteListArea
+                anchors.fill: parent
+                hoverEnabled: true
+                onClicked: root.toggleNoteList()
+                onPressed: parent.scale = 0.97
+                onReleased: parent.scale = 1.0
+            }
+
+            // Note list icon: two vertical columns
+            Row {
+                anchors.centerIn: parent
+                spacing: 3
+
+                Column {
+                    spacing: 3
+                    anchors.verticalCenter: parent.verticalCenter
+                    Rectangle { width: 6; height: 10; radius: 1; color: root.noteListHidden ? Colors.textTertiary : Colors.textPrimary }
+                    Rectangle { width: 6; height: 4; radius: 1; color: root.noteListHidden ? Colors.textTertiary : Colors.textPrimary }
+                }
+                Column {
+                    spacing: 3
+                    anchors.verticalCenter: parent.verticalCenter
+                    Rectangle { width: 6; height: 6; radius: 1; color: root.noteListHidden ? Colors.textTertiary : Colors.textPrimary }
+                    Rectangle { width: 6; height: 8; radius: 1; color: root.noteListHidden ? Colors.textTertiary : Colors.textPrimary }
                 }
             }
         }

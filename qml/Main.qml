@@ -88,7 +88,14 @@ Window {
         AppHeader {
             id: appHeader
             Layout.fillWidth: true
-            onToggleSidebar: sidebar.visible = !sidebar.visible
+            sidebarHidden: sidebar.Layout.preferredWidth === 0
+            noteListHidden: noteList.Layout.preferredWidth === 0
+            onToggleSidebar: {
+                sidebar.Layout.preferredWidth = (sidebar.Layout.preferredWidth === 0) ? Metrics.sidebarWidth : 0
+            }
+            onToggleNoteList: {
+                noteList.Layout.preferredWidth = (noteList.Layout.preferredWidth === 0) ? Metrics.noteListWidth : 0
+            }
         }
 
         RowLayout {
@@ -102,6 +109,11 @@ Window {
                 Layout.fillHeight: true
                 color: "transparent"
                 z: 3000
+                clip: true
+
+                Behavior on Layout.preferredWidth {
+                    NumberAnimation { duration: Metrics.durationNormal; easing.type: Easing.InOutQuart }
+                }
 
                 MouseArea {
                     anchors.fill: parent
@@ -774,6 +786,11 @@ Window {
                 Layout.preferredWidth: Metrics.noteListWidth
                 Layout.fillHeight: true
                 color: "transparent"
+                clip: true
+
+                Behavior on Layout.preferredWidth {
+                    NumberAnimation { duration: Metrics.durationNormal; easing.type: Easing.InOutQuart }
+                }
 
                 GlassCard {
                     anchors.fill: parent
