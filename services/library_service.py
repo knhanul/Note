@@ -110,10 +110,6 @@ class LibraryService(QObject):
         lib_db.init_schema()
         lib_db.close()
         
-        # Create images directory for this library
-        images_dir = self._libraries_dir / f"{library_id}_images"
-        images_dir.mkdir(exist_ok=True)
-        
         self.librariesChanged.emit()
         self.libraryAdded.emit(library_id)
         
@@ -149,15 +145,6 @@ class LibraryService(QObject):
                 db_path.unlink()
         except Exception as e:
             print(f"[LibraryService] Error deleting DB file: {e}")
-        
-        # Delete images directory
-        try:
-            images_dir = self._libraries_dir / f"{library_id}_images"
-            if images_dir.exists():
-                import shutil
-                shutil.rmtree(images_dir)
-        except Exception as e:
-            print(f"[LibraryService] Error deleting images dir: {e}")
         
         # If this was the current library, switch to another one
         if self._current_library_id == library_id:
@@ -262,10 +249,6 @@ class LibraryService(QObject):
     def get_current_database(self) -> Optional[Database]:
         """Get the database instance for the current library."""
         return self._current_db
-    
-    def get_library_images_dir(self, library_id: str) -> Path:
-        """Get the images directory path for a library."""
-        return self._libraries_dir / f"{library_id}_images"
     
     @pyqtSlot(str, result=str)
     def createLibrary(self, name: str, description: str = "") -> str:
