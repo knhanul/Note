@@ -13,7 +13,7 @@ Window {
     height: 900
     minimumWidth: 900
     minimumHeight: 600
-    title: "Nuni Note"
+    title: (typeof appName !== "undefined" && appName) ? appName : "Nuni Note"
     color: Colors.bgPrimary
 
     // Properties for note selection
@@ -128,13 +128,21 @@ Window {
         AppHeader {
             id: appHeader
             Layout.fillWidth: true
-            sidebarHidden: sidebar.Layout.preferredWidth === 0
-            noteListHidden: noteList.Layout.preferredWidth === 0
-            onToggleSidebar: {
-                sidebar.Layout.preferredWidth = (sidebar.Layout.preferredWidth === 0) ? Metrics.sidebarWidth : 0
-            }
-            onToggleNoteList: {
-                noteList.Layout.preferredWidth = (noteList.Layout.preferredWidth === 0) ? Metrics.noteListWidth : 0
+            onLogoClicked: {
+                // 사이클: 0=모두 표시 → 1=사이드바 숨김 → 2=모두 숨김 → 0
+                var sb = sidebar.Layout.preferredWidth > 0
+                var nl = noteList.Layout.preferredWidth > 0
+                if (sb && nl) {
+                    // State 0 → 1: 사이드바 숨김
+                    sidebar.Layout.preferredWidth = 0
+                } else if (!sb && nl) {
+                    // State 1 → 2: 노트목록도 숨김
+                    noteList.Layout.preferredWidth = 0
+                } else {
+                    // State 2 → 0: 모두 복원
+                    sidebar.Layout.preferredWidth = Metrics.sidebarWidth
+                    noteList.Layout.preferredWidth = Metrics.noteListWidth
+                }
             }
         }
 
@@ -276,7 +284,7 @@ Window {
                                     anchors.topMargin: Metrics.xs
                                     anchors.left: parent.left
                                     anchors.right: parent.right
-                                    // Calculate height dynamically based on actual Repeater content
+                                    // Calculate height dynamically based on actual Repeater content + 2 extra items
                                     property int totalHeight: {
                                         if (!libraryRepeater || !libraryRepeater.count) {
                                             return 2 * Metrics.sm + 32; // min height for empty state
@@ -293,9 +301,11 @@ Window {
                                             }
                                             if (i < libraryRepeater.count - 1) h += Metrics.xs;
                                         }
+                                        // Add space for 2 extra items so list feels roomy
+                                        h += 2 * 32 + 2 * Metrics.xs;
                                         return h;
                                     }
-                                    height: Math.min(totalHeight, 400) // cap at 400px, scroll if more
+                                    height: Math.min(totalHeight, 500) // cap at 500px, scroll if more
                                     radius: Metrics.radiusLg
                                     color: "white"
                                     border.color: Colors.borderLight
@@ -552,7 +562,7 @@ Window {
                                 // Folder creation menu
                                 Rectangle {
                                     id: folderAddMenu
-                                    parent: sidebar
+                                    parent: window.contentItem
                                     visible: false
                                     property string baseFolderId: ""
                                     x: 0
@@ -563,7 +573,7 @@ Window {
                                     color: "#FFFFFF"
                                     border.color: Colors.borderMedium
                                     border.width: 1
-                                    z: 5000  // Very high to render above everything including note list
+                                    z: 10000  // Above all other elements
 
                                     // Drop shadow using multiple rectangles
                                     Rectangle {
@@ -614,7 +624,7 @@ Window {
                                     function open(mouseX, mouseY) {
                                         var currentId = (folderController && folderController.currentFolderId) ? folderController.currentFolderId : ""
                                         baseFolderId = (folderController && folderController.isSmartFolder(currentId)) ? "" : currentId
-                                        var p = addFolderArea.mapToItem(sidebar, mouseX, mouseY)
+                                        var p = addFolderArea.mapToItem(window.contentItem, mouseX, mouseY)
                                         x = p.x + Metrics.xs
                                         y = p.y
                                         visible = true
@@ -798,12 +808,12 @@ Window {
                             spacing: Metrics.xs
                             clip: true
                             ScrollBar.vertical: ScrollBar {
-                                policy: ScrollBar.AsNeeded
-                                implicitWidth: 4
+                                policy: ScrollBar.AlwaysOn
+                                implicitWidth: 6
                                 contentItem: Rectangle {
-                                    radius: 2
+                                    radius: 3
                                     color: Colors.borderMedium
-                                    opacity: parent.active ? 0.8 : 0.4
+                                    opacity: parent.active ? 0.8 : 0.3
                                 }
                                 background: Item {}
                             }
@@ -912,12 +922,12 @@ Window {
                                     spacing: 1
                                     model: noteController ? noteController.allTags : []
                                     ScrollBar.vertical: ScrollBar {
-                                        policy: ScrollBar.AsNeeded
-                                        implicitWidth: 4
+                                        policy: ScrollBar.AlwaysOn
+                                        implicitWidth: 6
                                         contentItem: Rectangle {
-                                            radius: 2
+                                            radius: 3
                                             color: Colors.borderMedium
-                                            opacity: parent.active ? 0.8 : 0.4
+                                            opacity: parent.active ? 0.8 : 0.3
                                         }
                                         background: Item {}
                                     }
@@ -929,14 +939,16 @@ Window {
 
                                     delegate: Rectangle {
                                         property var tagData: modelData
-                                        property string tagName: tagData ? (tagData.name || "") : ""
-                                        property int tagCount: tagData ? (tagData.count || 0) : 0
-                                        property bool isSelected: noteController && noteController.selectedTag === tagName
-                                        property bool tagHovered: false
-                                        property int tagDepth: tagName.split('/').length - 1
+                                        property string tagName:    tagData ? (tagData.name        || "") : ""
+                                        property string tagDisplay: tagData ? (tagData.display     || tagName) : ""
+                                        property int    tagCount:   tagData ? (tagData.count       || 0)  : 0
+                                        property int    tagDepth:   tagData ? (tagData.depth       || 0)  : 0
+                                        property bool   tagHasChildren: tagData ? (tagData.has_children || false) : false
+                                        property bool   isSelected: noteController && noteController.selectedTag === tagName
+                                        property bool   tagHovered: false
 
                                         width: tagListView.width
-                                        height: 30
+                                        height: 28
                                         radius: Metrics.radiusMd
                                         color: isSelected
                                             ? Colors.primary500
@@ -946,36 +958,51 @@ Window {
 
                                         RowLayout {
                                             anchors.fill: parent
-                                            anchors.leftMargin: Metrics.sm + tagDepth * 12
+                                            anchors.leftMargin: Metrics.sm + tagDepth * 14
                                             anchors.rightMargin: Metrics.sm
-                                            spacing: 4
+                                            spacing: 3
 
-                                            // Hierarchy indicator
+                                            // Tree connector line for children
                                             Text {
                                                 visible: tagDepth > 0
                                                 text: "└"
                                                 font.pixelSize: 10
-                                                color: isSelected ? Qt.rgba(1,1,1,0.5) : Colors.textTertiary
+                                                color: isSelected ? Qt.rgba(1,1,1,0.45) : Colors.borderMedium
+                                                Layout.alignment: Qt.AlignVCenter
                                             }
 
-                                            // # prefix
+                                            // Expand/collapse indicator for parent nodes
                                             Text {
+                                                visible: tagHasChildren
+                                                text: "▸"
+                                                font.pixelSize: 8
+                                                color: isSelected ? Qt.rgba(1,1,1,0.7) : Colors.textTertiary
+                                                Layout.alignment: Qt.AlignVCenter
+                                            }
+
+                                            // # prefix (only for leaf nodes)
+                                            Text {
+                                                visible: !tagHasChildren
                                                 text: "#"
                                                 font.family: Typography.fontPrimary
                                                 font.pixelSize: 11
                                                 color: isSelected ? Qt.rgba(1,1,1,0.7) : Colors.primary400
                                                 font.weight: Typography.weightMedium
+                                                Layout.alignment: Qt.AlignVCenter
                                             }
 
-                                            // Tag name (leaf only — strip parent prefix)
+                                            // Display label (leaf segment only)
                                             Text {
-                                                text: tagName.split('/').pop()
+                                                text: tagDisplay
                                                 font.family: Typography.fontPrimary
-                                                font.pixelSize: 12
+                                                font.pixelSize: tagHasChildren ? 11 : 12
                                                 color: isSelected ? "white" : Colors.textPrimary
-                                                font.weight: isSelected ? Typography.weightSemibold : Typography.weightRegular
+                                                font.weight: (isSelected || tagHasChildren)
+                                                    ? Typography.weightSemibold
+                                                    : Typography.weightRegular
                                                 elide: Text.ElideRight
                                                 Layout.fillWidth: true
+                                                Layout.alignment: Qt.AlignVCenter
                                             }
 
                                             // Note count badge
@@ -984,6 +1011,7 @@ Window {
                                                 height: 16
                                                 radius: Metrics.radiusFull
                                                 color: isSelected ? Qt.rgba(1,1,1,0.2) : Colors.bgTertiary
+                                                Layout.alignment: Qt.AlignVCenter
                                                 Text {
                                                     id: countText
                                                     anchors.centerIn: parent
@@ -1536,12 +1564,12 @@ Window {
                             clip: true
                             reuseItems: false  // Prevent delegate recycling issues
                             ScrollBar.vertical: ScrollBar {
-                                policy: ScrollBar.AsNeeded
-                                implicitWidth: 4
+                                policy: ScrollBar.AlwaysOn
+                                implicitWidth: 6
                                 contentItem: Rectangle {
-                                    radius: 2
+                                    radius: 3
                                     color: Colors.borderMedium
-                                    opacity: parent.active ? 0.8 : 0.4
+                                    opacity: parent.active ? 0.8 : 0.3
                                 }
                                 background: Item {}
                             }
@@ -2691,5 +2719,85 @@ Window {
         }
 
         Keys.onEscapePressed: close()
+    }
+
+    // ── Folder Delete Failed Dialog ─────────────────────────────────────
+    Rectangle {
+        id: folderDeleteFailDialog
+        visible: false
+        anchors.centerIn: parent
+        width: 340
+        height: 180
+        z: 9999
+        color: Colors.bgPrimary
+        radius: Metrics.radiusXxl
+        border.width: 1
+        border.color: Colors.borderLight
+
+        property string folderName: ""
+        property string failReason: ""
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: Metrics.lg
+            spacing: Metrics.md
+
+            Text {
+                Layout.fillWidth: true
+                text: "폴더 삭제 불가"
+                font.family: Typography.fontPrimary
+                font.weight: Typography.weightSemibold
+                font.pixelSize: Typography.h4
+                color: Colors.textPrimary
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: "\"" + folderDeleteFailDialog.folderName + "\" " + folderDeleteFailDialog.failReason
+                font.family: Typography.fontPrimary
+                font.weight: Typography.weightRegular
+                font.pixelSize: Typography.body
+                color: Colors.textSecondary
+                wrapMode: Text.WordWrap
+            }
+
+            Item { Layout.fillHeight: true }
+
+            Rectangle {
+                Layout.alignment: Qt.AlignRight
+                width: 80
+                height: 36
+                radius: Metrics.radiusLg
+                color: okFailArea.containsMouse ? Colors.primary600 : Colors.primary500
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "확인"
+                    font.family: Typography.fontPrimary
+                    font.weight: Typography.weightSemibold
+                    font.pixelSize: 14
+                    color: "white"
+                }
+
+                MouseArea {
+                    id: okFailArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onClicked: folderDeleteFailDialog.visible = false
+                }
+            }
+        }
+
+        Keys.onEscapePressed: visible = false
+    }
+
+    // Connect folder delete failed signal
+    Connections {
+        target: folderController
+        function onFolderDeleteFailed(folderName, reason) {
+            folderDeleteFailDialog.folderName = folderName
+            folderDeleteFailDialog.failReason = reason
+            folderDeleteFailDialog.visible = true
+        }
     }
 }

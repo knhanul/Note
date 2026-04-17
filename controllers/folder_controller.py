@@ -23,6 +23,7 @@ class FolderController(QObject):
     folderAdded = pyqtSignal(str)  # folder_id
     folderRemoved = pyqtSignal(str)  # folder_id
     folderRenamed = pyqtSignal(str, str)  # folder_id, new_name
+    folderDeleteFailed = pyqtSignal(str, str)  # folder_name, reason
     libraryChanged = pyqtSignal()  # Emitted when library changes
     
     def __init__(self, library_service: LibraryService, parent=None):
@@ -205,8 +206,21 @@ class FolderController(QObject):
     
     @pyqtSlot(str, result=bool)
     def deleteFolder(self, folder_id: str) -> bool:
-        """Delete a folder by ID."""
+        """Delete a folder by ID. Prevents deletion if folder has children or notes."""
         if not self._folder_service.exists(folder_id):
+            return False
+
+        # Prevent deletion if folder has sub-folders
+        folder = self._folder_service.get_by_id(folder_id)
+        folder_name = folder['name'] if folder else ''
+
+        if self._folder_service.has_children(folder_id):
+            self.folderDeleteFailed.emit(folder_name, '하위 폴더가 있어 삭제할 수 없습니다.')
+            return False
+
+        # Prevent deletion if folder has notes
+        if self._folder_service.has_notes(folder_id):
+            self.folderDeleteFailed.emit(folder_name, '노트가 있어 삭제할 수 없습니다.')
             return False
 
         # Delete from database (cascades to notes)

@@ -5,172 +5,88 @@ import theme
 Rectangle {
     id: root
 
-    property bool sidebarHidden: false
-    property bool noteListHidden: false
-    signal toggleSidebar()
-    signal toggleNoteList()
+    signal logoClicked()
 
     height: Metrics.headerHeight
     color: "transparent"
 
-    RowLayout {
-        id: leftSection
+    // ── Left: Logo + App name (클릭으로 패널 사이클) ──────────
+    Item {
         anchors.left: parent.left
         anchors.leftMargin: Metrics.xl
         anchors.verticalCenter: parent.verticalCenter
-        spacing: Metrics.md
-
-        Rectangle {
-            id: menuBtn
-            width: 36
-            height: 36
-            radius: Metrics.radiusMd
-            color: menuArea.containsMouse ? Colors.primary100 : "transparent"
-            border.width: 1
-            border.color: menuArea.containsMouse ? Colors.primary200 : "transparent"
-
-            Behavior on color {
-                ColorAnimation { duration: Metrics.durationFast }
-            }
-
-            Behavior on scale {
-                NumberAnimation { duration: Metrics.durationFast }
-            }
-
-            MouseArea {
-                id: menuArea
-                anchors.fill: parent
-                hoverEnabled: true
-                onClicked: root.toggleSidebar()
-                onPressed: parent.scale = 0.97
-                onReleased: parent.scale = 1.0
-            }
-
-            Column {
-                anchors.centerIn: parent
-                spacing: 4
-                Rectangle {
-                    width: 16
-                    height: 2
-                    radius: 1
-                    color: root.sidebarHidden ? Colors.textTertiary : Colors.textPrimary
-                }
-                Rectangle {
-                    width: root.sidebarHidden ? 10 : 16
-                    height: 2
-                    radius: 1
-                    color: root.sidebarHidden ? Colors.textTertiary : Colors.textPrimary
-                    Behavior on width { NumberAnimation { duration: Metrics.durationFast } }
-                }
-                Rectangle {
-                    width: root.sidebarHidden ? 6 : 12
-                    height: 2
-                    radius: 1
-                    color: root.sidebarHidden ? Colors.textTertiary : Colors.textPrimary
-                    Behavior on width { NumberAnimation { duration: Metrics.durationFast } }
-                }
-            }
-        }
-
-        // Note list toggle button
-        Rectangle {
-            id: noteListBtn
-            width: 36
-            height: 36
-            radius: Metrics.radiusMd
-            color: noteListArea.containsMouse ? Colors.primary100 : (root.noteListHidden ? Colors.bgSecondary : "transparent")
-            border.width: 1
-            border.color: noteListArea.containsMouse ? Colors.primary200 : (root.noteListHidden ? Colors.borderLight : "transparent")
-
-            Behavior on color {
-                ColorAnimation { duration: Metrics.durationFast }
-            }
-
-            MouseArea {
-                id: noteListArea
-                anchors.fill: parent
-                hoverEnabled: true
-                onClicked: root.toggleNoteList()
-                onPressed: parent.scale = 0.97
-                onReleased: parent.scale = 1.0
-            }
-
-            // Note list icon: two vertical columns
-            Row {
-                anchors.centerIn: parent
-                spacing: 3
-
-                Column {
-                    spacing: 3
-                    anchors.verticalCenter: parent.verticalCenter
-                    Rectangle { width: 6; height: 10; radius: 1; color: root.noteListHidden ? Colors.textTertiary : Colors.textPrimary }
-                    Rectangle { width: 6; height: 4; radius: 1; color: root.noteListHidden ? Colors.textTertiary : Colors.textPrimary }
-                }
-                Column {
-                    spacing: 3
-                    anchors.verticalCenter: parent.verticalCenter
-                    Rectangle { width: 6; height: 6; radius: 1; color: root.noteListHidden ? Colors.textTertiary : Colors.textPrimary }
-                    Rectangle { width: 6; height: 8; radius: 1; color: root.noteListHidden ? Colors.textTertiary : Colors.textPrimary }
-                }
-            }
-        }
+        implicitWidth: headerRow.implicitWidth
+        implicitHeight: headerRow.implicitHeight
 
         RowLayout {
-            spacing: Metrics.sm
-            Layout.alignment: Qt.AlignVCenter
+            id: headerRow
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 6
 
-            Rectangle {
-                width: 28
-                height: 28
-                radius: Metrics.radiusFull
-                gradient: Gradient {
-                    GradientStop { position: 0.0; color: Colors.accentOrange }
-                    GradientStop { position: 1.0; color: Colors.accentRose }
-                }
+            // Logo image
+            Image {
+                Layout.alignment: Qt.AlignVCenter
+                source: (typeof appLogoPath !== "undefined" && appLogoPath !== "")
+                        ? "file:///" + appLogoPath.replace(/\\/g, "/")
+                        : ""
+                Layout.preferredHeight: 64
+                Layout.preferredWidth: 64
+                fillMode: Image.PreserveAspectFit
+                smooth: true
+                mipmap: true
+                visible: status === Image.Ready
 
+                // Fallback circle
                 Rectangle {
-                    width: 6
-                    height: 6
-                    radius: Metrics.radiusFull
-                    color: "white"
-                    opacity: 0.9
-                    anchors.centerIn: parent
-                    anchors.horizontalCenterOffset: -4
-                    anchors.verticalCenterOffset: -4
-                }
-                Rectangle {
-                    width: 4
-                    height: 4
-                    radius: Metrics.radiusFull
-                    color: "white"
-                    opacity: 0.7
-                    anchors.centerIn: parent
-                    anchors.horizontalCenterOffset: 3
-                    anchors.verticalCenterOffset: -2
-                }
-                Rectangle {
-                    width: 5
-                    height: 5
-                    radius: Metrics.radiusFull
-                    color: "white"
-                    opacity: 0.8
-                    anchors.centerIn: parent
-                    anchors.horizontalCenterOffset: -2
-                    anchors.verticalCenterOffset: 5
+                    anchors.fill: parent
+                    radius: width / 2
+                    visible: parent.status !== Image.Ready
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: Colors.accentOrange }
+                        GradientStop { position: 1.0; color: Colors.accentRose }
+                    }
+                    Rectangle {
+                        width: 3; height: 3; radius: 1.5
+                        color: "white"; opacity: 0.9
+                        anchors.centerIn: parent
+                        anchors.horizontalCenterOffset: -2; anchors.verticalCenterOffset: -2
+                    }
+                    Rectangle {
+                        width: 2; height: 2; radius: 1
+                        color: "white"; opacity: 0.7
+                        anchors.centerIn: parent
+                        anchors.horizontalCenterOffset: 2; anchors.verticalCenterOffset: -1
+                    }
+                    Rectangle {
+                        width: 3; height: 3; radius: 1.5
+                        color: "white"; opacity: 0.8
+                        anchors.centerIn: parent
+                        anchors.horizontalCenterOffset: -1; anchors.verticalCenterOffset: 2
+                    }
                 }
             }
 
+            // App name
             Text {
-                text: "Nuni Note"
+                Layout.alignment: Qt.AlignVCenter
+                text: (typeof appName !== "undefined" && appName) ? appName : "누니노트"
                 font.family: Typography.fontPrimary
                 font.weight: Typography.weightSemibold
-                font.pixelSize: Typography.h5
+                font.pixelSize: 26
                 color: Colors.textPrimary
                 font.letterSpacing: Typography.letterSpacingTight
             }
         }
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.logoClicked()
+        }
     }
 
+    // ── Right: Status ──────────────────────────────────────────
     RowLayout {
         anchors.right: parent.right
         anchors.rightMargin: Metrics.xl

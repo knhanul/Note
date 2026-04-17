@@ -248,8 +248,11 @@ class NoteService:
         return text[:max_length].rsplit(' ', 1)[0] + '...'
 
     def get_all_tags(self, folder_ids: Optional[List[str]] = None) -> List[Dict[str, Any]]:
-        """Aggregate all tags from notes (optionally restricted to folder_ids).
-        Returns [{name, count}] sorted by name, supporting hierarchical tags.
+        """Aggregate tags and return as a depth-first tree-flattened list.
+
+        Each item: {name (full path), display (leaf label), count (aggregate),
+                    depth (int), has_children (bool)}
+        Virtual parent nodes are inserted for intermediate path segments.
         """
         if folder_ids:
             placeholders = ','.join('?' * len(folder_ids))
@@ -262,17 +265,69 @@ class NoteService:
                 "SELECT tags FROM notes WHERE deleted_at IS NULL"
             )]
 
-        tag_counts: Dict[str, int] = {}
+        # Step 1: collect direct counts per full path
+        direct: Dict[str, int] = {}
         for note in notes:
             for tag in note.get('tags', []):
                 tag = tag.strip()
                 if tag:
-                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
+                    direct[tag] = direct.get(tag, 0) + 1
 
-        return sorted(
-            [{'name': k, 'count': v} for k, v in tag_counts.items()],
-            key=lambda x: x['name'].lower()
+        if not direct:
+            return []
+
+        # Step 2: build node map (includes virtual parents)
+        # node_map[path] = {direct_count, children: set}
+        node_map: Dict[str, Dict] = {}
+
+        for tag, cnt in direct.items():
+            parts = tag.split('/')
+            for i in range(len(parts)):
+                path = '/'.join(parts[:i + 1])
+                if path not in node_map:
+                    node_map[path] = {'direct_count': 0, 'children': set()}
+                if i == len(parts) - 1:
+                    node_map[path]['direct_count'] = cnt
+                if i > 0:
+                    parent = '/'.join(parts[:i])
+                    node_map[parent]['children'].add(path)
+
+        # Step 3: memoised aggregate count
+        _cache: Dict[str, int] = {}
+
+        def aggregate(path: str) -> int:
+            if path in _cache:
+                return _cache[path]
+            total = node_map[path]['direct_count']
+            for child in node_map[path]['children']:
+                total += aggregate(child)
+            _cache[path] = total
+            return total
+
+        # Step 4: DFS flattening (alphabetical at each level)
+        result: List[Dict[str, Any]] = []
+
+        def visit(path: str, depth: int) -> None:
+            node = node_map[path]
+            children = sorted(node['children'], key=str.lower)
+            result.append({
+                'name': path,
+                'display': path.split('/')[-1],
+                'count': aggregate(path),
+                'depth': depth,
+                'has_children': bool(children),
+            })
+            for child in children:
+                visit(child, depth + 1)
+
+        roots = sorted(
+            (p for p in node_map if '/' not in p),
+            key=str.lower
         )
+        for root in roots:
+            visit(root, 0)
+
+        return result
 
     def update_tags(self, note_id: str, tags: List[str]) -> bool:
         """Update the tags list for a note."""

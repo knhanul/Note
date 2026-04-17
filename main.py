@@ -17,7 +17,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtQml import QQmlApplicationEngine, qmlRegisterSingletonType
 from PyQt6.QtCore import QUrl, QObject, pyqtSignal, pyqtProperty, QTimer
-from PyQt6.QtGui import QFontDatabase, QFont
+from PyQt6.QtGui import QFontDatabase, QFont, QIcon
 
 from services.library_service import LibraryService
 from controllers.folder_controller import FolderController
@@ -43,19 +43,48 @@ def setup_fonts(app: QApplication):
     app.setFont(font)
 
 
+def resolve_brand(base_dir: Path) -> dict:
+    """Detect brand from CLI args and return branding config."""
+    args = sys.argv[1:]
+    if "posid" in args:
+        return {
+            "brand":     "posid",
+            "app_name":  "포시드노트",
+            "icon_path": base_dir / "assets" / "images" / "posid" / "posid_logo.ico",
+            "logo_path": str(base_dir / "assets" / "images" / "posid" / "posid_ename.png"),
+        }
+    return {
+        "brand":     "nuni",
+        "app_name":  "누니노트",
+        "icon_path": base_dir / "assets" / "images" / "nuni" / "nuni_ico.ico",
+        "logo_path": str(base_dir / "assets" / "images" / "nuni" / "nuni_logo.png"),
+    }
+
+
 def main():
     """Application entry point."""
     # Enable High DPI scaling
     os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
     os.environ["QT_SCALE_FACTOR_ROUNDING_POLICY"] = "RoundPreferFloor"
-    
-    # WebEngine is initialized automatically when QWebEngineView is created
-    
+    # Use Basic style for customizable ScrollBar
+    os.environ["QT_QUICK_CONTROLS_STYLE"] = "Basic"
+
+    # Determine base directory
+    base_dir = Path(__file__).parent.resolve()
+
+    # Resolve branding
+    branding = resolve_brand(base_dir)
+
     # Create application
     app = QApplication(sys.argv)
-    app.setApplicationName("Nuni Note")
+    app.setApplicationName(branding["app_name"])
     app.setOrganizationName("nuninote")
     app.setApplicationVersion("1.0.0")
+
+    # Set window icon
+    icon_path = branding["icon_path"]
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
     
     # Setup fonts
     setup_fonts(app)
@@ -71,7 +100,7 @@ def main():
     note_controller = NoteController(library_service, folder_controller, engine)
     
     # Get the directory containing this script
-    current_dir = Path(__file__).parent.resolve()
+    current_dir = base_dir
     qml_dir = current_dir / "qml"
     
     # Add import paths for QML modules
@@ -81,6 +110,11 @@ def main():
     engine.rootContext().setContextProperty("libraryService", library_service)
     engine.rootContext().setContextProperty("folderController", folder_controller)
     engine.rootContext().setContextProperty("noteController", note_controller)
+
+    # Branding context
+    engine.rootContext().setContextProperty("appBrand",    branding["brand"])
+    engine.rootContext().setContextProperty("appName",     branding["app_name"])
+    engine.rootContext().setContextProperty("appLogoPath", branding["logo_path"])
     
     # Force context property update
     engine.rootContext().setContextProperty("folderControllerReady", True)

@@ -107,6 +107,18 @@ class FolderService:
         )
         return result['count'] if result else 0
     
+    def has_children(self, folder_id: str) -> bool:
+        """Check if folder has sub-folders."""
+        result = self.db.fetch_one(
+            "SELECT 1 FROM folders WHERE parent_id = ? LIMIT 1",
+            (folder_id,)
+        )
+        return result is not None
+
+    def has_notes(self, folder_id: str) -> bool:
+        """Check if folder has non-deleted notes."""
+        return self.get_note_count(folder_id) > 0
+
     def exists(self, folder_id: str) -> bool:
         """Check if folder exists."""
         result = self.db.fetch_one(
