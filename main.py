@@ -89,14 +89,12 @@ def main():
     main_qml = qml_dir / "Main.qml"
     
     if not main_qml.exists():
-        print(f"Error: Main.qml not found at {main_qml}")
         sys.exit(1)
-    
+
     engine.load(QUrl.fromLocalFile(str(main_qml)))
-    
+
     # Check if loading succeeded
     if not engine.rootObjects():
-        print("Error: Failed to load QML")
         sys.exit(1)
     
     # Run the application

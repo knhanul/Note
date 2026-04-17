@@ -48,8 +48,7 @@ class FolderService:
             )
             self.db.commit()
             return cursor.rowcount > 0
-        except Exception as e:
-            print(f"[FolderService] Create error: {e}")
+        except Exception:
             return False
     
     def update(self, folder_id: str, name: Optional[str] = None, 
@@ -77,8 +76,7 @@ class FolderService:
             cursor = self.db.execute(query, tuple(params))
             self.db.commit()
             return cursor.rowcount > 0
-        except Exception as e:
-            print(f"[FolderService] Update error: {e}")
+        except Exception:
             return False
     
     def delete(self, folder_id: str) -> bool:
@@ -98,8 +96,7 @@ class FolderService:
             )
             self.db.commit()
             return cursor.rowcount > 0
-        except Exception as e:
-            print(f"[FolderService] Delete error: {e}")
+        except Exception:
             return False
     
     def get_note_count(self, folder_id: str) -> int:

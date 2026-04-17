@@ -2,7 +2,8 @@
 from typing import List, Optional, Dict, Any
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtProperty, pyqtSlot, QTimer, QVariant
 from PyQt6.QtGui import QClipboard, QImage
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QCalendarWidget, QVBoxLayout, QPushButton, QDialog, QHBoxLayout
+from datetime import datetime, date
 import uuid
 import re
 import hashlib
@@ -36,42 +37,38 @@ class NoteController(QObject):
         self._folder_controller = folder_controller
         self._library_service = library_service
         
-        print(f"[NoteController] Initializing...")
-        
         # Services will be initialized when library is set
         self._note_service: Optional[NoteService] = None
         self._image_service = ImageService()
-        
+
         # Current state
         self._current_note_id: Optional[str] = None
         self._is_dirty: bool = False
         self._is_saving: bool = False
         self._save_status: str = "saved"  # saved, saving, dirty
-        
+
+        # Sorting and filtering state
+        self._sort_field: str = "updated_at"  # updated_at, created_at, title
+        self._sort_order: str = "desc"        # asc, desc
+        self._search_keyword: str = ""
+        self._filter_from_date: str = ""      # YYYY-MM-DD
+        self._filter_to_date: str = ""        # YYYY-MM-DD
+
         # Auto-save timer (debounce)
         self._auto_save_timer = QTimer(self)
         self._auto_save_timer.setSingleShot(True)
         self._auto_save_timer.timeout.connect(self._perform_auto_save)
-        
+
         # Connect to signals
-        try:
-            self._folder_controller.currentFolderChanged.connect(self._on_folder_changed)
-            self._library_service.currentLibraryChanged.connect(self._on_library_changed)
-            self._folder_controller.libraryChanged.connect(self._on_folder_changed)
-            print(f"[NoteController] Connected to signals")
-        except Exception as e:
-            print(f"[NoteController] Error connecting signals: {e}")
-        
+        self._folder_controller.currentFolderChanged.connect(self._on_folder_changed)
+        self._library_service.currentLibraryChanged.connect(self._on_library_changed)
+        self._folder_controller.libraryChanged.connect(self._on_folder_changed)
+
         # Initialize with current library
-        try:
-            self._on_library_changed()
-            print(f"[NoteController] Initialization complete")
-        except Exception as e:
-            print(f"[NoteController] Error in initial load: {e}")
+        self._on_library_changed()
     
     def _on_library_changed(self):
         """Handle library change - reload notes from new database."""
-        print(f"[NoteController] Library changed, reloading...")
         db = self._library_service.get_current_database()
         if db:
             self._note_service = NoteService(db)
@@ -83,36 +80,8 @@ class NoteController(QObject):
             self._on_folder_changed()  # Reload notes for current folder
             self.libraryChanged.emit()
             self.saveStatusChanged.emit()
-            print(f"[NoteController] Library change handled, notes refreshed")
     
-    def _initialize_default_notes(self):
-        """Initialize with default notes if database is empty."""
-        existing_notes = self._note_service.get_all()
-        if existing_notes:
-            return
-        
-        # Get first folder for default notes
-        folders = self._folder_controller.folders
-        if not folders:
-            return
-        
-        folder_id = folders[0]['id'] if folders else None
-        if not folder_id:
-            return
-        
-        # Create default notes
-        defaults = [
-            ("아침 루틴 정리", "매일 아침 6시에 일어나서 물 한 잔 마시기.\n스트레칭 10분 하고 명상하기."),
-            ("프로젝트 아이디어", "새로운 노트 앱 UI 디자인 컨셉.\niOS 스타일의 부드러움과 금융 앱의 신뢰감을 결합."),
-            ("회의록: 디자인 팀", "GlassCard 컴포넌트 구현 완료.\nSidebarSection 작업 진행중..."),
-        ]
-        
-        for title, content in defaults:
-            note_id = str(uuid.uuid4())[:8]
-            self._note_service.create(note_id, folder_id, title, content)
-        
-        self.notesChanged.emit()
-        self.filteredNotesChanged.emit()
+    # Default notes initialization removed - app starts with empty state
     
     def _on_folder_changed(self):
         """Handle folder change - emit filtered notes changed."""
@@ -136,22 +105,27 @@ class NoteController(QObject):
     def _extract_tokens(self, content: str) -> List[str]:
         return [m.group(1) for m in self._TOKEN_PATTERN.finditer(content or "")]
 
-    def _store_data_urls_and_tokenize(self, note_id: str, content: str) -> str:
-        """Replace data URLs in markdown with note-image:// tokens and persist payloads."""
-        if not content:
-            return content
+    def _store_data_urls_and_tokenize(self, note_id: str,
+                                        content: str,
+                                        content_json: str = "") -> tuple:
+        """Replace data URLs in markdown+json with note-image:// tokens.
 
+        Returns (tokenized_content, tokenized_json).
+        """
         def _replace(match):
-            mime_type = match.group(1)
-            data_base64 = match.group(2).replace("\n", "").replace("\r", "")
-            checksum = hashlib.sha256(f"{mime_type}:{data_base64}".encode("utf-8")).hexdigest()
-            image_id = self._note_service.upsert_note_image(note_id, mime_type, data_base64, checksum)
+            mime_type  = match.group(1)
+            data_b64   = match.group(2).replace("\n", "").replace("\r", "")
+            checksum   = hashlib.sha256(f"{mime_type}:{data_b64}".encode()).hexdigest()
+            image_id   = self._note_service.upsert_note_image(note_id, mime_type, data_b64, checksum)
             return f"note-image://{image_id}"
 
-        tokenized = self._DATA_URL_PATTERN.sub(_replace, content)
-        keep_ids = list(dict.fromkeys(self._extract_tokens(tokenized)))
+        tok_content = self._DATA_URL_PATTERN.sub(_replace, content) if content else content
+        tok_json    = self._DATA_URL_PATTERN.sub(_replace, content_json) if content_json else content_json
+
+        all_ids = self._extract_tokens(tok_content) + self._extract_tokens(tok_json)
+        keep_ids = list(dict.fromkeys(all_ids))
         self._note_service.delete_unused_note_images(note_id, keep_ids)
-        return tokenized
+        return tok_content, tok_json
 
     def _hydrate_image_tokens(self, content: str) -> str:
         """Replace note-image:// tokens with data URLs for editor rendering."""
@@ -159,8 +133,7 @@ class NoteController(QObject):
             return content
 
         def _replace(match):
-            image_id = match.group(1)
-            row = self._note_service.get_note_image(image_id)
+            row = self._note_service.get_note_image(match.group(1))
             if not row:
                 return ""
             return f"data:{row['mime_type']};base64,{row['data_base64']}"
@@ -175,13 +148,16 @@ class NoteController(QObject):
     
     @pyqtProperty(list, notify=filteredNotesChanged)
     def filteredNotes(self):
-        """Get notes filtered by current folder."""
+        """Get notes filtered by current folder with sorting and search."""
         current_folder_id = self._folder_controller.currentFolderId
         if current_folder_id == self.SMART_ALL:
-            return self._note_service.get_all()
-        if current_folder_id == self.SMART_FAVORITES:
-            return self._note_service.get_pinned(ensure_note_id=self._current_note_id)
-        return self._note_service.get_all(folder_id=current_folder_id or None)
+            notes = self._note_service.get_all()
+        elif current_folder_id == self.SMART_FAVORITES:
+            notes = self._note_service.get_pinned(ensure_note_id=self._current_note_id)
+        else:
+            notes = self._note_service.get_all(folder_id=current_folder_id or None)
+
+        return self._apply_sort_and_filter(notes)
     
     @pyqtProperty(str, notify=filteredNotesChanged)
     def currentFolderName(self) -> str:
@@ -207,6 +183,147 @@ class NoteController(QObject):
     def isSaving(self) -> bool:
         """Check if currently saving."""
         return self._is_saving
+
+    # Sorting and filtering properties
+    @pyqtProperty(str, notify=filteredNotesChanged)
+    def sortField(self) -> str:
+        """Get current sort field."""
+        return self._sort_field
+
+    @pyqtProperty(str, notify=filteredNotesChanged)
+    def sortOrder(self) -> str:
+        """Get current sort order."""
+        return self._sort_order
+
+    @pyqtProperty(str, notify=filteredNotesChanged)
+    def searchKeyword(self) -> str:
+        """Get current search keyword."""
+        return self._search_keyword
+
+    @pyqtSlot()
+    def toggleSortOrder(self):
+        """Toggle between asc and desc order."""
+        self._sort_order = "asc" if self._sort_order == "desc" else "desc"
+        self.filteredNotesChanged.emit()
+
+    @pyqtSlot(str)
+    def setSearchKeyword(self, keyword: str):
+        """Set search keyword and refresh notes."""
+        self._search_keyword = keyword.strip()
+        self.filteredNotesChanged.emit()
+
+    @pyqtProperty(str, notify=filteredNotesChanged)
+    def filterFromDate(self) -> str:
+        """Get from-date filter (YYYY-MM-DD)."""
+        return self._filter_from_date
+
+    @pyqtProperty(str, notify=filteredNotesChanged)
+    def filterToDate(self) -> str:
+        """Get to-date filter (YYYY-MM-DD)."""
+        return self._filter_to_date
+
+    @pyqtProperty(bool, notify=filteredNotesChanged)
+    def isFilterActive(self) -> bool:
+        """Check if any filter condition is active."""
+        return (self._search_keyword != "" or
+                self._filter_from_date != "" or
+                self._filter_to_date != "")
+
+    @pyqtSlot(str)
+    def setFilterFromDate(self, date: str):
+        """Set start date filter (YYYY-MM-DD)."""
+        self._filter_from_date = date.strip()
+        self.filteredNotesChanged.emit()
+
+    @pyqtSlot(str)
+    def setFilterToDate(self, date: str):
+        """Set end date filter (YYYY-MM-DD)."""
+        self._filter_to_date = date.strip()
+        self.filteredNotesChanged.emit()
+
+    @pyqtSlot(str, result=str)
+    def showCalendarDialog(self, currentDate: str = "") -> str:
+        """Show calendar dialog and return selected date (YYYY-MM-DD)."""
+        dialog = QDialog()
+        dialog.setWindowTitle("날짜 선택")
+        dialog.setMinimumWidth(280)
+        dialog.setMinimumHeight(320)
+
+        layout = QVBoxLayout()
+        dialog.setLayout(layout)
+
+        calendar = QCalendarWidget()
+        if currentDate:
+            try:
+                d = datetime.strptime(currentDate, "%Y-%m-%d").date()
+                calendar.setSelectedDate(d)
+            except:
+                pass
+        layout.addWidget(calendar)
+
+        result = {"date": ""}
+
+        def onSelect():
+            selected = calendar.selectedDate().toPyDate()
+            result["date"] = selected.strftime("%Y-%m-%d")
+            dialog.close()
+
+        def onCancel():
+            dialog.close()
+
+        btnLayout = QHBoxLayout()
+        selectBtn = QPushButton("선택")
+        selectBtn.clicked.connect(onSelect)
+        cancelBtn = QPushButton("취소")
+        cancelBtn.clicked.connect(onCancel)
+        btnLayout.addStretch()
+        btnLayout.addWidget(cancelBtn)
+        btnLayout.addWidget(selectBtn)
+        layout.addLayout(btnLayout)
+
+        dialog.exec()
+        return result["date"]
+
+    @pyqtSlot(str)
+    def setSortField(self, field: str):
+        """Set sort field, reset date filters when switching to title or content."""
+        if field in ("updated_at", "created_at", "title", "content"):
+            if field in ("title", "content"):
+                self._filter_from_date = ""
+                self._filter_to_date = ""
+            self._sort_field = field
+            self.filteredNotesChanged.emit()
+
+    def _apply_sort_and_filter(self, notes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Apply search filter and sorting to notes list."""
+        # Filter by search keyword (title + content)
+        if self._search_keyword:
+            keyword_lower = self._search_keyword.lower()
+            notes = [
+                n for n in notes
+                if keyword_lower in (n.get("title") or "").lower()
+                or keyword_lower in (n.get("content") or "").lower()
+            ]
+
+        # Filter by date range (only when sort field is date-based)
+        if self._sort_field in ("created_at", "updated_at"):
+            field = self._sort_field
+            if self._filter_from_date:
+                notes = [n for n in notes if (n.get(field) or "")[:10] >= self._filter_from_date]
+            if self._filter_to_date:
+                notes = [n for n in notes if (n.get(field) or "")[:10] <= self._filter_to_date]
+
+        # Sort notes
+        reverse = self._sort_order == "desc"
+        if self._sort_field == "title":
+            notes = sorted(notes, key=lambda n: (n.get("title") or "").lower(), reverse=reverse)
+        elif self._sort_field == "content":
+            # Sort by content length (longer first if desc)
+            notes = sorted(notes, key=lambda n: len(n.get("content") or ""), reverse=reverse)
+        else:
+            notes = sorted(notes, key=lambda n: n.get(self._sort_field) or "", reverse=reverse)
+
+        return notes
     
     # Slots
     @pyqtSlot(str, str, str, result=str)
@@ -225,9 +342,9 @@ class NoteController(QObject):
         
         note_id = str(uuid.uuid4())[:8]
         
-        initial_content = self._store_data_urls_and_tokenize(note_id, content)
+        tok_content, tok_json = self._store_data_urls_and_tokenize(note_id, content)
 
-        if self._note_service.create(note_id, folder_id, title, initial_content):
+        if self._note_service.create(note_id, folder_id, title, tok_content):
             self._current_note_id = note_id
             self._is_dirty = False
             self._save_status = "saved"
@@ -257,14 +374,19 @@ class NoteController(QObject):
     
     @pyqtSlot(str, str, str, result=bool)
     def updateNote(self, note_id: str, title: str, content: str) -> bool:
-        """Update note title and content."""
+        """Update note title and content (Markdown only, backward-compatible)."""
+        return self.updateNoteWithJson(note_id, title, content, "")
+
+    @pyqtSlot(str, str, str, str, result=bool)
+    def updateNoteWithJson(self, note_id: str, title: str, content: str, content_json: str) -> bool:
+        """Update note with both Markdown and TipTap JSON content."""
         if not note_id:
             return False
-        
-        tokenized_content = self._store_data_urls_and_tokenize(note_id, content)
 
-        # Perform immediate update to database
-        if self._note_service.update(note_id, title=title, content=tokenized_content):
+        tok_content, tok_json = self._store_data_urls_and_tokenize(note_id, content, content_json)
+
+        if self._note_service.update(note_id, title=title, content=tok_content,
+                                      content_json=tok_json if tok_json else None):
             self._current_note_id = note_id
             self._is_dirty = True
             self._save_status = "dirty"
@@ -302,48 +424,42 @@ class NoteController(QObject):
     
     @pyqtSlot(str, result=QVariant)
     def getNote(self, note_id: str) -> QVariant:
-        """Get a single note by ID."""
+        """Get a single note by ID, with image tokens hydrated in both formats."""
         note = self._note_service.get_by_id(note_id)
         if note:
-            note['content'] = self._hydrate_image_tokens(note.get('content', ''))
+            note['content']      = self._hydrate_image_tokens(note.get('content', ''))
+            note['content_json'] = self._hydrate_image_tokens(note.get('content_json', '') or '')
             return QVariant(note)
         return QVariant()
     
     @pyqtSlot(str, result=bool)
     def selectNote(self, note_id: str) -> bool:
         """Select a note (set as current)."""
-        print(f"[NoteController] selectNote called: {note_id}, current={self._current_note_id}")
         # Save current note if dirty before switching
         if self._is_dirty and self._current_note_id and self._current_note_id != note_id:
             self.saveCurrentNote()
-        
+
         note = self._note_service.get_by_id(note_id)
         if note:
             self._current_note_id = note_id
             self._is_dirty = False
             self._save_status = "saved"
-            print(f"[NoteController] Note selected: {note_id}")
             self.notesChanged.emit()
             self.saveStatusChanged.emit()
             return True
-        print(f"[NoteController] Note not found: {note_id}")
         return False
     
     @pyqtSlot(str, result=bool)
     def togglePinned(self, note_id: str) -> bool:
         """Toggle pinned status for a note."""
-        print(f"[NoteController] togglePinned called for note_id: {note_id}")
         note = self._note_service.get_by_id(note_id)
         if not note:
-            print(f"[NoteController] Note not found: {note_id}")
             return False
-        
+
         current_pinned = note.get('is_pinned', 0) == 1
         new_pinned = not current_pinned
-        print(f"[NoteController] Toggling pinned: {note_id} from {current_pinned} to {new_pinned}")
-        
+
         if self._note_service.set_pinned(note_id, new_pinned):
-            print(f"[NoteController] Pinned status updated, emitting signals")
             self.notesChanged.emit()
             self.filteredNotesChanged.emit()
             return True
@@ -353,11 +469,9 @@ class NoteController(QObject):
     def isNotePinned(self, note_id: str) -> bool:
         """Check if a note is pinned."""
         note = self._note_service.get_by_id(note_id)
-        result = False
         if note:
-            result = note.get('is_pinned', 0) == 1
-        print(f"[NoteController] isNotePinned({note_id}) = {result}")
-        return result
+            return note.get('is_pinned', 0) == 1
+        return False
     
     @pyqtSlot(str, result=int)
     def getNoteCountForFolder(self, folder_id: str) -> int:

@@ -111,7 +111,13 @@ class Database:
         cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_note_images_note_checksum ON note_images (note_id, checksum)")
         
         conn.commit()
-        print(f"[Database] Schema initialized at {self.db_path}")
+
+        # Migration: add content_json column if not present
+        try:
+            cursor.execute("ALTER TABLE notes ADD COLUMN content_json TEXT DEFAULT NULL")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # Column already exists
     
     def execute(self, query: str, parameters: tuple = ()) -> sqlite3.Cursor:
         """Execute a SQL query."""

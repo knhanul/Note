@@ -143,8 +143,8 @@ class LibraryService(QObject):
             db_path = Path(library['db_path'])
             if db_path.exists():
                 db_path.unlink()
-        except Exception as e:
-            print(f"[LibraryService] Error deleting DB file: {e}")
+        except Exception:
+            pass
         
         # If this was the current library, switch to another one
         if self._current_library_id == library_id:
@@ -229,7 +229,6 @@ class LibraryService(QObject):
         self._current_db.init_schema()
         self._current_library_id = library_id
         
-        print(f"[LibraryService] Switched to library: {library['name']} ({library_id})")
         self.currentLibraryChanged.emit()
         return True
     

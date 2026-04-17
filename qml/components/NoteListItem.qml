@@ -7,7 +7,9 @@ Item {
 
     property string title: "Untitled Note"
     property string preview: ""
-    property string date: ""
+    property string date: ""           // deprecated: use updatedDate
+    property string createdDate: ""
+    property string updatedDate: ""
     property var tags: []
     property bool isSelected: false
     property bool isHovered: false
@@ -16,114 +18,60 @@ Item {
     signal clicked()
     signal pinClicked()
 
-    height: 88
+    height: 56
     Layout.fillWidth: true
 
     GlassCard {
         id: card
         anchors.fill: parent
-        anchors.margins: Metrics.xs
+        anchors.margins: 2
         hovered: root.isHovered
         selected: root.isSelected
         radius: Metrics.radiusXl
 
-        ColumnLayout {
+        RowLayout {
             anchors.fill: parent
-            anchors.margins: Metrics.lg
-            spacing: Metrics.xs
+            anchors.margins: Metrics.sm
+            spacing: Metrics.sm
 
-            RowLayout {
+            ColumnLayout {
                 Layout.fillWidth: true
-                spacing: Metrics.sm
+                spacing: 2
 
+                // Title
                 Text {
                     Layout.fillWidth: true
                     text: root.title
                     font.family: Typography.fontPrimary
                     font.weight: root.isSelected ? Typography.weightSemibold : Typography.weightMedium
-                    font.pixelSize: Typography.bodyRegular
+                    font.pixelSize: 13
                     color: root.isSelected ? Colors.textInverse : Colors.textPrimary
                     elide: Text.ElideRight
                     maximumLineCount: 1
                 }
 
-                // Spacer for star button (star button is at root level)
-                Item {
-                    width: 24
-                    height: 24
-                }
-            }
-
-            Text {
-                Layout.fillWidth: true
-                text: root.preview || ""
-                font.family: Typography.fontPrimary
-                font.weight: Typography.weightRegular
-                font.pixelSize: Typography.bodySmall
-                color: root.isSelected ? Qt.rgba(1, 1, 1, 0.85) : Colors.textSecondary
-                elide: Text.ElideRight
-                maximumLineCount: 2
-                lineHeight: Typography.lineHeightNormal
-                visible: root.preview !== ""
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: Metrics.sm
-
+                // Dates row
                 Text {
-                    text: root.date
+                    text: {
+                        var c = root.createdDate || ""
+                        var u = root.updatedDate || root.date || ""
+                        var result = ""
+                        if (c) result += "생성: " + c
+                        if (c && u) result += "  |  "
+                        if (u) result += "수정: " + u
+                        return result
+                    }
                     font.family: Typography.fontPrimary
                     font.weight: Typography.weightRegular
-                    font.pixelSize: Typography.caption
+                    font.pixelSize: 11
                     color: root.isSelected ? Qt.rgba(1, 1, 1, 0.7) : Colors.textTertiary
                 }
+            }
 
-                Item { Layout.fillWidth: true }
-
-                Row {
-                    spacing: Metrics.xs
-                    visible: root.tags.length > 0
-
-                    Repeater {
-                        model: Math.min(root.tags.length, 2)
-
-                        delegate: Rectangle {
-                            height: 16
-                            width: tagText.width + 8
-                            radius: Metrics.radiusSm
-                            color: root.isSelected ? Qt.rgba(1, 1, 1, 0.25) : Colors.primary100
-
-                            Text {
-                                id: tagText
-                                anchors.centerIn: parent
-                                text: root.tags[index]
-                                font.family: Typography.fontPrimary
-                                font.weight: Typography.weightMedium
-                                font.pixelSize: 9
-                                color: root.isSelected ? Colors.textInverse : Colors.primary600
-                            }
-                        }
-                    }
-
-                    Rectangle {
-                        visible: root.tags.length > 2
-                        height: 16
-                        width: moreText.width + 8
-                        radius: Metrics.radiusSm
-                        color: root.isSelected ? Qt.rgba(1, 1, 1, 0.25) : Colors.bgTertiary
-
-                        Text {
-                            id: moreText
-                            anchors.centerIn: parent
-                            text: "+" + (root.tags.length - 2)
-                            font.family: Typography.fontPrimary
-                            font.weight: Typography.weightMedium
-                            font.pixelSize: 9
-                            color: root.isSelected ? Colors.textInverse : Colors.textTertiary
-                        }
-                    }
-                }
+            // Spacer for star button
+            Item {
+                width: 20
+                height: 20
             }
         }
     }
@@ -141,9 +89,9 @@ Item {
     Rectangle {
         anchors.top: parent.top
         anchors.right: parent.right
-        anchors.margins: Metrics.lg + Metrics.sm
-        width: 24
-        height: 24
+        anchors.margins: Metrics.md
+        width: 20
+        height: 20
         radius: Metrics.radiusFull
         color: root.isSelected ? Qt.rgba(1, 1, 1, 0.2) : (root.isPinned ? Colors.accentOrangeLight : Colors.bgTertiary)
         z: 10
@@ -151,7 +99,7 @@ Item {
         Text {
             anchors.centerIn: parent
             text: root.isPinned ? "★" : "☆"
-            font.pixelSize: 14
+            font.pixelSize: 12
             color: root.isPinned ? Colors.accentOrange : (root.isSelected ? Colors.textInverse : Colors.textTertiary)
         }
 

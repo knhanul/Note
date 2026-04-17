@@ -19,19 +19,77 @@ Window {
     // Properties for note selection
     property string selectedNoteId: ""
     property var currentNote: null
+    property var openTabs: []   // [{id, title}, ...]
+    property bool editorFocused: false
+    property real editorZoom: 1.0
+
+    onEditorFocusedChanged: {
+        if (editorFocused) {
+            sidebar.Layout.preferredWidth = 0
+            noteList.Layout.preferredWidth = 0
+        } else {
+            sidebar.Layout.preferredWidth = Metrics.sidebarWidth
+            noteList.Layout.preferredWidth = Metrics.noteListWidth
+        }
+    }
+
+    function addOrActivateTab(noteId, noteTitle) {
+        for (var i = 0; i < openTabs.length; i++) {
+            if (openTabs[i].id === noteId) return
+        }
+        var t = openTabs.slice()
+        t.push({ id: noteId, title: noteTitle || "제목 없음" })
+        openTabs = t
+    }
+
+    function updateTabTitle(noteId, title) {
+        if (!title) return
+        for (var i = 0; i < openTabs.length; i++) {
+            if (openTabs[i].id === noteId) {
+                var t = openTabs.slice()
+                t[i] = { id: noteId, title: title }
+                openTabs = t
+                return
+            }
+        }
+    }
+
+    function closeTab(noteId) {
+        var idx = -1
+        for (var i = 0; i < openTabs.length; i++) {
+            if (openTabs[i].id === noteId) { idx = i; break }
+        }
+        if (idx < 0) return
+        var t = openTabs.slice()
+        t.splice(idx, 1)
+        openTabs = t
+        if (noteId === selectedNoteId) {
+            if (t.length === 0) {
+                selectedNoteId = ""
+            } else {
+                var next = t[Math.min(idx, t.length - 1)]
+                selectedNoteId = next.id
+                if (noteController) noteController.selectNote(next.id)
+            }
+        }
+    }
+
+    onCurrentNoteChanged: {
+        if (currentNote && selectedNoteId) {
+            updateTabTitle(selectedNoteId, currentNote.title || "제목 없음")
+        }
+    }
     
     // Library change handling - force refresh
     Connections {
         target: folderController
         function onLibraryChanged() {
-            console.log("[QML] Library changed, refreshing folders...")
-            // Force folders ListView to refresh
             foldersListView.model = null
             foldersListView.model = folderController ? folderController.folders : []
+            window.openTabs = []
+            window.selectedNoteId = ""
         }
         function onFoldersChanged() {
-            console.log("[QML] Folders changed, refreshing list...")
-            // Refresh folders ListView when folders are created/deleted/renamed
             foldersListView.model = null
             foldersListView.model = folderController ? folderController.folders : []
         }
@@ -40,42 +98,35 @@ Window {
     Connections {
         target: noteController
         function onLibraryChanged() {
-            console.log("[QML] Library changed, refreshing notes...")
-            // Force notes ListView to refresh
             notesListView.model = null
             notesListView.model = noteController ? noteController.filteredNotes : []
-            // Clear selection
             window.selectedNoteId = ""
         }
         function onFilteredNotesChanged() {
-            console.log("[QML] Filtered notes changed, selection=" + window.selectedNoteId)
-            // Don't clear selection when folder changes
-            // The ListView will refresh but keep the selection
+            // ListView will refresh but keep the selection
         }
     }
 
     Connections {
         target: libraryService
         function onLibrariesChanged() {
-            console.log("[QML] Libraries list changed, refreshing dropdown...")
-            // Force library dropdown Repeater to refresh with new data
             if (libraryRepeater && libraryService) {
                 libraryRepeater.model = libraryService.getAllLibraries()
             }
         }
         function onLibraryAdded(libraryId) {
-            console.log("[QML] Library added:", libraryId, "- refreshing list...")
-            // Refresh the repeater model when a new library is added
             if (libraryRepeater && libraryService) {
                 libraryRepeater.model = libraryService.getAllLibraries()
             }
         }
     }
     
-    // Load note data when selection changes
+    // Load note data when selection changes + update tabs
     onSelectedNoteIdChanged: {
         if (selectedNoteId && noteController) {
             currentNote = noteController.getNote(selectedNoteId)
+            var title = currentNote ? (currentNote.title || "제목 없음") : "제목 없음"
+            addOrActivateTab(selectedNoteId, title)
         } else {
             currentNote = null
         }
@@ -91,9 +142,11 @@ Window {
             sidebarHidden: sidebar.Layout.preferredWidth === 0
             noteListHidden: noteList.Layout.preferredWidth === 0
             onToggleSidebar: {
+                window.editorFocused = false
                 sidebar.Layout.preferredWidth = (sidebar.Layout.preferredWidth === 0) ? Metrics.sidebarWidth : 0
             }
             onToggleNoteList: {
+                window.editorFocused = false
                 noteList.Layout.preferredWidth = (noteList.Layout.preferredWidth === 0) ? Metrics.noteListWidth : 0
             }
         }
@@ -101,7 +154,7 @@ Window {
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: Metrics.lg
+            spacing: Metrics.xs
 
             Rectangle {
                 id: sidebar
@@ -133,13 +186,14 @@ Window {
                     anchors.fill: parent
                     anchors.margins: Metrics.md
                     anchors.leftMargin: Metrics.lg
+                    anchors.rightMargin: 0
                     radius: Metrics.radiusXxl
                     baseOpacity: 0.9
 
                     ColumnLayout {
                         anchors.fill: parent
-                        anchors.margins: Metrics.cardPadding
-                        spacing: Metrics.lg
+                        anchors.margins: Metrics.sm
+                        spacing: Metrics.sm
 
                         // Library Selector
                         ColumnLayout {
@@ -415,8 +469,8 @@ Window {
                         // Header for Folders section with Add button
                         RowLayout {
                             Layout.fillWidth: true
-                            Layout.leftMargin: Metrics.lg
-                            Layout.rightMargin: Metrics.lg
+                            Layout.leftMargin: Metrics.xs
+                            Layout.rightMargin: Metrics.xs
                             z: 2100
 
                             Text {
@@ -764,8 +818,6 @@ Window {
                             }
                         }
 
-                        Item { Layout.preferredHeight: Metrics.sm }
-
                         Rectangle {
                             Layout.fillWidth: true
                             height: 80
@@ -801,14 +853,15 @@ Window {
                 GlassCard {
                     anchors.fill: parent
                     anchors.margins: Metrics.md
-                    anchors.rightMargin: Metrics.sm
+                    anchors.leftMargin: 0
+                    anchors.rightMargin: 0
                     radius: Metrics.radiusXxl
                     baseOpacity: 0.9
 
                     ColumnLayout {
                         anchors.fill: parent
-                        anchors.margins: Metrics.cardPadding
-                        spacing: Metrics.md
+                        anchors.margins: Metrics.sm
+                        spacing: Metrics.sm
 
                         RowLayout {
                             Layout.fillWidth: true
@@ -871,14 +924,435 @@ Window {
                             }
                         }
 
+                        // Sort & Filter bar
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: Metrics.xs
+
+                            // Row 1: Sort controls + filter toggle icon
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: Metrics.sm
+
+                                // Sort field buttons (disabled when filter active)
+                                Rectangle {
+                                    Layout.preferredWidth: 200
+                                    Layout.preferredHeight: 28
+                                    radius: Metrics.radiusMd
+                                    color: noteController && noteController.isFilterActive ? Colors.bgTertiary : Colors.bgSecondary
+                                    border.color: Colors.borderLight
+                                    border.width: 1
+                                    opacity: noteController && noteController.isFilterActive ? 0.5 : 1.0
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.margins: 2
+                                        spacing: 2
+
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            Layout.fillHeight: true
+                                            radius: Metrics.radiusSm
+                                            color: noteController && noteController.sortField === "updated_at" && !(noteController && noteController.isFilterActive) ? Colors.primary500 : "transparent"
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: "수정일"
+                                                font.family: Typography.fontPrimary
+                                                font.pixelSize: 11
+                                                color: noteController && noteController.sortField === "updated_at" && !(noteController && noteController.isFilterActive) ? "white" : Colors.textTertiary
+                                            }
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                onClicked: if (noteController && !noteController.isFilterActive) noteController.setSortField("updated_at")
+                                            }
+                                        }
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            Layout.fillHeight: true
+                                            radius: Metrics.radiusSm
+                                            color: noteController && noteController.sortField === "created_at" && !(noteController && noteController.isFilterActive) ? Colors.primary500 : "transparent"
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: "생성일"
+                                                font.family: Typography.fontPrimary
+                                                font.pixelSize: 11
+                                                color: noteController && noteController.sortField === "created_at" && !(noteController && noteController.isFilterActive) ? "white" : Colors.textTertiary
+                                            }
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                onClicked: if (noteController && !noteController.isFilterActive) noteController.setSortField("created_at")
+                                            }
+                                        }
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            Layout.fillHeight: true
+                                            radius: Metrics.radiusSm
+                                            color: noteController && noteController.sortField === "title" && !(noteController && noteController.isFilterActive) ? Colors.primary500 : "transparent"
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: "제목"
+                                                font.family: Typography.fontPrimary
+                                                font.pixelSize: 11
+                                                color: noteController && noteController.sortField === "title" && !(noteController && noteController.isFilterActive) ? "white" : Colors.textTertiary
+                                            }
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                onClicked: if (noteController && !noteController.isFilterActive) noteController.setSortField("title")
+                                            }
+                                        }
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            Layout.fillHeight: true
+                                            radius: Metrics.radiusSm
+                                            color: noteController && noteController.sortField === "content" && !(noteController && noteController.isFilterActive) ? Colors.primary500 : "transparent"
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: "내용"
+                                                font.family: Typography.fontPrimary
+                                                font.pixelSize: 11
+                                                color: noteController && noteController.sortField === "content" && !(noteController && noteController.isFilterActive) ? "white" : Colors.textTertiary
+                                            }
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                onClicked: if (noteController && !noteController.isFilterActive) noteController.setSortField("content")
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Sort order toggle (disabled when filter active)
+                                Rectangle {
+                                    Layout.preferredWidth: 28
+                                    Layout.preferredHeight: 28
+                                    radius: Metrics.radiusMd
+                                    color: noteController && noteController.isFilterActive ? Colors.bgTertiary : (orderMouseArea.containsMouse ? Colors.primary100 : Colors.bgSecondary)
+                                    border.color: Colors.borderLight
+                                    border.width: 1
+                                    opacity: noteController && noteController.isFilterActive ? 0.5 : 1.0
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: noteController && noteController.sortOrder === "asc" ? "▲" : "▼"
+                                        font.pixelSize: 10
+                                        color: noteController && noteController.isFilterActive ? Colors.textTertiary : Colors.textSecondary
+                                    }
+
+                                    MouseArea {
+                                        id: orderMouseArea
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        enabled: !(noteController && noteController.isFilterActive)
+                                        onClicked: if (noteController) noteController.toggleSortOrder()
+                                    }
+                                }
+
+                                Item { Layout.fillWidth: true }
+
+                                // Filter toggle button
+                                Rectangle {
+                                    Layout.preferredWidth: 28
+                                    Layout.preferredHeight: 28
+                                    radius: Metrics.radiusMd
+                                    color: filterPanelVisible
+                                        ? (noteController && noteController.searchKeyword !== "" ? Colors.primary500 : Colors.primary100)
+                                        : (filterIconArea.containsMouse ? Colors.bgTertiary : "transparent")
+                                    border.color: filterPanelVisible ? Colors.primary300 : Colors.borderLight
+                                    border.width: 1
+
+                                    property bool filterPanelVisible: false
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "⌕"
+                                        font.pixelSize: 16
+                                        color: parent.filterPanelVisible
+                                            ? (noteController && noteController.searchKeyword !== "" ? "white" : Colors.primary600)
+                                            : (filterIconArea.containsMouse ? Colors.textSecondary : Colors.textTertiary)
+                                    }
+
+                                    MouseArea {
+                                        id: filterIconArea
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        onClicked: {
+                                            parent.filterPanelVisible = !parent.filterPanelVisible
+                                            if (!parent.filterPanelVisible && noteController) {
+                                                noteController.setSearchKeyword("")
+                                                searchField.text = ""
+                                            } else if (parent.filterPanelVisible) {
+                                                searchField.forceActiveFocus()
+                                            }
+                                        }
+                                    }
+
+                                    id: filterToggleBtn
+                                }
+                            }
+
+                            // Row 2: Filter panel (collapsible)
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: Metrics.xs
+                                visible: filterToggleBtn.filterPanelVisible
+
+                                // Text search row (always shown in filter panel)
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 28
+                                    radius: Metrics.radiusMd
+                                    color: Colors.bgSecondary
+                                    border.color: searchField.activeFocus ? Colors.primary300 : Colors.borderLight
+                                    border.width: 1
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.margins: 4
+                                        spacing: Metrics.xs
+
+                                        Text {
+                                            text: "⌕"
+                                            font.pixelSize: 13
+                                            color: Colors.textTertiary
+                                        }
+
+                                        TextInput {
+                                            id: searchField
+                                            Layout.fillWidth: true
+                                            verticalAlignment: TextInput.AlignVCenter
+                                            font.family: Typography.fontPrimary
+                                            font.pixelSize: Typography.caption
+                                            color: Colors.textPrimary
+                                            clip: true
+                                            onTextChanged: {
+                                                if (noteController) noteController.setSearchKeyword(text)
+                                            }
+
+                                            Text {
+                                                anchors.fill: parent
+                                                verticalAlignment: Text.AlignVCenter
+                                                text: "제목 또는 내용 검색..."
+                                                font.family: Typography.fontPrimary
+                                                font.pixelSize: Typography.caption
+                                                color: Colors.textTertiary
+                                                visible: parent.text === "" && !parent.activeFocus
+                                            }
+                                        }
+
+                                        Text {
+                                            text: "✕"
+                                            font.pixelSize: 11
+                                            color: Colors.textTertiary
+                                            visible: searchField.text !== ""
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                onClicked: {
+                                                    searchField.text = ""
+                                                    if (noteController) noteController.setSearchKeyword("")
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Date range row (shown only when sort field is created_at or updated_at)
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: Metrics.xs
+                                    visible: noteController && (noteController.sortField === "created_at" || noteController.sortField === "updated_at")
+
+                                    Text {
+                                        text: noteController && noteController.sortField === "created_at" ? "생성일" : "수정일"
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
+                                        color: Colors.textTertiary
+                                        Layout.preferredWidth: 30
+                                    }
+
+                                    // From date input with calendar button
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: Metrics.xs
+
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: 28
+                                            radius: Metrics.radiusMd
+                                            color: Colors.bgSecondary
+                                            border.color: fromDateField.activeFocus ? Colors.primary300 : Colors.borderLight
+                                            border.width: 1
+
+                                            TextInput {
+                                                id: fromDateField
+                                                anchors.fill: parent
+                                                anchors.margins: 4
+                                                anchors.leftMargin: 8
+                                                verticalAlignment: TextInput.AlignVCenter
+                                                font.family: Typography.fontPrimary
+                                                font.pixelSize: Typography.caption
+                                                color: Colors.textPrimary
+                                                clip: true
+                                                inputMethodHints: Qt.ImhDigitsOnly
+                                                maximumLength: 10
+                                                onTextChanged: {
+                                                    if (noteController && (text.length === 0 || text.length === 10))
+                                                        noteController.setFilterFromDate(text)
+                                                }
+
+                                                Text {
+                                                    anchors.fill: parent
+                                                    verticalAlignment: Text.AlignVCenter
+                                                    text: "시작일 YYYY-MM-DD"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.caption
+                                                    color: Colors.textTertiary
+                                                    visible: parent.text === "" && !parent.activeFocus
+                                                }
+                                            }
+                                        }
+
+                                        // Calendar button for from date
+                                        Rectangle {
+                                            Layout.preferredWidth: 26
+                                            Layout.preferredHeight: 28
+                                            radius: Metrics.radiusMd
+                                            color: fromCalBtnArea.containsMouse ? Colors.primary100 : Colors.bgSecondary
+                                            border.color: Colors.borderLight
+                                            border.width: 1
+
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: "📅"
+                                                font.pixelSize: 12
+                                            }
+
+                                            MouseArea {
+                                                id: fromCalBtnArea
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                onClicked: {
+                                                    if (noteController) {
+                                                        var selected = noteController.showCalendarDialog(fromDateField.text)
+                                                        if (selected !== "") {
+                                                            fromDateField.text = selected
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        text: "~"
+                                        font.pixelSize: Typography.caption
+                                        color: Colors.textTertiary
+                                    }
+
+                                    // To date input with calendar button
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: Metrics.xs
+
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: 28
+                                            radius: Metrics.radiusMd
+                                            color: Colors.bgSecondary
+                                            border.color: toDateField.activeFocus ? Colors.primary300 : Colors.borderLight
+                                            border.width: 1
+
+                                            TextInput {
+                                                id: toDateField
+                                                anchors.fill: parent
+                                                anchors.margins: 4
+                                                anchors.leftMargin: 8
+                                                verticalAlignment: TextInput.AlignVCenter
+                                                font.family: Typography.fontPrimary
+                                                font.pixelSize: Typography.caption
+                                                color: Colors.textPrimary
+                                                clip: true
+                                                inputMethodHints: Qt.ImhDigitsOnly
+                                                maximumLength: 10
+                                                onTextChanged: {
+                                                    if (noteController && (text.length === 0 || text.length === 10))
+                                                        noteController.setFilterToDate(text)
+                                                }
+
+                                                Text {
+                                                    anchors.fill: parent
+                                                    verticalAlignment: Text.AlignVCenter
+                                                    text: "종료일 YYYY-MM-DD"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.caption
+                                                    color: Colors.textTertiary
+                                                    visible: parent.text === "" && !parent.activeFocus
+                                                }
+                                            }
+                                        }
+
+                                        // Calendar button for to date
+                                        Rectangle {
+                                            Layout.preferredWidth: 26
+                                            Layout.preferredHeight: 28
+                                            radius: Metrics.radiusMd
+                                            color: toCalBtnArea.containsMouse ? Colors.primary100 : Colors.bgSecondary
+                                            border.color: Colors.borderLight
+                                            border.width: 1
+
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: "📅"
+                                                font.pixelSize: 12
+                                            }
+
+                                            MouseArea {
+                                                id: toCalBtnArea
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                onClicked: {
+                                                    if (noteController) {
+                                                        var selected = noteController.showCalendarDialog(toDateField.text)
+                                                        if (selected !== "") {
+                                                            toDateField.text = selected
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Clear date range
+                                    Text {
+                                        text: "✕"
+                                        font.pixelSize: 11
+                                        color: Colors.textTertiary
+                                        visible: fromDateField.text !== "" || toDateField.text !== ""
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            onClicked: {
+                                                fromDateField.text = ""
+                                                toDateField.text = ""
+                                                if (noteController) {
+                                                    noteController.setFilterFromDate("")
+                                                    noteController.setFilterToDate("")
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         // Notes list from controller - filtered by current folder
                         ListView {
                             id: notesListView
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            spacing: Metrics.sm
+                            spacing: Metrics.xs
                             clip: true
                             reuseItems: false  // Prevent delegate recycling issues
+                            ScrollBar.vertical: ScrollBar {
+                                policy: ScrollBar.AsNeeded
+                            }
 
                             // Use filtered notes from noteController
                             model: noteController ? noteController.filteredNotes : []
@@ -906,7 +1380,8 @@ Window {
 
                                 title: modelRef ? modelRef.title || "" : ""
                                 preview: modelRef && modelRef.content ? (modelRef.content.substring(0, 80) + (modelRef.content.length > 80 ? "..." : "")) : ""
-                                date: modelRef && modelRef.updated_at ? noteController.formatDate(modelRef.updated_at) : ""
+                                createdDate: modelRef && modelRef.created_at ? noteController.formatDate(modelRef.created_at) : ""
+                                updatedDate: modelRef && modelRef.updated_at ? noteController.formatDate(modelRef.updated_at) : ""
                                 tags: modelRef && modelRef.tags ? modelRef.tags : []
                                 isPinned: noteItem.pinState
                                 isSelected: {
@@ -989,14 +1464,290 @@ Window {
                 GlassCard {
                     anchors.fill: parent
                     anchors.margins: Metrics.md
-                    anchors.leftMargin: Metrics.sm
+                    anchors.leftMargin: 0
                     radius: Metrics.radiusXxl
                     baseOpacity: 0.95
 
+                    // ── Focus toggle button (top-right corner) ───────────────────
+                    Rectangle {
+                        id: editorFocusBtn
+                        anchors.top: parent.top
+                        anchors.right: parent.right
+                        anchors.margins: Metrics.sm
+                        width: 26
+                        height: 26
+                        radius: Metrics.radiusSm
+                        z: 200
+                        color: focusBtnMA.containsMouse
+                            ? (window.editorFocused ? Colors.primary100 : Colors.bgTertiary)
+                            : "transparent"
+                        border.color: focusBtnMA.containsMouse ? Colors.borderLight : "transparent"
+                        border.width: 1
+
+                        // Draw expand/collapse icon with rectangles
+                        Item {
+                            anchors.centerIn: parent
+                            width: 14
+                            height: 14
+                            property color ic: window.editorFocused ? Colors.primary600 : Colors.textSecondary
+
+                            // Top-left corner
+                            Rectangle { x:0; y:0; width:5; height:1; color: parent.ic }
+                            Rectangle { x:0; y:0; width:1; height:5; color: parent.ic }
+                            // Top-right corner
+                            Rectangle { x:9; y:0; width:5; height:1; color: parent.ic }
+                            Rectangle { x:13; y:0; width:1; height:5; color: parent.ic }
+                            // Bottom-left corner
+                            Rectangle { x:0; y:13; width:5; height:1; color: parent.ic }
+                            Rectangle { x:0; y:9; width:1; height:5; color: parent.ic }
+                            // Bottom-right corner
+                            Rectangle { x:9; y:13; width:5; height:1; color: parent.ic }
+                            Rectangle { x:13; y:9; width:1; height:5; color: parent.ic }
+
+                            // Center X when focused (collapse icon)
+                            Rectangle {
+                                visible: window.editorFocused
+                                x:4; y:6; width:6; height:1
+                                rotation: 45
+                                color: Colors.primary600
+                                transformOrigin: Item.Center
+                            }
+                            Rectangle {
+                                visible: window.editorFocused
+                                x:4; y:6; width:6; height:1
+                                rotation: -45
+                                color: Colors.primary600
+                                transformOrigin: Item.Center
+                            }
+                        }
+
+                        MouseArea {
+                            id: focusBtnMA
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: window.editorFocused = !window.editorFocused
+                        }
+
+                        ToolTip.visible: focusBtnMA.containsMouse
+                        ToolTip.text: window.editorFocused ? "일반 보기" : "크게 보기"
+                        ToolTip.delay: 600
+                    }
+
                     ColumnLayout {
                         anchors.fill: parent
-                        anchors.margins: Metrics.cardPaddingLg
-                        spacing: Metrics.lg
+                        anchors.margins: Metrics.sm
+                        spacing: 0
+
+                        // Tab bar - visible when any tab is open
+                        Rectangle {
+                            id: tabBar
+                            Layout.fillWidth: true
+                            visible: window.openTabs.length > 0
+                            color: "transparent"
+
+                            // ── Layout metrics ───────────────────────────────────────────
+                            readonly property int tabH:    30
+                            readonly property int minTW:   72
+                            readonly property int maxTW:   180
+                            readonly property int cnt:     window.openTabs.length
+                            readonly property int fitIn1:  Math.max(1, Math.floor(width / (minTW + 2)))
+                            readonly property int rows:    (cnt === 0 || cnt <= fitIn1) ? 1 : 2
+                            readonly property int perRow:  rows === 1 ? cnt : Math.ceil(cnt / 2)
+                            readonly property int tabW:    perRow === 0 ? maxTW
+                                                               : Math.max(minTW, Math.min(maxTW, Math.floor(width / perRow) - 2))
+                            readonly property int rowW:    perRow * (tabW + 2)
+
+                            Layout.preferredHeight: rows * tabH + (rows > 1 ? 2 : 0)
+
+                            // ── Shared tab delegate ──────────────────────────────────────
+                            Component {
+                                id: tabDelegate
+                                Rectangle {
+                                    property bool isActive: modelData.id === window.selectedNoteId
+                                    width:  tabBar.tabW
+                                    height: tabBar.tabH
+                                    radius: Metrics.radiusSm
+                                    color: isActive
+                                        ? Colors.primary500
+                                        : (tabMouse.containsMouse ? Colors.primary50 : "transparent")
+                                    border.color: isActive ? Colors.primary600
+                                        : (tabMouse.containsMouse ? Colors.primary200 : Colors.borderLight)
+                                    border.width: 1
+
+                                    // tab click area (declared first → lower z)
+                                    MouseArea {
+                                        id: tabMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        onClicked: {
+                                            window.selectedNoteId = modelData.id
+                                            if (noteController) noteController.selectNote(modelData.id)
+                                        }
+                                    }
+
+                                    // content row (on top of tabMouse)
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 6
+                                        anchors.rightMargin: 4
+                                        spacing: 3
+
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: modelData.title || "제목 없음"
+                                            font.family: Typography.fontPrimary
+                                            font.pixelSize: 11
+                                            font.weight: isActive ? Typography.weightSemibold : Typography.weightRegular
+                                            color: isActive ? "white" : Colors.textSecondary
+                                            elide: Text.ElideRight
+                                        }
+
+                                        // Close button
+                                        Rectangle {
+                                            width: 14
+                                            height: 14
+                                            radius: Metrics.radiusFull
+                                            visible: tabMouse.containsMouse || isActive
+                                            color: closeMA.containsMouse
+                                                ? (isActive ? Qt.rgba(1,1,1,0.25) : Colors.bgTertiary)
+                                                : "transparent"
+
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: "×"
+                                                font.pixelSize: 12
+                                                color: isActive ? "white" : Colors.textSecondary
+                                            }
+
+                                            MouseArea {
+                                                id: closeMA
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                onClicked: window.closeTab(modelData.id)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // ── RowLayout: [left btn] [Flickable] [right btn] ─────────────
+                            RowLayout {
+                                anchors.fill: parent
+                                spacing: 0
+
+                                // Left scroll button
+                                Rectangle {
+                                    id: tabScrollLeft
+                                    Layout.preferredWidth: (tabBar.rowW > tabBar.width && tabFlickable.contentX > 1) ? 22 : 0
+                                    Layout.fillHeight: true
+                                    clip: true
+                                    color: leftBtnMA.containsMouse ? Colors.bgTertiary : Colors.bgSecondary
+                                    border.color: Colors.borderLight
+                                    border.width: Layout.preferredWidth > 0 ? 1 : 0
+                                    radius: Metrics.radiusSm
+
+                                    Behavior on Layout.preferredWidth {
+                                        NumberAnimation { duration: Metrics.durationFast }
+                                    }
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "‹"
+                                        font.pixelSize: 16
+                                        color: Colors.textSecondary
+                                        visible: tabScrollLeft.Layout.preferredWidth > 10
+                                    }
+                                    MouseArea {
+                                        id: leftBtnMA
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        enabled: tabScrollLeft.Layout.preferredWidth > 0
+                                        onClicked: tabFlickable.contentX = Math.max(0, tabFlickable.contentX - 120)
+                                    }
+                                }
+
+                                // Flickable
+                                Flickable {
+                                    id: tabFlickable
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    contentWidth: Math.max(tabBar.rowW, width)
+                                    flickableDirection: Flickable.HorizontalFlick
+                                    interactive: tabBar.rowW > width
+                                    clip: true
+
+                                    Behavior on contentX {
+                                        NumberAnimation { duration: Metrics.durationNormal; easing.type: Easing.OutCubic }
+                                    }
+
+                                    Column {
+                                        spacing: 2
+
+                                        // Row 1
+                                        Row {
+                                            spacing: 2
+                                            Repeater {
+                                                model: window.openTabs.slice(0, tabBar.perRow)
+                                                delegate: tabDelegate
+                                            }
+                                        }
+
+                                        // Row 2 (only when rows === 2)
+                                        Row {
+                                            spacing: 2
+                                            visible: tabBar.rows === 2
+                                            Repeater {
+                                                model: window.openTabs.slice(tabBar.perRow)
+                                                delegate: tabDelegate
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Right scroll button
+                                Rectangle {
+                                    id: tabScrollRight
+                                    Layout.preferredWidth: (tabBar.rowW > tabBar.width &&
+                                        tabFlickable.contentX < tabFlickable.contentWidth - tabFlickable.width - 1) ? 22 : 0
+                                    Layout.fillHeight: true
+                                    clip: true
+                                    color: rightBtnMA.containsMouse ? Colors.bgTertiary : Colors.bgSecondary
+                                    border.color: Colors.borderLight
+                                    border.width: Layout.preferredWidth > 0 ? 1 : 0
+                                    radius: Metrics.radiusSm
+
+                                    Behavior on Layout.preferredWidth {
+                                        NumberAnimation { duration: Metrics.durationFast }
+                                    }
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "›"
+                                        font.pixelSize: 16
+                                        color: Colors.textSecondary
+                                        visible: tabScrollRight.Layout.preferredWidth > 10
+                                    }
+                                    MouseArea {
+                                        id: rightBtnMA
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        enabled: tabScrollRight.Layout.preferredWidth > 0
+                                        onClicked: tabFlickable.contentX = Math.min(
+                                            tabFlickable.contentWidth - tabFlickable.width,
+                                            tabFlickable.contentX + 120)
+                                    }
+                                }
+                            }
+                        }
+
+                        // Thin separator below tab bar
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 1
+                            color: Colors.borderLight
+                            visible: window.openTabs.length > 0
+                        }
 
                         // Empty state - only visible when no note selected
                         Rectangle {
@@ -1068,35 +1819,37 @@ Window {
                             noteId: window.selectedNoteId
                             title: window.currentNote ? (window.currentNote.title || "") : ""
                             content: window.currentNote ? (window.currentNote.content || "") : ""
+                            contentJson: window.currentNote ? (window.currentNote.content_json || "") : ""
                             saveStatus: noteController ? noteController.saveStatus : "saved"
+                            editorZoom: window.editorZoom
 
+                            // Primary handler: receives title + markdown + JSON in one shot
+                            onContentUpdated: (newTitle, newMarkdown, newJson) => {
+                                if (window.selectedNoteId && noteController) {
+                                    noteController.updateNoteWithJson(
+                                        window.selectedNoteId, newTitle, newMarkdown, newJson)
+                                    if (newTitle) window.updateTabTitle(window.selectedNoteId, newTitle)
+                                }
+                            }
+
+                            // Fallback: old-format signals (backward compat)
                             onTitleEdited: (newTitle) => {
                                 if (window.selectedNoteId && noteController) {
-                                    noteController.updateNote(window.selectedNoteId, newTitle, window.currentNote ? window.currentNote.content : "")
+                                    noteController.updateNote(
+                                        window.selectedNoteId, newTitle,
+                                        window.currentNote ? window.currentNote.content : "")
                                 }
                             }
 
                             onContentEdited: (newContent) => {
                                 if (window.selectedNoteId && noteController) {
-                                    noteController.updateNote(window.selectedNoteId, noteEditor.title, newContent)
+                                    noteController.updateNote(
+                                        window.selectedNoteId, noteEditor.title, newContent)
                                 }
                             }
 
                             onRequestSave: {
-                                if (noteController) {
-                                    noteController.saveCurrentNote()
-                                }
-                            }
-
-                            onImagePasted: (dataUrl) => {
-                                // Normalize image data for DB storage
-                                if (noteController && window.selectedNoteId && dataUrl) {
-                                    // Keep as data URL so note content stores image in DB
-                                    var storedDataUrl = noteController.saveBase64Image(window.selectedNoteId, dataUrl)
-                                    if (storedDataUrl) {
-                                        console.log("Image stored in DB content (data URL)")
-                                    }
-                                }
+                                if (noteController) noteController.saveCurrentNote()
                             }
                         }
 
@@ -1110,14 +1863,96 @@ Window {
                                 status: noteController ? noteController.saveStatus : "saved"
                             }
 
+                            // ── Zoom controls ──────────────────────────────────
+                            RowLayout {
+                                spacing: 2
+
+                                // Zoom out
+                                Rectangle {
+                                    width: 22; height: 22
+                                    radius: Metrics.radiusSm
+                                    color: zoomOutMA.containsMouse ? Colors.bgTertiary : "transparent"
+                                    border.color: zoomOutMA.containsMouse ? Colors.borderLight : "transparent"
+                                    border.width: 1
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "−"
+                                        font.pixelSize: 14
+                                        color: Colors.textSecondary
+                                    }
+                                    MouseArea {
+                                        id: zoomOutMA
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        onClicked: window.editorZoom = Math.max(0.5, Math.round((window.editorZoom - 0.1) * 10) / 10)
+                                    }
+                                }
+
+                                // Zoom label (click to reset)
+                                Rectangle {
+                                    width: 44; height: 22
+                                    radius: Metrics.radiusSm
+                                    color: zoomResetMA.containsMouse ? Colors.bgTertiary : "transparent"
+                                    border.color: zoomResetMA.containsMouse ? Colors.borderLight : "transparent"
+                                    border.width: 1
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: Math.round(window.editorZoom * 100) + "%"
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: 11
+                                        color: window.editorZoom !== 1.0 ? Colors.primary600 : Colors.textTertiary
+                                        font.weight: window.editorZoom !== 1.0 ? Typography.weightSemibold : Typography.weightRegular
+                                    }
+                                    MouseArea {
+                                        id: zoomResetMA
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        onClicked: window.editorZoom = 1.0
+                                    }
+                                    ToolTip.visible: zoomResetMA.containsMouse
+                                    ToolTip.text: "원래 크기로 되돌리기"
+                                    ToolTip.delay: 600
+                                }
+
+                                // Zoom in
+                                Rectangle {
+                                    width: 22; height: 22
+                                    radius: Metrics.radiusSm
+                                    color: zoomInMA.containsMouse ? Colors.bgTertiary : "transparent"
+                                    border.color: zoomInMA.containsMouse ? Colors.borderLight : "transparent"
+                                    border.width: 1
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "+"
+                                        font.pixelSize: 14
+                                        color: Colors.textSecondary
+                                    }
+                                    MouseArea {
+                                        id: zoomInMA
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        onClicked: window.editorZoom = Math.min(3.0, Math.round((window.editorZoom + 0.1) * 10) / 10)
+                                    }
+                                }
+                            }
+
                             Item { Layout.fillWidth: true }
 
-                            // Current note metadata
+                            // Current note metadata (created + updated)
                             Text {
                                 visible: window.selectedNoteId && noteController && window.currentNote
                                 text: {
-                                    if (!window.currentNote || !window.currentNote.updated_at) return ""
-                                    return "수정됨: " + noteController.formatDate(window.currentNote.updated_at)
+                                    if (!window.currentNote) return ""
+                                    var created = window.currentNote.created_at ? noteController.formatDate(window.currentNote.created_at) : ""
+                                    var updated = window.currentNote.updated_at ? noteController.formatDate(window.currentNote.updated_at) : ""
+                                    if (created && updated && created !== updated) {
+                                        return "생성: " + created + "  ·  수정: " + updated
+                                    } else if (created) {
+                                        return "생성: " + created
+                                    } else if (updated) {
+                                        return "수정: " + updated
+                                    }
+                                    return ""
                                 }
                                 font.family: Typography.fontPrimary
                                 font.weight: Typography.weightRegular

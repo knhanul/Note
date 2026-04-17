@@ -31,25 +31,14 @@ class FolderController(QObject):
         self._library_service = library_service
         self._collapsed_folder_ids: set = set()  # Track collapsed (hidden) folders
         
-        print(f"[FolderController] Initializing...")
-        
         # Connect to library changes
-        try:
-            self._library_service.currentLibraryChanged.connect(self._on_library_changed)
-            print(f"[FolderController] Connected to library changes")
-        except Exception as e:
-            print(f"[FolderController] Error connecting signal: {e}")
-        
+        self._library_service.currentLibraryChanged.connect(self._on_library_changed)
+
         # Initialize with current library
-        try:
-            self._on_library_changed()
-            print(f"[FolderController] Initialization complete")
-        except Exception as e:
-            print(f"[FolderController] Error in initial load: {e}")
+        self._on_library_changed()
     
     def _on_library_changed(self):
         """Handle library change - reload folders from new database."""
-        print(f"[FolderController] Library changed, reloading folders...")
         db = self._library_service.get_current_database()
         if db:
             self._db = db
@@ -59,7 +48,6 @@ class FolderController(QObject):
             self.libraryChanged.emit()
             self.foldersChanged.emit()
             self.currentFolderChanged.emit()
-            print(f"[FolderController] Folders reloaded, count: {len(self.folders)}")
         
     def _get_db(self) -> Database:
         """Get current database, refreshing if needed."""
@@ -108,9 +96,6 @@ class FolderController(QObject):
     def folders(self):
         """Get all folders as list of dicts for QML with hierarchy info."""
         folders = self._folder_service.get_all()
-        folder_names = [f['name'] for f in folders]
-        print(f"[FolderController] DB: {self._db.db_path}")
-        print(f"[FolderController] Folders: {folder_names}")
 
         # Build id -> folder map for depth calculation
         folders_map = {f['id']: f for f in folders}
@@ -121,7 +106,6 @@ class FolderController(QObject):
             folder['note_count'] = self._folder_service.get_note_count(folder['id'])
             folder['depth'] = self._get_folder_depth(folder['id'], folders_map, depth_cache)
             folder['has_children'] = any(f.get('parent_id') == folder['id'] for f in folders)
-            print(f"[FolderController] Folder '{folder['name']}' (id={folder['id']}) depth={folder['depth']}, parent_id={folder.get('parent_id')}")
 
         # Build tree and traverse in pre-order (parent -> children -> grandchildren)
         def sort_key(f):
@@ -165,10 +149,7 @@ class FolderController(QObject):
                 "is_smart": True,
             })
 
-        result = smart_folders + sorted_folders
-
-        print(f"[FolderController] Total folders returned: {len(result)}")
-        return result
+        return smart_folders + sorted_folders
     
     @pyqtProperty(str, notify=currentFolderChanged)
     def currentFolderId(self) -> str:
@@ -203,64 +184,53 @@ class FolderController(QObject):
         
         # Empty string means None (root level)
         actual_parent_id = parent_id if parent_id else None
-        
-        print(f"[FolderController] createFolder called: name='{name}', parent_id='{parent_id}' (actual: {actual_parent_id})")
-        
+
         # Check depth limit: max depth is 3 (0=root, 1=child, 2=grandchild)
         if actual_parent_id:
             folders = self._folder_service.get_all()
             folders_map = {f['id']: f for f in folders}
             parent_depth = self._get_folder_depth(actual_parent_id, folders_map)
             if parent_depth >= 2:  # Parent is already at depth 2, child would be depth 3 - not allowed
-                print(f"[FolderController] Folder creation rejected: max depth exceeded (parent depth={parent_depth})")
                 return ""
-        
+
         if self._folder_service.create(folder_id, name, color, actual_parent_id):
-            print(f"[FolderController] Folder created: id={folder_id}, parent_id={actual_parent_id}")
             self.foldersChanged.emit()
             self.folderAdded.emit(folder_id)
             
             # Auto-select the new folder
             self.currentFolderId = folder_id
             return folder_id
-        
-        print(f"[FolderController] Folder creation failed")
+
         return ""
     
     @pyqtSlot(str, result=bool)
     def deleteFolder(self, folder_id: str) -> bool:
         """Delete a folder by ID."""
-        print(f"[FolderController] deleteFolder called: {folder_id}")
         if not self._folder_service.exists(folder_id):
-            print(f"[FolderController] delete failed: folder not found")
             return False
-        
+
         # Delete from database (cascades to notes)
         result = self._folder_service.delete(folder_id)
-        print(f"[FolderController] delete result: {result}")
         if result:
             # Update current folder if deleted
             if self._current_folder_id == folder_id:
                 folders = self._folder_service.get_all()
                 self._current_folder_id = folders[0]['id'] if folders else None
                 self.currentFolderChanged.emit()
-            
+
             self.foldersChanged.emit()
             self.folderRemoved.emit(folder_id)
             return True
-        
+
         return False
     
     @pyqtSlot(str, str, result=bool)
     def renameFolder(self, folder_id: str, new_name: str) -> bool:
         """Rename a folder."""
-        print(f"[FolderController] renameFolder called: {folder_id} -> {new_name}")
         if not new_name.strip():
-            print(f"[FolderController] rename failed: empty name")
             return False
-        
+
         result = self._folder_service.update(folder_id, name=new_name.strip())
-        print(f"[FolderController] rename result: {result}")
         if result:
             self.foldersChanged.emit()
             self.folderRenamed.emit(folder_id, new_name)
@@ -321,10 +291,8 @@ class FolderController(QObject):
         """Toggle folder expanded/collapsed state."""
         if folder_id in self._collapsed_folder_ids:
             self._collapsed_folder_ids.discard(folder_id)
-            print(f"[FolderController] Folder expanded: {folder_id}")
         else:
             self._collapsed_folder_ids.add(folder_id)
-            print(f"[FolderController] Folder collapsed: {folder_id}")
         self.foldersChanged.emit()
     
     # Helper methods

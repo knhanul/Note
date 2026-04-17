@@ -208,9 +208,7 @@ ColumnLayout {
                         smooth: true
                         
                         onStatusChanged: {
-                            if (status === Image.Error) {
-                                console.log("Failed to load image: " + modelData)
-                            }
+                            // Error handling for image load failure
                         }
                     }
                     

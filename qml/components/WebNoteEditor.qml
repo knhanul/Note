@@ -11,13 +11,16 @@ ColumnLayout {
     // Public properties
     property string noteId: ""
     property string title: ""
-    property string content: ""  // Markdown content
+    property string content: ""     // Markdown content
+    property string contentJson: "" // TipTap JSON (for perfect restore)
     property string saveStatus: "saved"
     property bool isDirty: false
-    
+    property real editorZoom: 1.0   // 0.5 ~ 3.0
+
     // Signals
     signal titleEdited(string newTitle)
     signal contentEdited(string newContent)
+    signal contentUpdated(string newTitle, string newMarkdown, string newJson)
     signal requestSave()
     signal requestImagePaste()
     signal imagePasted(string dataUrl)
@@ -29,98 +32,30 @@ ColumnLayout {
         nameFilters: ["이미지 파일 (*.png *.jpg *.jpeg *.gif *.bmp *.webp)", "모든 파일 (*)"]
         onAccepted: {
             var filePath = imageFileDialog.currentFile.toString()
-            console.log("[WebNoteEditor] Selected file: " + filePath)
-            
+
             // Remove file:// prefix (Windows: file:///C:/..., Unix: file:///...)
             if (filePath.indexOf("file://") === 0) {
-                filePath = filePath.substring(7) // Remove file://
-                if (filePath.charAt(0) === '/') {
-                    filePath = filePath.substring(1) // Remove leading slash on Windows
-                }
+                filePath = filePath.substring(7)
+                if (filePath.charAt(0) === '/')
+                    filePath = filePath.substring(1)
             }
-            console.log("[WebNoteEditor] Cleaned path: " + filePath)
-            console.log("[WebNoteEditor] noteId: " + root.noteId)
-            console.log("[WebNoteEditor] noteController: " + (noteController ? "available" : "not available"))
-            
+
             if (noteController && root.noteId && filePath) {
-                // Convert image to data URL (stored in note content / DB)
-                var savedPath = noteController.saveLocalImage(root.noteId, filePath)
-                console.log("[WebNoteEditor] Saved path: " + savedPath)
-                
-                if (savedPath) {
-                    // Insert markdown image link
-                    var markdown = "\n![이미지](" + savedPath + ")\n"
-                    console.log("[WebNoteEditor] Inserting markdown: " + markdown)
-                    
-                    // Use encodeURIComponent to safely pass markdown
-                    // Build JS code that decodes and inserts
-                    var encoded = encodeURIComponent(markdown)
-                    var jsCode = "if (window.editorAPI) { window.editorAPI.insertMarkdownAtCursor(decodeURIComponent('" + encoded + "')); window.editorAPI.onContentChanged(); } else { console.log('editorAPI not found'); }"
-                    console.log("[WebNoteEditor] JS code: " + jsCode.substring(0, 100) + "...")
-                    
-                    webView.runJavaScript(jsCode, function(result) {
-                        console.log("[WebNoteEditor] JavaScript executed: " + result)
-                    })
+                var dataUrl = noteController.saveLocalImage(root.noteId, filePath)
+                if (dataUrl) {
+                    // Store data URL in window var to avoid size/escaping issues
+                    webView.runJavaScript(
+                        "window.__imgDataUrl = " + JSON.stringify(dataUrl) + ";" +
+                        "if (window.editorAPI) { window.editorAPI.insertImage(window.__imgDataUrl); }"
+                    )
                 }
-            } else {
-                console.log("[WebNoteEditor] Cannot save image - missing noteId or controller")
             }
         }
     }
-    
-    spacing: Metrics.md
-    
-    // Editor toolbar with Markdown formatting
-    EditorToolbar {
-        Layout.alignment: Qt.AlignLeft
-        
-        onFormatBold: {
-            noteEditor.formatBold()
-        }
-        
-        onFormatItalic: {
-            noteEditor.formatItalic()
-        }
-        
-        onFormatHeading: {
-            noteEditor.formatHeading()
-        }
-        
-        onFormatCode: {
-            noteEditor.formatCode()
-        }
-        
-        onInsertLink: {
-            noteEditor.insertLink()
-        }
-        
-        onInsertImage: {
-            // Open file dialog for local image selection
-            imageFileDialog.open()
-        }
-        
-        onInsertTable: {
-            noteEditor.insertTable()
-        }
-        
-        onInsertBulletList: {
-            noteEditor.insertBulletList()
-        }
-        
-        onInsertNumberedList: {
-            noteEditor.insertNumberedList()
-        }
-        
-        onInsertQuote: {
-            noteEditor.insertQuote()
-        }
-    }
-    
-    // Title is now extracted from first line of content
-    // No separate title input field
-    
-    
-    // Web-based WYSIWYG Editor
+
+    spacing: 0
+
+    // Web-based WYSIWYG Editor (TipTap - toolbar built into React component)
     Rectangle {
         Layout.fillWidth: true
         Layout.fillHeight: true
@@ -130,10 +65,11 @@ ColumnLayout {
         WebEngineView {
             id: webView
             anchors.fill: parent
+            zoomFactor: root.editorZoom
             
             // Load local HTML file from application directory
             // Qt.application.directory doesn't exist, use standard path
-            url: "file:///E:/Pjt/Note2/assets/editor.html"
+            url: Qt.resolvedUrl("../../assets/editor/index.html")
             
             // Enable JavaScript
             settings.javascriptEnabled: true
@@ -142,35 +78,38 @@ ColumnLayout {
             
             // Inject content when loaded
             onLoadProgressChanged: {
-                if (loadProgress === 100 && root.content) {
-                    // Small delay to ensure JS is ready
+                if (loadProgress === 100) {
                     setContentTimer.start()
                 }
             }
-            
-            // Handle console messages for communication
+
+            // Handle console messages for bridge communication
             onJavaScriptConsoleMessage: (level, message, lineNumber, sourceID) => {
                 var msg = message.toString()
-                if (msg.indexOf("EDITOR_CONTENT_CHANGED:") === 0) {
-                    var content = msg.substring(23)
-                    root.contentEdited(content)
-                    // Extract first line as title
-                    var firstLine = extractFirstLine(content)
-                    if (firstLine !== root.title) {
-                        root.titleEdited(firstLine)
-                    }
+                if (msg === "EDITOR_CONTENT_CHANGED:__PAYLOAD_READY__") {
+                    // Retrieve the full payload via runJavaScript (avoids console.log size limits)
+                    webView.runJavaScript(
+                        "JSON.stringify(window.__editorLastPayload || {})",
+                        function(result) {
+                            try {
+                                var payload = JSON.parse(result || "{}")
+                                root.contentUpdated(payload.title || "", payload.markdown || "", payload.json || "")
+                            } catch (e) {}
+                        }
+                    )
+                } else if (msg === "REQUEST_IMAGE_DIALOG") {
+                    imageFileDialog.open()
                 } else if (msg.indexOf("EDITOR_IMAGE_PASTED:") === 0) {
-                    var dataUrl = msg.substring(20)
-                    root.imagePasted(dataUrl)
+                    root.imagePasted(msg.substring(20))
                 }
             }
         }
         
         Timer {
             id: setContentTimer
-            interval: 100
+            interval: 150
             onTriggered: {
-                setMarkdownContent(root.content)
+                setEditorContent(root.content, root.contentJson)
             }
         }
     }
@@ -185,10 +124,18 @@ ColumnLayout {
                   .replace(/\r/g, "\\r")
     }
     
-    // Set markdown content in editor
+    // Set content: store data in window vars first, then call setContent
+    // This avoids string-escaping and size issues with runJavaScript
+    function setEditorContent(md, json) {
+        var setMd = "window.__loadMd = " + JSON.stringify(md || "") + ";"
+        var setJson = "window.__loadJson = " + JSON.stringify(json || "") + ";"
+        webView.runJavaScript(setMd + setJson +
+            "if (window.editorAPI) { window.editorAPI.setContent(window.__loadMd, window.__loadJson); }")
+    }
+
+    // Backward-compatible alias
     function setMarkdownContent(md) {
-        var escaped = escapeJsString(md || "")
-        webView.runJavaScript("if (window.editorAPI) { window.editorAPI.setMarkdown('" + escaped + "'); }")
+        setEditorContent(md, "")
     }
     
     // Get markdown content from editor
@@ -266,19 +213,32 @@ ColumnLayout {
     
     // Focus management
     function focusTitle() {
-        // Title is now extracted from content, focus content editor instead
         focusContent()
     }
-    
+
+    Timer {
+        id: focusTimer
+        interval: 200
+        onTriggered: {
+            webView.forceActiveFocus()
+            webView.runJavaScript("if (window.editorAPI) { window.editorAPI.focus(); }")
+        }
+    }
+
     function focusContent() {
-        webView.forceActiveFocus()
-        webView.runJavaScript("if (window.editorAPI) { window.editorAPI.focus(); }")
+        // Delay focus to ensure editor is ready after visibility change
+        focusTimer.start()
     }
     
     onContentChanged: {
-        // Update editor when content changes externally
         if (webView.loadProgress === 100) {
-            setMarkdownContent(content)
+            setEditorContent(content, contentJson)
+        }
+    }
+
+    onContentJsonChanged: {
+        if (webView.loadProgress === 100 && contentJson !== "") {
+            setEditorContent(content, contentJson)
         }
     }
 }

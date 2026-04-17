@@ -29,23 +29,18 @@ class NoteService:
 
     def get_pinned(self, ensure_note_id: str = None) -> List[Dict[str, Any]]:
         """Get all pinned, non-deleted notes."""
-        print(f"[NoteService] get_pinned called, ensure_note_id={ensure_note_id}")
         result = self.db.fetch_all(
             """SELECT * FROM notes
                WHERE is_pinned = 1 AND deleted_at IS NULL
                ORDER BY updated_at DESC"""
         )
-        print(f"[NoteService] get_pinned: found {len(result)} pinned notes")
-        for note in result:
-            print(f"[NoteService]   - {note['id']}: {note['title'][:30] if note['title'] else 'Untitled'}")
-        
+
         # If ensure_note_id is provided and not in results, fetch and prepend it
         if ensure_note_id and not any(n['id'] == ensure_note_id for n in result):
             note = self.get_by_id(ensure_note_id)
             if note and not note.get('deleted_at'):
-                print(f"[NoteService] Adding ensured note: {ensure_note_id}")
                 result.insert(0, note)
-        
+
         return result
 
     def get_recent(self, days: int = 7) -> List[Dict[str, Any]]:
@@ -65,36 +60,39 @@ class NoteService:
             (note_id,)
         )
     
-    def create(self, note_id: str, folder_id: str, title: str = "", 
-               content: str = "") -> bool:
+    def create(self, note_id: str, folder_id: str, title: str = "",
+               content: str = "", content_json: str = "") -> bool:
         """Create a new note."""
         try:
             now = Database.now_iso()
             cursor = self.db.execute(
-                """INSERT INTO notes (id, folder_id, title, content, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (note_id, folder_id, title, content, now, now)
+                """INSERT INTO notes (id, folder_id, title, content, content_json, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (note_id, folder_id, title, content, content_json or None, now, now)
             )
             self.db.commit()
             return cursor.rowcount > 0
-        except Exception as e:
-            print(f"[NoteService] Create error: {e}")
+        except Exception:
             return False
     
     def update(self, note_id: str, title: Optional[str] = None,
-               content: Optional[str] = None, 
+               content: Optional[str] = None,
+               content_json: Optional[str] = None,
                folder_id: Optional[str] = None) -> bool:
         """Update note fields."""
         try:
             updates = []
             params = []
-            
+
             if title is not None:
                 updates.append("title = ?")
                 params.append(title)
             if content is not None:
                 updates.append("content = ?")
                 params.append(content)
+            if content_json is not None:
+                updates.append("content_json = ?")
+                params.append(content_json or None)
             if folder_id is not None:
                 updates.append("folder_id = ?")
                 params.append(folder_id)
@@ -110,8 +108,7 @@ class NoteService:
             cursor = self.db.execute(query, tuple(params))
             self.db.commit()
             return cursor.rowcount > 0
-        except Exception as e:
-            print(f"[NoteService] Update error: {e}")
+        except Exception:
             return False
     
     def soft_delete(self, note_id: str) -> bool:
@@ -124,8 +121,7 @@ class NoteService:
             )
             self.db.commit()
             return cursor.rowcount > 0
-        except Exception as e:
-            print(f"[NoteService] Soft delete error: {e}")
+        except Exception:
             return False
     
     def hard_delete(self, note_id: str) -> bool:
@@ -137,8 +133,7 @@ class NoteService:
             )
             self.db.commit()
             return cursor.rowcount > 0
-        except Exception as e:
-            print(f"[NoteService] Hard delete error: {e}")
+        except Exception:
             return False
     
     def restore(self, note_id: str) -> bool:
@@ -150,8 +145,7 @@ class NoteService:
             )
             self.db.commit()
             return cursor.rowcount > 0
-        except Exception as e:
-            print(f"[NoteService] Restore error: {e}")
+        except Exception:
             return False
     
     def move_to_folder(self, note_id: str, folder_id: str) -> bool:
@@ -162,17 +156,14 @@ class NoteService:
         """Set note pinned status."""
         try:
             pinned_val = 1 if is_pinned else 0
-            print(f"[NoteService] set_pinned: note_id={note_id}, is_pinned={pinned_val}")
             # Don't update updated_at to preserve note order
             cursor = self.db.execute(
                 "UPDATE notes SET is_pinned = ? WHERE id = ?",
                 (pinned_val, note_id)
             )
             self.db.commit()
-            print(f"[NoteService] set_pinned: updated {cursor.rowcount} rows")
             return cursor.rowcount > 0
-        except Exception as e:
-            print(f"[NoteService] Set pinned error: {e}")
+        except Exception:
             return False
     
     def search(self, query: str, folder_id: Optional[str] = None) -> List[Dict[str, Any]]:
