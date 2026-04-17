@@ -506,7 +506,40 @@ class NoteController(QObject):
             return dt.strftime("%Y.%m.%d %H:%M")
         except:
             return iso_date
-    
+
+    @pyqtSlot(str, result=str)
+    def getFolderPathForNote(self, note_id: str) -> str:
+        """Get folder path for a note (e.g., 'Folder1/SubFolder')."""
+        if not note_id or not self._note_service:
+            return ""
+
+        note = self._note_service.get_by_id(note_id)
+        if not note:
+            return ""
+
+        folder_id = note.get('folder_id')
+        if not folder_id:
+            return "미분류"
+
+        # Build path by traversing parent folders
+        path_parts = []
+        visited = set()  # Prevent infinite loop
+
+        while folder_id and folder_id not in visited:
+            visited.add(folder_id)
+            folder = self._folder_controller._folder_service.get_by_id(folder_id)
+            if not folder:
+                break
+            path_parts.append(folder.get('name', 'Unnamed'))
+            folder_id = folder.get('parent_id')
+
+        if not path_parts:
+            return "미분류"
+
+        # Reverse to get root -> leaf order
+        path_parts.reverse()
+        return " / ".join(path_parts)
+
     @pyqtSlot(result=bool)
     def hasClipboardImage(self) -> bool:
         """Check if clipboard contains an image."""

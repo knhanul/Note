@@ -20,18 +20,7 @@ Window {
     property string selectedNoteId: ""
     property var currentNote: null
     property var openTabs: []   // [{id, title}, ...]
-    property bool editorFocused: false
     property real editorZoom: 1.0
-
-    onEditorFocusedChanged: {
-        if (editorFocused) {
-            sidebar.Layout.preferredWidth = 0
-            noteList.Layout.preferredWidth = 0
-        } else {
-            sidebar.Layout.preferredWidth = Metrics.sidebarWidth
-            noteList.Layout.preferredWidth = Metrics.noteListWidth
-        }
-    }
 
     function addOrActivateTab(noteId, noteTitle) {
         for (var i = 0; i < openTabs.length; i++) {
@@ -142,11 +131,9 @@ Window {
             sidebarHidden: sidebar.Layout.preferredWidth === 0
             noteListHidden: noteList.Layout.preferredWidth === 0
             onToggleSidebar: {
-                window.editorFocused = false
                 sidebar.Layout.preferredWidth = (sidebar.Layout.preferredWidth === 0) ? Metrics.sidebarWidth : 0
             }
             onToggleNoteList: {
-                window.editorFocused = false
                 noteList.Layout.preferredWidth = (noteList.Layout.preferredWidth === 0) ? Metrics.noteListWidth : 0
             }
         }
@@ -1468,72 +1455,6 @@ Window {
                     radius: Metrics.radiusXxl
                     baseOpacity: 0.95
 
-                    // ── Focus toggle button (top-right corner) ───────────────────
-                    Rectangle {
-                        id: editorFocusBtn
-                        anchors.top: parent.top
-                        anchors.right: parent.right
-                        anchors.margins: Metrics.sm
-                        width: 26
-                        height: 26
-                        radius: Metrics.radiusSm
-                        z: 200
-                        color: focusBtnMA.containsMouse
-                            ? (window.editorFocused ? Colors.primary100 : Colors.bgTertiary)
-                            : "transparent"
-                        border.color: focusBtnMA.containsMouse ? Colors.borderLight : "transparent"
-                        border.width: 1
-
-                        // Draw expand/collapse icon with rectangles
-                        Item {
-                            anchors.centerIn: parent
-                            width: 14
-                            height: 14
-                            property color ic: window.editorFocused ? Colors.primary600 : Colors.textSecondary
-
-                            // Top-left corner
-                            Rectangle { x:0; y:0; width:5; height:1; color: parent.ic }
-                            Rectangle { x:0; y:0; width:1; height:5; color: parent.ic }
-                            // Top-right corner
-                            Rectangle { x:9; y:0; width:5; height:1; color: parent.ic }
-                            Rectangle { x:13; y:0; width:1; height:5; color: parent.ic }
-                            // Bottom-left corner
-                            Rectangle { x:0; y:13; width:5; height:1; color: parent.ic }
-                            Rectangle { x:0; y:9; width:1; height:5; color: parent.ic }
-                            // Bottom-right corner
-                            Rectangle { x:9; y:13; width:5; height:1; color: parent.ic }
-                            Rectangle { x:13; y:9; width:1; height:5; color: parent.ic }
-
-                            // Center X when focused (collapse icon)
-                            Rectangle {
-                                visible: window.editorFocused
-                                x:4; y:6; width:6; height:1
-                                rotation: 45
-                                color: Colors.primary600
-                                transformOrigin: Item.Center
-                            }
-                            Rectangle {
-                                visible: window.editorFocused
-                                x:4; y:6; width:6; height:1
-                                rotation: -45
-                                color: Colors.primary600
-                                transformOrigin: Item.Center
-                            }
-                        }
-
-                        MouseArea {
-                            id: focusBtnMA
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: window.editorFocused = !window.editorFocused
-                        }
-
-                        ToolTip.visible: focusBtnMA.containsMouse
-                        ToolTip.text: window.editorFocused ? "일반 보기" : "크게 보기"
-                        ToolTip.delay: 600
-                    }
-
                     ColumnLayout {
                         anchors.fill: parent
                         anchors.margins: Metrics.sm
@@ -1937,6 +1858,24 @@ Window {
                             }
 
                             Item { Layout.fillWidth: true }
+
+                            // Folder path + Note title
+                            Text {
+                                visible: window.selectedNoteId && noteController
+                                text: {
+                                    var path = noteController ? noteController.getFolderPathForNote(window.selectedNoteId) : ""
+                                    var title = window.currentNote ? (window.currentNote.title || "제목 없음") : ""
+                                    if (path && title) return path + "  ·  " + title
+                                    return path || title
+                                }
+                                font.family: Typography.fontPrimary
+                                font.weight: Typography.weightRegular
+                                font.pixelSize: Typography.caption
+                                color: Colors.textTertiary
+                                elide: Text.ElideLeft
+                                maximumLineCount: 1
+                                Layout.maximumWidth: 280
+                            }
 
                             // Current note metadata (created + updated)
                             Text {
