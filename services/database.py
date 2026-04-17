@@ -118,6 +118,13 @@ class Database:
             conn.commit()
         except sqlite3.OperationalError:
             pass  # Column already exists
+
+        # Migration: add tags column if not present (JSON array string, e.g. '["dev/python","react"]')
+        try:
+            cursor.execute("ALTER TABLE notes ADD COLUMN tags TEXT DEFAULT '[]'")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # Column already exists
     
     def execute(self, query: str, parameters: tuple = ()) -> sqlite3.Cursor:
         """Execute a SQL query."""

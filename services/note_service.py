@@ -1,6 +1,7 @@
 """Note service for database operations."""
 from typing import Optional, List, Dict, Any
 import uuid
+import json
 from .database import Database
 
 
@@ -10,9 +11,22 @@ class NoteService:
     def __init__(self, database: Database):
         self.db = database
     
-    def get_all(self, folder_id: Optional[str] = None, 
-                include_deleted: bool = False) -> List[Dict[str, Any]]:
-        """Get all notes, optionally filtered by folder."""
+    @staticmethod
+    def _parse_tags(note: Dict[str, Any]) -> Dict[str, Any]:
+        """Ensure note has a parsed 'tags' list."""
+        raw = note.get('tags')
+        if isinstance(raw, list):
+            return note
+        try:
+            note['tags'] = json.loads(raw) if raw else []
+        except Exception:
+            note['tags'] = []
+        return note
+
+    def get_all(self, folder_id: Optional[str] = None,
+                include_deleted: bool = False,
+                tag: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get all notes, optionally filtered by folder and/or tag."""
         query = "SELECT * FROM notes WHERE 1=1"
         params = []
         
@@ -25,15 +39,23 @@ class NoteService:
         
         query += " ORDER BY updated_at DESC"
         
-        return self.db.fetch_all(query, tuple(params))
+        notes = [self._parse_tags(n) for n in self.db.fetch_all(query, tuple(params))]
+
+        if tag:
+            # Support hierarchical prefix match: tag="dev" matches "dev/python"
+            notes = [n for n in notes if any(
+                t == tag or t.startswith(tag + '/') for t in n['tags']
+            )]
+
+        return notes
 
     def get_pinned(self, ensure_note_id: str = None) -> List[Dict[str, Any]]:
         """Get all pinned, non-deleted notes."""
-        result = self.db.fetch_all(
+        result = [self._parse_tags(n) for n in self.db.fetch_all(
             """SELECT * FROM notes
                WHERE is_pinned = 1 AND deleted_at IS NULL
                ORDER BY updated_at DESC"""
-        )
+        )]
 
         # If ensure_note_id is provided and not in results, fetch and prepend it
         if ensure_note_id and not any(n['id'] == ensure_note_id for n in result):
@@ -55,10 +77,11 @@ class NoteService:
     
     def get_by_id(self, note_id: str) -> Optional[Dict[str, Any]]:
         """Get note by ID."""
-        return self.db.fetch_one(
+        note = self.db.fetch_one(
             "SELECT * FROM notes WHERE id = ? AND deleted_at IS NULL",
             (note_id,)
         )
+        return self._parse_tags(note) if note else None
     
     def create(self, note_id: str, folder_id: str, title: str = "",
                content: str = "", content_json: str = "") -> bool:
@@ -78,7 +101,8 @@ class NoteService:
     def update(self, note_id: str, title: Optional[str] = None,
                content: Optional[str] = None,
                content_json: Optional[str] = None,
-               folder_id: Optional[str] = None) -> bool:
+               folder_id: Optional[str] = None,
+               tags: Optional[List[str]] = None) -> bool:
         """Update note fields."""
         try:
             updates = []
@@ -96,6 +120,9 @@ class NoteService:
             if folder_id is not None:
                 updates.append("folder_id = ?")
                 params.append(folder_id)
+            if tags is not None:
+                updates.append("tags = ?")
+                params.append(json.dumps(tags, ensure_ascii=False))
             
             if not updates:
                 return False
@@ -219,6 +246,37 @@ class NoteService:
         if len(text) <= max_length:
             return text
         return text[:max_length].rsplit(' ', 1)[0] + '...'
+
+    def get_all_tags(self, folder_ids: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """Aggregate all tags from notes (optionally restricted to folder_ids).
+        Returns [{name, count}] sorted by name, supporting hierarchical tags.
+        """
+        if folder_ids:
+            placeholders = ','.join('?' * len(folder_ids))
+            notes = [self._parse_tags(n) for n in self.db.fetch_all(
+                f"SELECT tags FROM notes WHERE folder_id IN ({placeholders}) AND deleted_at IS NULL",
+                tuple(folder_ids)
+            )]
+        else:
+            notes = [self._parse_tags(n) for n in self.db.fetch_all(
+                "SELECT tags FROM notes WHERE deleted_at IS NULL"
+            )]
+
+        tag_counts: Dict[str, int] = {}
+        for note in notes:
+            for tag in note.get('tags', []):
+                tag = tag.strip()
+                if tag:
+                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
+
+        return sorted(
+            [{'name': k, 'count': v} for k, v in tag_counts.items()],
+            key=lambda x: x['name'].lower()
+        )
+
+    def update_tags(self, note_id: str, tags: List[str]) -> bool:
+        """Update the tags list for a note."""
+        return self.update(note_id, tags=tags)
 
     # Note image APIs
     def upsert_note_image(self, note_id: str, mime_type: str, data_base64: str, checksum: str) -> str:

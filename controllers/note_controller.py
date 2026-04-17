@@ -23,6 +23,7 @@ class NoteController(QObject):
     # Signals
     notesChanged = pyqtSignal()
     filteredNotesChanged = pyqtSignal()
+    tagsChanged = pyqtSignal()
     noteAdded = pyqtSignal(str)  # note_id
     noteRemoved = pyqtSignal(str)  # note_id
     noteUpdated = pyqtSignal(str)  # note_id
@@ -53,6 +54,7 @@ class NoteController(QObject):
         self._search_keyword: str = ""
         self._filter_from_date: str = ""      # YYYY-MM-DD
         self._filter_to_date: str = ""        # YYYY-MM-DD
+        self._selected_tag: str = ""          # active tag filter
 
         # Auto-save timer (debounce)
         self._auto_save_timer = QTimer(self)
@@ -75,8 +77,10 @@ class NoteController(QObject):
             self._current_note_id = None
             self._is_dirty = False
             self._save_status = "saved"
+            self._selected_tag = ""
             self.notesChanged.emit()  # Clear notes view immediately
             self.filteredNotesChanged.emit()
+            self.tagsChanged.emit()
             self._on_folder_changed()  # Reload notes for current folder
             self.libraryChanged.emit()
             self.saveStatusChanged.emit()
@@ -150,14 +154,31 @@ class NoteController(QObject):
     def filteredNotes(self):
         """Get notes filtered by current folder with sorting and search."""
         current_folder_id = self._folder_controller.currentFolderId
+        tag_filter = self._selected_tag or None
         if current_folder_id == self.SMART_ALL:
-            notes = self._note_service.get_all()
+            notes = self._note_service.get_all(tag=tag_filter)
         elif current_folder_id == self.SMART_FAVORITES:
             notes = self._note_service.get_pinned(ensure_note_id=self._current_note_id)
+            if tag_filter:
+                notes = [n for n in notes if any(
+                    t == tag_filter or t.startswith(tag_filter + '/') for t in n.get('tags', [])
+                )]
         else:
-            notes = self._note_service.get_all(folder_id=current_folder_id or None)
+            notes = self._note_service.get_all(folder_id=current_folder_id or None, tag=tag_filter)
 
         return self._apply_sort_and_filter(notes)
+
+    @pyqtProperty(list, notify=tagsChanged)
+    def allTags(self):
+        """Get all tags with counts for the current library."""
+        if not self._note_service:
+            return []
+        return self._note_service.get_all_tags()
+
+    @pyqtProperty(str, notify=tagsChanged)
+    def selectedTag(self) -> str:
+        """Get currently selected tag filter."""
+        return self._selected_tag
     
     @pyqtProperty(str, notify=filteredNotesChanged)
     def currentFolderName(self) -> str:
@@ -358,6 +379,36 @@ class NoteController(QObject):
         
         return ""
     
+    @pyqtSlot(str)
+    def selectTag(self, tag: str):
+        """Set active tag filter; selecting the same tag clears it."""
+        if self._selected_tag == tag:
+            self._selected_tag = ""
+        else:
+            self._selected_tag = tag
+        self.tagsChanged.emit()
+        self.filteredNotesChanged.emit()
+
+    @pyqtSlot()
+    def clearTagFilter(self):
+        """Clear active tag filter."""
+        if self._selected_tag:
+            self._selected_tag = ""
+            self.tagsChanged.emit()
+            self.filteredNotesChanged.emit()
+
+    @pyqtSlot(str, 'QVariantList', result=bool)
+    def updateNoteTags(self, note_id: str, tags: list) -> bool:
+        """Update the tags for a note."""
+        if not note_id or not self._note_service:
+            return False
+        tag_list = [str(t).strip() for t in tags if str(t).strip()]
+        if self._note_service.update_tags(note_id, tag_list):
+            self.tagsChanged.emit()
+            self.filteredNotesChanged.emit()
+            return True
+        return False
+
     @pyqtSlot(str, result=bool)
     def deleteNote(self, note_id: str) -> bool:
         """Soft delete a note by ID."""
@@ -367,6 +418,7 @@ class NoteController(QObject):
             
             self.notesChanged.emit()
             self.filteredNotesChanged.emit()
+            self.tagsChanged.emit()
             self.noteRemoved.emit(note_id)
             return True
         

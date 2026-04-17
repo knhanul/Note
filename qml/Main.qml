@@ -150,6 +150,7 @@ Window {
                 color: "transparent"
                 z: 3000
                 clip: true
+                property int sidebarTabIdx: 0  // 0=폴더, 1=태그
 
                 Behavior on Layout.preferredWidth {
                     NumberAnimation { duration: Metrics.durationNormal; easing.type: Easing.InOutQuart }
@@ -453,27 +454,70 @@ Window {
                             z: 0
                         }
 
-                        // Header for Folders section with Add button
+                        // ── Tab switcher: 폴더 | 태그 ──────────────────────────
                         RowLayout {
                             Layout.fillWidth: true
                             Layout.leftMargin: Metrics.xs
                             Layout.rightMargin: Metrics.xs
-                            z: 2100
+                            spacing: 4
 
-                            Text {
-                                text: "폴더"
-                                font.family: Typography.fontPrimary
-                                font.weight: Typography.weightSemibold
-                                font.pixelSize: Typography.caption
-                                color: Colors.textTertiary
-                                font.letterSpacing: Typography.letterSpacingWide
+                            // 폴더 tab
+                            Rectangle {
+                                height: 26
+                                width: 54
+                                radius: Metrics.radiusMd
+                                color: sidebar.sidebarTabIdx === 0 ? Colors.primary500 : (folderTabMA.containsMouse ? Colors.primary50 : "transparent")
+                                border.color: sidebar.sidebarTabIdx === 0 ? Colors.primary600 : (folderTabMA.containsMouse ? Colors.primary200 : Colors.borderLight)
+                                border.width: 1
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "폴더"
+                                    font.family: Typography.fontPrimary
+                                    font.weight: sidebar.sidebarTabIdx === 0 ? Typography.weightSemibold : Typography.weightRegular
+                                    font.pixelSize: 11
+                                    color: sidebar.sidebarTabIdx === 0 ? "white" : Colors.textSecondary
+                                }
+                                MouseArea {
+                                    id: folderTabMA
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    onClicked: {
+                                        sidebar.sidebarTabIdx = 0
+                                        if (noteController) noteController.clearTagFilter()
+                                    }
+                                }
+                            }
+
+                            // 태그 tab
+                            Rectangle {
+                                height: 26
+                                width: 54
+                                radius: Metrics.radiusMd
+                                color: sidebar.sidebarTabIdx === 1 ? Colors.primary500 : (tagTabMA.containsMouse ? Colors.primary50 : "transparent")
+                                border.color: sidebar.sidebarTabIdx === 1 ? Colors.primary600 : (tagTabMA.containsMouse ? Colors.primary200 : Colors.borderLight)
+                                border.width: 1
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "태그"
+                                    font.family: Typography.fontPrimary
+                                    font.weight: sidebar.sidebarTabIdx === 1 ? Typography.weightSemibold : Typography.weightRegular
+                                    font.pixelSize: 11
+                                    color: sidebar.sidebarTabIdx === 1 ? "white" : Colors.textSecondary
+                                }
+                                MouseArea {
+                                    id: tagTabMA
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    onClicked: sidebar.sidebarTabIdx = 1
+                                }
                             }
 
                             Item { Layout.fillWidth: true }
 
-                            // Add folder button
+                            // Add folder button (폴더 탭에서만 표시)
                             Rectangle {
                                 id: addFolderButton
+                                visible: sidebar.sidebarTabIdx === 0
                                 width: 20
                                 height: 20
                                 z: 2101
@@ -747,13 +791,21 @@ Window {
                         ListView {
                             id: foldersListView
                             Layout.fillWidth: true
-                            Layout.fillHeight: true
+                            Layout.fillHeight: sidebar.sidebarTabIdx === 0
+                            visible: sidebar.sidebarTabIdx === 0
                             z: 0
                             model: folderController ? folderController.folders : []
                             spacing: Metrics.xs
                             clip: true
                             ScrollBar.vertical: ScrollBar {
                                 policy: ScrollBar.AsNeeded
+                                implicitWidth: 4
+                                contentItem: Rectangle {
+                                    radius: 2
+                                    color: Colors.borderMedium
+                                    opacity: parent.active ? 0.8 : 0.4
+                                }
+                                background: Item {}
                             }
 
                             delegate: FolderItem {
@@ -805,21 +857,167 @@ Window {
                             }
                         }
 
-                        Rectangle {
+                        // ── Tag list (태그 탭) ───────────────────────────────
+                        Item {
                             Layout.fillWidth: true
-                            height: 80
-                            radius: Metrics.radiusLg
-                            color: Colors.bgSecondary
-                            border.width: 1
-                            border.color: Colors.borderLight
+                            Layout.fillHeight: sidebar.sidebarTabIdx === 1
+                            visible: sidebar.sidebarTabIdx === 1
 
-                            Text {
-                                anchors.centerIn: parent
-                                text: "No tags"
-                                font.family: Typography.fontPrimary
-                                font.weight: Typography.weightRegular
-                                font.pixelSize: Typography.bodySmall
-                                color: Colors.textTertiary
+                            ColumnLayout {
+                                anchors.fill: parent
+                                spacing: 2
+
+                                // "전체 해제" chip — only shown when a tag is selected
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    visible: noteController && noteController.selectedTag !== ""
+                                    height: 26
+                                    radius: Metrics.radiusMd
+                                    color: Colors.primary50
+                                    border.color: Colors.primary200
+                                    border.width: 1
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: Metrics.sm
+                                        anchors.rightMargin: Metrics.sm
+                                        spacing: 4
+                                        Text {
+                                            text: "#" + (noteController ? noteController.selectedTag : "")
+                                            font.family: Typography.fontPrimary
+                                            font.pixelSize: 11
+                                            color: Colors.primary600
+                                            font.weight: Typography.weightMedium
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                        }
+                                        Text {
+                                            text: "✕"
+                                            font.pixelSize: 10
+                                            color: Colors.primary400
+                                        }
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        onClicked: if (noteController) noteController.clearTagFilter()
+                                    }
+                                }
+
+                                // Tag list
+                                ListView {
+                                    id: tagListView
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    clip: true
+                                    spacing: 1
+                                    model: noteController ? noteController.allTags : []
+                                    ScrollBar.vertical: ScrollBar {
+                                        policy: ScrollBar.AsNeeded
+                                        implicitWidth: 4
+                                        contentItem: Rectangle {
+                                            radius: 2
+                                            color: Colors.borderMedium
+                                            opacity: parent.active ? 0.8 : 0.4
+                                        }
+                                        background: Item {}
+                                    }
+
+                                    Connections {
+                                        target: noteController
+                                        function onTagsChanged() { tagListView.model = noteController ? noteController.allTags : [] }
+                                    }
+
+                                    delegate: Rectangle {
+                                        property var tagData: modelData
+                                        property string tagName: tagData ? (tagData.name || "") : ""
+                                        property int tagCount: tagData ? (tagData.count || 0) : 0
+                                        property bool isSelected: noteController && noteController.selectedTag === tagName
+                                        property bool tagHovered: false
+                                        property int tagDepth: tagName.split('/').length - 1
+
+                                        width: tagListView.width
+                                        height: 30
+                                        radius: Metrics.radiusMd
+                                        color: isSelected
+                                            ? Colors.primary500
+                                            : (tagHovered ? Colors.primary50 : "transparent")
+
+                                        Behavior on color { ColorAnimation { duration: Metrics.durationFast } }
+
+                                        RowLayout {
+                                            anchors.fill: parent
+                                            anchors.leftMargin: Metrics.sm + tagDepth * 12
+                                            anchors.rightMargin: Metrics.sm
+                                            spacing: 4
+
+                                            // Hierarchy indicator
+                                            Text {
+                                                visible: tagDepth > 0
+                                                text: "└"
+                                                font.pixelSize: 10
+                                                color: isSelected ? Qt.rgba(1,1,1,0.5) : Colors.textTertiary
+                                            }
+
+                                            // # prefix
+                                            Text {
+                                                text: "#"
+                                                font.family: Typography.fontPrimary
+                                                font.pixelSize: 11
+                                                color: isSelected ? Qt.rgba(1,1,1,0.7) : Colors.primary400
+                                                font.weight: Typography.weightMedium
+                                            }
+
+                                            // Tag name (leaf only — strip parent prefix)
+                                            Text {
+                                                text: tagName.split('/').pop()
+                                                font.family: Typography.fontPrimary
+                                                font.pixelSize: 12
+                                                color: isSelected ? "white" : Colors.textPrimary
+                                                font.weight: isSelected ? Typography.weightSemibold : Typography.weightRegular
+                                                elide: Text.ElideRight
+                                                Layout.fillWidth: true
+                                            }
+
+                                            // Note count badge
+                                            Rectangle {
+                                                width: Math.max(18, countText.implicitWidth + 8)
+                                                height: 16
+                                                radius: Metrics.radiusFull
+                                                color: isSelected ? Qt.rgba(1,1,1,0.2) : Colors.bgTertiary
+                                                Text {
+                                                    id: countText
+                                                    anchors.centerIn: parent
+                                                    text: tagCount
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: 10
+                                                    color: isSelected ? "white" : Colors.textTertiary
+                                                }
+                                            }
+                                        }
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            onEntered: parent.tagHovered = true
+                                            onExited: parent.tagHovered = false
+                                            onClicked: {
+                                                if (noteController) noteController.selectTag(tagName)
+                                            }
+                                        }
+                                    }
+
+                                    // Empty state
+                                    Text {
+                                        anchors.centerIn: parent
+                                        visible: tagListView.count === 0
+                                        text: "태그가 없습니다\n노트에 #태그를 추가하세요"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
+                                        color: Colors.textTertiary
+                                        lineHeight: 1.6
+                                    }
+                                }
                             }
                         }
                     }
@@ -1339,6 +1537,13 @@ Window {
                             reuseItems: false  // Prevent delegate recycling issues
                             ScrollBar.vertical: ScrollBar {
                                 policy: ScrollBar.AsNeeded
+                                implicitWidth: 4
+                                contentItem: Rectangle {
+                                    radius: 2
+                                    color: Colors.borderMedium
+                                    opacity: parent.active ? 0.8 : 0.4
+                                }
+                                background: Item {}
                             }
 
                             // Use filtered notes from noteController
@@ -1780,6 +1985,138 @@ Window {
                             onRequestSave: {
                                 if (noteController) noteController.saveCurrentNote()
                             }
+                        }
+
+                        // ── Tag row (note tags display + edit) ───────────────
+                        RowLayout {
+                            Layout.fillWidth: true
+                            visible: window.selectedNoteId !== ""
+                            spacing: 4
+
+                            Text {
+                                text: "#"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: 11
+                                color: Colors.textTertiary
+                                font.weight: Typography.weightMedium
+                            }
+
+                            // Existing tags
+                            Repeater {
+                                model: window.currentNote ? (window.currentNote.tags || []) : []
+                                delegate: Rectangle {
+                                    property bool tagChipHovered: false
+                                    height: 20
+                                    width: chipRow.implicitWidth + 12
+                                    radius: Metrics.radiusFull
+                                    color: tagChipHovered ? Colors.primary100 : Colors.bgTertiary
+                                    border.color: tagChipHovered ? Colors.primary300 : Colors.borderLight
+                                    border.width: 1
+                                    Behavior on color { ColorAnimation { duration: Metrics.durationFast } }
+
+                                    Row {
+                                        id: chipRow
+                                        anchors.centerIn: parent
+                                        spacing: 3
+                                        Text {
+                                            text: modelData
+                                            font.family: Typography.fontPrimary
+                                            font.pixelSize: 10
+                                            color: Colors.primary600
+                                            anchors.verticalCenter: parent.verticalCenter
+                                        }
+                                        Text {
+                                            text: "×"
+                                            font.pixelSize: 9
+                                            color: tagChipHovered ? "#DC2626" : Colors.textTertiary
+                                            anchors.verticalCenter: parent.verticalCenter
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        onEntered: parent.tagChipHovered = true
+                                        onExited: parent.tagChipHovered = false
+                                        onClicked: {
+                                            if (!window.selectedNoteId || !noteController) return
+                                            var tags = (window.currentNote && window.currentNote.tags) ? window.currentNote.tags.slice() : []
+                                            var idx = tags.indexOf(modelData)
+                                            if (idx >= 0) tags.splice(idx, 1)
+                                            noteController.updateNoteTags(window.selectedNoteId, tags)
+                                            var updated = noteController.getNote(window.selectedNoteId)
+                                            if (updated) window.currentNote = updated
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Add tag input
+                            Rectangle {
+                                id: tagInputBox
+                                height: 20
+                                width: tagInputField.activeFocus ? 90 : 20
+                                radius: Metrics.radiusFull
+                                color: tagInputField.activeFocus ? Colors.bgTertiary : (addTagMA.containsMouse ? Colors.bgTertiary : "transparent")
+                                border.color: tagInputField.activeFocus ? Colors.primary300 : (addTagMA.containsMouse ? Colors.borderLight : "transparent")
+                                border.width: 1
+                                clip: true
+
+                                Behavior on width { NumberAnimation { duration: 150 } }
+
+                                TextInput {
+                                    id: tagInputField
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 6
+                                    anchors.rightMargin: 6
+                                    verticalAlignment: TextInput.AlignVCenter
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: 10
+                                    color: Colors.textPrimary
+                                    clip: true
+
+                                    Text {
+                                        anchors.fill: parent
+                                        verticalAlignment: Text.AlignVCenter
+                                        text: tagInputField.activeFocus ? "" : "+"
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: tagInputField.activeFocus ? 0 : 13
+                                        color: Colors.textTertiary
+                                        visible: tagInputField.text === ""
+                                    }
+
+                                    Keys.onReturnPressed: {
+                                        var raw = tagInputField.text.trim().replace(/^#/, "")
+                                        if (raw && window.selectedNoteId && noteController) {
+                                            var tags = (window.currentNote && window.currentNote.tags) ? window.currentNote.tags.slice() : []
+                                            if (tags.indexOf(raw) < 0) tags.push(raw)
+                                            noteController.updateNoteTags(window.selectedNoteId, tags)
+                                            var updated = noteController.getNote(window.selectedNoteId)
+                                            if (updated) window.currentNote = updated
+                                        }
+                                        tagInputField.text = ""
+                                        tagInputField.focus = false
+                                    }
+                                    Keys.onEscapePressed: {
+                                        tagInputField.text = ""
+                                        tagInputField.focus = false
+                                    }
+                                }
+
+                                MouseArea {
+                                    id: addTagMA
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    visible: !tagInputField.activeFocus
+                                    onClicked: tagInputField.forceActiveFocus()
+                                }
+
+                                ToolTip.visible: addTagMA.containsMouse && !tagInputField.activeFocus
+                                ToolTip.text: "태그 추가"
+                                ToolTip.delay: 600
+                            }
+
+                            Item { Layout.fillWidth: true }
                         }
 
                         // Bottom status bar

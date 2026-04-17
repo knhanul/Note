@@ -1,4 +1,5 @@
 .venv/
+libraries/
 
 # 빌드 결과
 build/
