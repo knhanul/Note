@@ -1420,6 +1420,14 @@ Window {
                                         }
                                     }
                                 }
+
+                                onDeleteClicked: {
+                                    if (noteItem.noteId) {
+                                        deleteConfirmDialog.targetNoteId = noteItem.noteId
+                                        deleteConfirmDialog.targetNoteTitle = noteItem.title || "제목 없음"
+                                        deleteConfirmDialog.visible = true
+                                    }
+                                }
                             }
 
                             // Show empty state when no notes
@@ -1897,6 +1905,119 @@ Window {
                                 font.weight: Typography.weightRegular
                                 font.pixelSize: Typography.caption
                                 color: Colors.textTertiary
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Note Delete Confirmation Dialog ─────────────────────────────────────
+    Rectangle {
+        id: deleteConfirmDialog
+        visible: false
+        anchors.centerIn: parent
+        width: 340
+        height: 160
+        radius: Metrics.radiusXxl
+        color: Colors.bgPrimary
+        border.color: Colors.borderLight
+        border.width: 1
+        z: 9000
+
+        property string targetNoteId: ""
+        property string targetNoteTitle: ""
+
+        // Backdrop
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: -9999
+            color: Qt.rgba(0, 0, 0, 0.35)
+            z: -1
+            MouseArea { anchors.fill: parent }
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: Metrics.cardPadding
+            spacing: Metrics.md
+
+            Text {
+                text: "노트 삭제"
+                font.family: Typography.fontPrimary
+                font.weight: Typography.weightSemibold
+                font.pixelSize: Typography.h4
+                color: Colors.textPrimary
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: "\"" + deleteConfirmDialog.targetNoteTitle + "\" 을(를) 삭제할까요?"
+                font.family: Typography.fontPrimary
+                font.weight: Typography.weightRegular
+                font.pixelSize: Typography.body
+                color: Colors.textSecondary
+                wrapMode: Text.Wrap
+            }
+
+            Item { Layout.fillHeight: true }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Metrics.sm
+
+                Item { Layout.fillWidth: true }
+
+                // Cancel
+                Rectangle {
+                    width: 80; height: 34
+                    radius: Metrics.radiusMd
+                    color: cancelMA.containsMouse ? Colors.bgTertiary : Colors.bgSecondary
+                    border.color: Colors.borderLight
+                    border.width: 1
+                    Text {
+                        anchors.centerIn: parent
+                        text: "취소"
+                        font.family: Typography.fontPrimary
+                        font.pixelSize: 13
+                        color: Colors.textSecondary
+                    }
+                    MouseArea {
+                        id: cancelMA
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: deleteConfirmDialog.visible = false
+                    }
+                }
+
+                // Delete confirm
+                Rectangle {
+                    width: 80; height: 34
+                    radius: Metrics.radiusMd
+                    color: confirmDeleteMA.containsMouse ? "#B91C1C" : "#DC2626"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "삭제"
+                        font.family: Typography.fontPrimary
+                        font.weight: Typography.weightSemibold
+                        font.pixelSize: 13
+                        color: "white"
+                    }
+                    MouseArea {
+                        id: confirmDeleteMA
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: {
+                            var noteId = deleteConfirmDialog.targetNoteId
+                            deleteConfirmDialog.visible = false
+                            if (noteId && noteController) {
+                                if (window.selectedNoteId === noteId) {
+                                    window.selectedNoteId = ""
+                                    window.currentNote = null
+                                }
+                                window.closeTab(noteId)
+                                noteController.deleteNote(noteId)
                             }
                         }
                     }

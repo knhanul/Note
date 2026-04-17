@@ -17,6 +17,7 @@ Item {
 
     signal clicked()
     signal pinClicked()
+    signal deleteClicked()
 
     height: 56
     Layout.fillWidth: true
@@ -68,10 +69,11 @@ Item {
                 }
             }
 
-            // Spacer for star button
+            // Spacer for star + delete buttons
             Item {
-                width: 20
+                width: root.isHovered ? 44 : 20
                 height: 20
+                Behavior on width { NumberAnimation { duration: Metrics.durationFast } }
             }
         }
     }
@@ -83,6 +85,44 @@ Item {
         onEntered: root.isHovered = true
         onExited: root.isHovered = false
         onClicked: root.clicked()
+    }
+
+    // Delete button - visible on hover, left of star
+    Rectangle {
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.rightMargin: Metrics.md + 24
+        anchors.topMargin: Metrics.md
+        width: 20
+        height: 20
+        radius: Metrics.radiusFull
+        visible: root.isHovered
+        opacity: root.isHovered ? 1 : 0
+        color: deleteBtnMA.containsMouse
+            ? (root.isSelected ? Qt.rgba(1, 0.3, 0.3, 0.4) : "#FEE2E2")
+            : (root.isSelected ? Qt.rgba(1, 1, 1, 0.15) : Colors.bgTertiary)
+        z: 11
+
+        Behavior on opacity { NumberAnimation { duration: Metrics.durationFast } }
+
+        Text {
+            anchors.centerIn: parent
+            text: "✕"
+            font.pixelSize: 10
+            color: deleteBtnMA.containsMouse
+                ? "#DC2626"
+                : (root.isSelected ? Colors.textInverse : Colors.textTertiary)
+        }
+
+        MouseArea {
+            id: deleteBtnMA
+            anchors.fill: parent
+            hoverEnabled: true
+            onClicked: {
+                mouse.accepted = true
+                root.deleteClicked()
+            }
+        }
     }
 
     // Star button at root level - above the main MouseArea
