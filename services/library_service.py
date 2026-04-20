@@ -97,6 +97,9 @@ class LibraryService(QObject):
         db_filename = f"{library_id}.db"
         db_path = str(self._libraries_dir / db_filename)
         
+        # Ensure parent directory exists
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        
         # Insert into metadata table
         self._meta_db.execute(
             """INSERT INTO libraries (id, name, description, db_path, created_at, updated_at, is_default)

@@ -22,6 +22,10 @@ class Database:
     def connect(self) -> sqlite3.Connection:
         """Get or create database connection."""
         if self._connection is None:
+            # Ensure parent directory exists
+            db_path = Path(self.db_path)
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            
             self._connection = sqlite3.connect(self.db_path, check_same_thread=False)
             # Return rows as dictionaries
             self._connection.row_factory = sqlite3.Row

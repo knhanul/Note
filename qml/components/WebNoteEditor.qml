@@ -108,6 +108,7 @@ ColumnLayout {
         Timer {
             id: setContentTimer
             interval: 150
+            repeat: false
             onTriggered: {
                 setEditorContent(root.content, root.contentJson)
             }
@@ -229,16 +230,29 @@ ColumnLayout {
         // Delay focus to ensure editor is ready after visibility change
         focusTimer.start()
     }
-    
+
+    // Reset editor content without overriding bound properties
+    function resetEditor() {
+        if (webView.loadProgress === 100) {
+            webView.runJavaScript("if (window.editorAPI) { window.editorAPI.setContent('', ''); }")
+        }
+    }
+
     onContentChanged: {
         if (webView.loadProgress === 100) {
-            setEditorContent(content, contentJson)
+            setContentTimer.restart()
+        }
+    }
+
+    onNoteIdChanged: {
+        if (webView.loadProgress === 100) {
+            setContentTimer.restart()
         }
     }
 
     onContentJsonChanged: {
-        if (webView.loadProgress === 100 && contentJson !== "") {
-            setEditorContent(content, contentJson)
+        if (webView.loadProgress === 100) {
+            setContentTimer.restart()
         }
     }
 }

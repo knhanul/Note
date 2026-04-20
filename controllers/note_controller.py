@@ -484,12 +484,48 @@ class NoteController(QObject):
             return QVariant(note)
         return QVariant()
     
+    def _is_note_empty(self, note_id: str) -> bool:
+        """Check if note is effectively empty (default title + no content)."""
+        note = self._note_service.get_by_id(note_id)
+        if not note:
+            return False
+        title = note.get('title', '') or ''
+        content = note.get('content', '') or ''
+        normalized = content.strip()
+        lowered = normalized.lower()
+
+        has_media = bool(re.search(r"<(img|video|audio|iframe|embed|object)\\b", content, re.IGNORECASE))
+        has_image_token = "note-image://" in content or "data:image/" in content
+
+        # TipTap/HTML editor often stores placeholder markup even when user entered nothing.
+        if has_media or has_image_token:
+            is_empty_content = False
+        elif lowered in ("<p></p>", "<p><br></p>", "<p><br/></p>", "<div><br></div>"):
+            is_empty_content = True
+        else:
+            plain = re.sub(r"<[^>]+>", "", content)
+            plain = plain.replace("&nbsp;", " ").replace("\u00a0", " ").replace("\u200b", "").strip()
+            is_empty_content = plain == ""
+
+        # Empty if title is default/blank and content is effectively empty
+        is_default_title = title in ('', '새 노트', '제목 없는 노트')
+        return is_default_title and is_empty_content
+
     @pyqtSlot(str, result=bool)
     def selectNote(self, note_id: str) -> bool:
         """Select a note (set as current)."""
-        # Save current note if dirty before switching
-        if self._is_dirty and self._current_note_id and self._current_note_id != note_id:
-            self.saveCurrentNote()
+        # If switching to different note, check if current note is empty and delete it
+        if self._current_note_id and self._current_note_id != note_id:
+            if self._is_note_empty(self._current_note_id):
+                # Delete empty note without saving
+                self._note_service.hard_delete(self._current_note_id)  # Hard delete empty note
+                self.notesChanged.emit()
+                self.filteredNotesChanged.emit()
+                self.tagsChanged.emit()
+                self.noteRemoved.emit(self._current_note_id)
+            elif self._is_dirty:
+                # Save current note if dirty before switching
+                self.saveCurrentNote()
 
         note = self._note_service.get_by_id(note_id)
         if note:
@@ -497,6 +533,7 @@ class NoteController(QObject):
             self._is_dirty = False
             self._save_status = "saved"
             self.notesChanged.emit()
+            self.filteredNotesChanged.emit()
             self.saveStatusChanged.emit()
             return True
         return False

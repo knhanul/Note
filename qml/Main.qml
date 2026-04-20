@@ -21,6 +21,8 @@ Window {
     property var currentNote: null
     property var openTabs: []   // [{id, title}, ...]
     property real editorZoom: 1.0
+    property bool isDraftNewNote: false
+    property string draftFolderId: ""
 
     function addOrActivateTab(noteId, noteTitle) {
         for (var i = 0; i < openTabs.length; i++) {
@@ -43,6 +45,35 @@ Window {
         }
     }
 
+    function startDraftNote() {
+        isDraftNewNote = true
+        draftFolderId = folderController ? folderController.currentFolderId : ""
+        selectedNoteId = ""
+        currentNote = { title: "", content: "", content_json: "" }
+        if (noteEditor) {
+            noteEditor.resetEditor()
+            noteEditor.focusTitle()
+        }
+    }
+
+    function ensureDraftPersisted(newTitle, newMarkdown, newJson) {
+        if (!isDraftNewNote || !noteController) return selectedNoteId
+        var titleText = (newTitle || "").trim()
+        if (!titleText) return ""
+
+        var targetFolderId = draftFolderId
+        if (!targetFolderId && folderController) {
+            targetFolderId = folderController.currentFolderId
+        }
+
+        var newId = noteController.createNote(titleText, newMarkdown || "", targetFolderId)
+        if (!newId) return ""
+
+        isDraftNewNote = false
+        selectedNoteId = newId
+        return newId
+    }
+
     function closeTab(noteId) {
         var idx = -1
         for (var i = 0; i < openTabs.length; i++) {
@@ -54,11 +85,12 @@ Window {
         openTabs = t
         if (noteId === selectedNoteId) {
             if (t.length === 0) {
+                if (noteController) noteController.selectNote("")
                 selectedNoteId = ""
             } else {
                 var next = t[Math.min(idx, t.length - 1)]
-                selectedNoteId = next.id
                 if (noteController) noteController.selectNote(next.id)
+                selectedNoteId = next.id
             }
         }
     }
@@ -68,7 +100,20 @@ Window {
             updateTabTitle(selectedNoteId, currentNote.title || "제목 없음")
         }
     }
-    
+
+    onSelectedNoteIdChanged: {
+        if (selectedNoteId && noteController) {
+            window.isDraftNewNote = false
+            window.currentNote = noteController.getNote(selectedNoteId)
+            var title = window.currentNote ? (window.currentNote.title || "제목 없음") : "제목 없음"
+            addOrActivateTab(selectedNoteId, title)
+        } else {
+            if (!window.isDraftNewNote) {
+                window.currentNote = null
+            }
+        }
+    }
+
     // Library change handling - force refresh
     Connections {
         target: folderController
@@ -109,18 +154,7 @@ Window {
             }
         }
     }
-    
-    // Load note data when selection changes + update tabs
-    onSelectedNoteIdChanged: {
-        if (selectedNoteId && noteController) {
-            currentNote = noteController.getNote(selectedNoteId)
-            var title = currentNote ? (currentNote.title || "제목 없음") : "제목 없음"
-            addOrActivateTab(selectedNoteId, title)
-        } else {
-            currentNote = null
-        }
-    }
-    
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -1114,15 +1148,7 @@ Window {
                                     anchors.fill: parent
                                     hoverEnabled: true
                                     onClicked: {
-                                        // Create new note in current folder
-                                        if (noteController && folderController) {
-                                            var newId = noteController.createNote("새 노트", "", folderController.currentFolderId)
-                                            window.selectedNoteId = newId
-                                            // Focus the editor title after creation
-                                            if (noteEditor) {
-                                                noteEditor.focusTitle()
-                                            }
-                                        }
+                                        window.startDraftNote()
                                     }
                                 }
 
@@ -1743,8 +1769,8 @@ Window {
                                         anchors.fill: parent
                                         hoverEnabled: true
                                         onClicked: {
-                                            window.selectedNoteId = modelData.id
                                             if (noteController) noteController.selectNote(modelData.id)
+                                            window.selectedNoteId = modelData.id
                                         }
                                     }
 
@@ -1913,7 +1939,7 @@ Window {
 
                         // Empty state - only visible when no note selected
                         Rectangle {
-                            visible: !window.selectedNoteId
+                            visible: !window.selectedNoteId && !window.isDraftNewNote
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             color: "transparent"
@@ -1949,13 +1975,7 @@ Window {
                                         anchors.fill: parent
                                         hoverEnabled: true
                                         onClicked: {
-                                            if (noteController && folderController) {
-                                                var newId = noteController.createNote("새 노트", "", folderController.currentFolderId)
-                                                window.selectedNoteId = newId
-                                                if (noteEditor) {
-                                                    noteEditor.focusTitle()
-                                                }
-                                            }
+                                            window.startDraftNote()
                                         }
                                     }
 
@@ -1976,7 +1996,7 @@ Window {
                             id: noteEditor
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            visible: window.selectedNoteId !== ""
+                            visible: window.selectedNoteId !== "" || window.isDraftNewNote
 
                             noteId: window.selectedNoteId
                             title: window.currentNote ? (window.currentNote.title || "") : ""
@@ -1987,30 +2007,56 @@ Window {
 
                             // Primary handler: receives title + markdown + JSON in one shot
                             onContentUpdated: (newTitle, newMarkdown, newJson) => {
-                                if (window.selectedNoteId && noteController) {
+                                if (!noteController) return
+
+                                var targetNoteId = window.selectedNoteId
+                                if (window.isDraftNewNote) {
+                                    targetNoteId = window.ensureDraftPersisted(newTitle, newMarkdown, newJson)
+                                }
+
+                                if (targetNoteId) {
                                     noteController.updateNoteWithJson(
-                                        window.selectedNoteId, newTitle, newMarkdown, newJson)
-                                    if (newTitle) window.updateTabTitle(window.selectedNoteId, newTitle)
+                                        targetNoteId, newTitle, newMarkdown, newJson)
+                                    if (newTitle) window.updateTabTitle(targetNoteId, newTitle)
                                 }
                             }
 
                             // Fallback: old-format signals (backward compat)
                             onTitleEdited: (newTitle) => {
-                                if (window.selectedNoteId && noteController) {
+                                if (!noteController) return
+
+                                var targetNoteId = window.selectedNoteId
+                                if (window.isDraftNewNote) {
+                                    targetNoteId = window.ensureDraftPersisted(newTitle, noteEditor.content, noteEditor.contentJson)
+                                }
+
+                                if (targetNoteId) {
                                     noteController.updateNote(
-                                        window.selectedNoteId, newTitle,
+                                        targetNoteId, newTitle,
                                         window.currentNote ? window.currentNote.content : "")
                                 }
                             }
 
                             onContentEdited: (newContent) => {
-                                if (window.selectedNoteId && noteController) {
+                                if (!noteController) return
+
+                                var targetNoteId = window.selectedNoteId
+                                if (window.isDraftNewNote) {
+                                    targetNoteId = window.ensureDraftPersisted(noteEditor.title, newContent, noteEditor.contentJson)
+                                }
+
+                                if (targetNoteId) {
                                     noteController.updateNote(
-                                        window.selectedNoteId, noteEditor.title, newContent)
+                                        targetNoteId, noteEditor.title, newContent)
                                 }
                             }
 
                             onRequestSave: {
+                                if (window.isDraftNewNote) {
+                                    var targetNoteId = window.ensureDraftPersisted(
+                                        noteEditor.title, noteEditor.content, noteEditor.contentJson)
+                                    if (!targetNoteId) return
+                                }
                                 if (noteController) noteController.saveCurrentNote()
                             }
                         }
@@ -2234,7 +2280,7 @@ Window {
 
                             // Folder path + Note title
                             Text {
-                                visible: window.selectedNoteId && noteController
+                                visible: window.selectedNoteId !== "" && !!noteController
                                 text: {
                                     var path = noteController ? noteController.getFolderPathForNote(window.selectedNoteId) : ""
                                     var title = window.currentNote ? (window.currentNote.title || "제목 없음") : ""
@@ -2252,7 +2298,7 @@ Window {
 
                             // Current note metadata (created + updated)
                             Text {
-                                visible: window.selectedNoteId && noteController && window.currentNote
+                                visible: window.selectedNoteId !== "" && !!noteController && !!window.currentNote
                                 text: {
                                     if (!window.currentNote) return ""
                                     var created = window.currentNote.created_at ? noteController.formatDate(window.currentNote.created_at) : ""
@@ -2285,7 +2331,7 @@ Window {
         anchors.centerIn: parent
         width: 340
         height: 160
-        radius: Metrics.radiusXxl
+        radius: (typeof Metrics !== "undefined" && typeof Metrics.radiusXxl === "number") ? Metrics.radiusXxl : 24
         color: Colors.bgPrimary
         border.color: Colors.borderLight
         border.width: 1
@@ -2730,7 +2776,7 @@ Window {
         height: 180
         z: 9999
         color: Colors.bgPrimary
-        radius: Metrics.radiusXxl
+        radius: (typeof Metrics !== "undefined" && typeof Metrics.radiusXxl === "number") ? Metrics.radiusXxl : 24
         border.width: 1
         border.color: Colors.borderLight
 
