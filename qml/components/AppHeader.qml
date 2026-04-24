@@ -1,17 +1,26 @@
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Controls
 import theme
 
 Rectangle {
     id: root
 
     signal logoClicked()
+    signal syncClicked()
+    signal importClicked()
+    signal exportClicked()
+
+    property string syncIconSource: ""
+    property string importIconSource: ""
+    property string exportIconSource: ""
 
     height: Metrics.headerHeight
     color: "transparent"
 
     // ── Left: Logo + App name (클릭으로 패널 사이클) ──────────
     Item {
+        id: titleBlock
         anchors.left: parent.left
         anchors.leftMargin: Metrics.xl
         anchors.verticalCenter: parent.verticalCenter
@@ -86,13 +95,138 @@ Rectangle {
         }
     }
 
-    // ── Right: Status ──────────────────────────────────────────
+    // ── Right: Toolbar + Status ──────────────────────────────────────────
     RowLayout {
         anchors.right: parent.right
         anchors.rightMargin: Metrics.xl
         anchors.verticalCenter: parent.verticalCenter
         spacing: Metrics.sm
 
+        Rectangle {
+            id: importBtn
+            width: 32
+            height: 32
+            radius: 8
+            color: importMA.containsMouse ? "#F0F5FF" : "transparent"
+            border.width: 0
+
+            Image {
+                anchors.centerIn: parent
+                width: 19
+                height: 19
+                source: root.importIconSource
+                fillMode: Image.PreserveAspectFit
+                visible: !!root.importIconSource
+            }
+
+            Text {
+                anchors.centerIn: parent
+                visible: !root.importIconSource
+                text: "⤓"
+                font.pixelSize: 18
+                color: Colors.textSecondary
+            }
+
+            MouseArea {
+                id: importMA
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.importClicked()
+            }
+
+            ToolTip.visible: importMA.containsMouse
+            ToolTip.delay: 400
+            ToolTip.text: "가져오기"
+        }
+
+        Rectangle {
+            id: exportBtn
+            width: 32
+            height: 32
+            radius: 8
+            color: exportMA.containsMouse ? "#F0F5FF" : "transparent"
+            border.width: 0
+
+            Image {
+                anchors.centerIn: parent
+                width: 19
+                height: 19
+                source: root.exportIconSource
+                fillMode: Image.PreserveAspectFit
+                visible: !!root.exportIconSource
+            }
+
+            Text {
+                anchors.centerIn: parent
+                visible: !root.exportIconSource
+                text: "⤒"
+                font.pixelSize: 18
+                color: Colors.textSecondary
+            }
+
+            MouseArea {
+                id: exportMA
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.exportClicked()
+            }
+
+            ToolTip.visible: exportMA.containsMouse
+            ToolTip.delay: 400
+            ToolTip.text: "보내기"
+        }
+
+        // Sync button (between export and status)
+        Rectangle {
+            id: syncBtn
+            width: 32
+            height: 32
+            radius: 8
+            color: syncMA.containsMouse ? "#F0F5FF" : "transparent"
+            border.width: 0
+
+            Image {
+                anchors.centerIn: parent
+                width: 19
+                height: 19
+                source: root.syncIconSource
+                fillMode: Image.PreserveAspectFit
+                visible: !!root.syncIconSource
+            }
+
+            Text {
+                anchors.centerIn: parent
+                visible: !root.syncIconSource
+                text: "⟳"
+                font.pixelSize: 18
+                color: Colors.textSecondary
+            }
+
+            MouseArea {
+                id: syncMA
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.syncClicked()
+            }
+
+            ToolTip.visible: syncMA.containsMouse
+            ToolTip.delay: 400
+            ToolTip.text: "동기화"
+        }
+
+        // Separator
+        Rectangle {
+            Layout.alignment: Qt.AlignVCenter
+            width: 1
+            height: 20
+            color: Colors.borderLight
+            opacity: 0.9
+        }
+
+        // Status indicator
         Rectangle {
             width: 8
             height: 8

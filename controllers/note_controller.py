@@ -1,6 +1,6 @@
 """Note controller for managing note operations with SQLite persistence."""
 from typing import List, Optional, Dict, Any
-from PyQt6.QtCore import QObject, pyqtSignal, pyqtProperty, pyqtSlot, QTimer, QVariant
+from PyQt6.QtCore import QObject, pyqtSignal, pyqtProperty, pyqtSlot, QVariant, QThread
 from PyQt6.QtGui import QClipboard, QImage
 from PyQt6.QtWidgets import QApplication, QCalendarWidget, QVBoxLayout, QPushButton, QDialog, QHBoxLayout
 from datetime import datetime, date
@@ -12,6 +12,42 @@ from services.database import Database
 from services.note_service import NoteService
 from services.image_service import ImageService
 from services.library_service import LibraryService
+
+
+class _NoteSaveWorker(QObject):
+    finished = pyqtSignal(bool)
+
+    def __init__(self, db_path: str, note_id: str,
+                 title: Optional[str], content: str, content_json: Optional[str]):
+        super().__init__()
+        self._db_path = db_path
+        self._note_id = note_id
+        self._title = title
+        self._content = content
+        self._content_json = content_json
+
+    @pyqtSlot()
+    def run(self):
+        ok = False
+        db = None
+        try:
+            db = Database(self._db_path)
+            note_service = NoteService(db)
+            ok = note_service.update(
+                self._note_id,
+                title=self._title,
+                content=self._content,
+                content_json=self._content_json
+            )
+        except Exception:
+            ok = False
+        finally:
+            try:
+                if db:
+                    db.close()
+            except Exception:
+                pass
+            self.finished.emit(ok)
 
 
 class NoteController(QObject):
@@ -56,10 +92,14 @@ class NoteController(QObject):
         self._filter_to_date: str = ""        # YYYY-MM-DD
         self._selected_tag: str = ""          # active tag filter
 
-        # Auto-save timer (debounce)
-        self._auto_save_timer = QTimer(self)
-        self._auto_save_timer.setSingleShot(True)
-        self._auto_save_timer.timeout.connect(self._perform_auto_save)
+        # Pending data for deferred save (for batching until explicit save)
+        self._pending_title = None
+        self._pending_content = None
+        self._pending_json = None
+        self._current_note_data = {}
+        self._save_thread: Optional[QThread] = None
+        self._save_worker: Optional[_NoteSaveWorker] = None
+        self._save_queued: bool = False
 
         # Connect to signals
         self._folder_controller.currentFolderChanged.connect(self._on_folder_changed)
@@ -86,23 +126,100 @@ class NoteController(QObject):
             self.saveStatusChanged.emit()
     
     # Default notes initialization removed - app starts with empty state
-    
     def _on_folder_changed(self):
         """Handle folder change - emit filtered notes changed."""
         self.filteredNotesChanged.emit()
     
-    def _perform_auto_save(self):
-        """Perform actual save operation."""
+    def _perform_save(self):
+        """Perform save operation asynchronously (called on Enter/focus-out)."""
         if not self._is_dirty or not self._current_note_id:
-            return
-        
+            return False
+
+        # If a save is already in-flight, queue another save pass.
+        if self._is_saving:
+            self._save_queued = True
+            return True
+
+        if not self._note_service or not self._note_service.db:
+            return False
+
         self._is_saving = True
         self._save_status = "saving"
         self.saveStatusChanged.emit()
-        
-        # Note is already saved via updateNote, just update status
+
+        note_id = self._current_note_id
+        title_to_save = self._pending_title if self._pending_title is not None else None
+        content_to_save = self._pending_content if self._pending_content is not None else self._current_note_data.get('content', '')
+        json_to_save = self._pending_json if self._pending_json is not None else self._current_note_data.get('content_json', '')
+
+        # Tokenize image payloads in main thread, then persist note row in worker thread.
+        if self._pending_title is not None or self._pending_content is not None or self._pending_json is not None:
+            tok_content, tok_json = self._store_data_urls_and_tokenize(
+                note_id,
+                content_to_save,
+                json_to_save
+            )
+
+            content_to_save = tok_content
+            json_to_save = tok_json if tok_json else None
+
+        # Clear pending data snapshot; if new edits come in during save,
+        # updateNoteWithJson will repopulate pending fields and mark dirty again.
+        self._pending_title = None
+        self._pending_content = None
+        self._pending_json = None
         self._is_dirty = False
+
+        db_path = self._note_service.db.db_path
+        self._start_async_note_update(note_id, title_to_save, content_to_save, json_to_save)
+        return True
+
+    def _start_async_note_update(self, note_id: str, title: Optional[str],
+                                 content: str, content_json: Optional[str]) -> None:
+        self._save_thread = QThread(self)
+        self._save_worker = _NoteSaveWorker(
+            db_path=self._note_service.db.db_path,
+            note_id=note_id,
+            title=title,
+            content=content,
+            content_json=content_json
+        )
+        self._save_worker.moveToThread(self._save_thread)
+
+        self._save_thread.started.connect(self._save_worker.run)
+        self._save_worker.finished.connect(self._on_async_save_finished)
+        self._save_worker.finished.connect(self._save_thread.quit)
+        self._save_worker.finished.connect(self._save_worker.deleteLater)
+        self._save_thread.finished.connect(self._save_thread.deleteLater)
+
+        self._save_thread.start()
+
+    @pyqtSlot(bool)
+    def _on_async_save_finished(self, ok: bool) -> None:
+        self._save_worker = None
+        self._save_thread = None
         self._is_saving = False
+
+        if not ok:
+            self._is_dirty = True
+            self._save_status = "dirty"
+            self.saveStatusChanged.emit()
+            return
+
+        has_new_pending = (
+            self._pending_title is not None or
+            self._pending_content is not None or
+            self._pending_json is not None
+        )
+
+        if self._save_queued or has_new_pending:
+            self._save_queued = False
+            self._is_dirty = True
+            self._save_status = "dirty"
+            self.saveStatusChanged.emit()
+            self._perform_save()
+            return
+
         self._save_status = "saved"
         self.saveStatusChanged.emit()
 
@@ -431,39 +548,44 @@ class NoteController(QObject):
 
     @pyqtSlot(str, str, str, str, result=bool)
     def updateNoteWithJson(self, note_id: str, title: str, content: str, content_json: str) -> bool:
-        """Update note with both Markdown and TipTap JSON content."""
+        """Update note with both Markdown and TipTap JSON content (deferred save)."""
         if not note_id:
             return False
 
-        tok_content, tok_json = self._store_data_urls_and_tokenize(note_id, content, content_json)
-
-        if self._note_service.update(note_id, title=title, content=tok_content,
-                                      content_json=tok_json if tok_json else None):
-            self._current_note_id = note_id
-            self._is_dirty = True
-            self._save_status = "dirty"
-            
-            # Emit immediate status change
-            self.saveStatusChanged.emit()
-            
-            # Start auto-save timer (debounce)
-            self._auto_save_timer.start(1000)  # 1 second debounce
-            
-            # Also emit note changes for list update
+        self._current_note_id = note_id
+        
+        # Track pending changes
+        self._pending_title = title if title != self._current_note_data.get('title') else None
+        self._pending_content = content if content != self._current_note_data.get('content') else None
+        self._pending_json = content_json if content_json != self._current_note_data.get('content_json') else None
+        
+        # Update cached data immediately for UI responsiveness
+        self._current_note_data['title'] = title
+        self._current_note_data['content'] = content
+        self._current_note_data['content_json'] = content_json
+        
+        self._is_dirty = True
+        self._save_status = "dirty"
+        
+        # Emit immediate status change
+        self.saveStatusChanged.emit()
+        
+        # Note: auto-save now happens on Enter key or focus out, not on timer
+        
+        # Only emit list signals on title change (expensive)
+        if self._pending_title is not None:
             self.notesChanged.emit()
             self.filteredNotesChanged.emit()
-            self.noteUpdated.emit(note_id)
-            
-            return True
         
-        return False
+        # Always emit noteUpdated for content updates (lightweight)
+        self.noteUpdated.emit(note_id)
+        
+        return True
     
     @pyqtSlot(result=bool)
     def saveCurrentNote(self) -> bool:
-        """Force save current note immediately."""
-        self._auto_save_timer.stop()
-        self._perform_auto_save()
-        return True
+        """Save current note (called on Enter or focus out)."""
+        return self._perform_save()
     
     @pyqtSlot(str, str, result=bool)
     def moveNoteToFolder(self, note_id: str, folder_id: str) -> bool:
@@ -532,6 +654,14 @@ class NoteController(QObject):
             self._current_note_id = note_id
             self._is_dirty = False
             self._save_status = "saved"
+            self._current_note_data = {
+                'title': note.get('title', ''),
+                'content': note.get('content', ''),
+                'content_json': note.get('content_json', '')
+            }
+            self._pending_title = None
+            self._pending_content = None
+            self._pending_json = None
             self.notesChanged.emit()
             self.filteredNotesChanged.emit()
             self.saveStatusChanged.emit()

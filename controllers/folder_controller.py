@@ -21,6 +21,7 @@ class FolderController(QObject):
     foldersChanged = pyqtSignal()
     currentFolderChanged = pyqtSignal()
     folderAdded = pyqtSignal(str)  # folder_id
+    folderAddedForRename = pyqtSignal(str)  # folder_id - emitted when new folder needs immediate rename
     folderRemoved = pyqtSignal(str)  # folder_id
     folderRenamed = pyqtSignal(str, str)  # folder_id, new_name
     folderDeleteFailed = pyqtSignal(str, str)  # folder_name, reason
@@ -198,8 +199,9 @@ class FolderController(QObject):
             self.foldersChanged.emit()
             self.folderAdded.emit(folder_id)
             
-            # Auto-select the new folder
+            # Auto-select the new folder and trigger rename mode
             self.currentFolderId = folder_id
+            self.folderAddedForRename.emit(folder_id)
             return folder_id
 
         return ""

@@ -61,6 +61,14 @@ Window {
         var titleText = (newTitle || "").trim()
         if (!titleText) return ""
 
+        // Save current editor state before transition
+        // Prefer latest payload from contentUpdated to avoid losing trailing chars.
+        var editorState = {
+            title: (newTitle !== undefined && newTitle !== null) ? newTitle : noteEditor.title,
+            content: (newMarkdown !== undefined && newMarkdown !== null) ? newMarkdown : noteEditor.content,
+            contentJson: (newJson !== undefined && newJson !== null) ? newJson : noteEditor.contentJson
+        }
+
         var targetFolderId = draftFolderId
         if (!targetFolderId && folderController) {
             targetFolderId = folderController.currentFolderId
@@ -71,7 +79,46 @@ Window {
 
         isDraftNewNote = false
         selectedNoteId = newId
+
+        // Restore editor state to prevent content loss during re-binding
+        Qt.callLater(function() {
+            // Only restore if we're still on the newly created note (user hasn't switched away)
+            if (window.selectedNoteId !== newId) return
+            
+            // Update currentNote first so editor binding gets correct values
+            window.currentNote = {
+                title: editorState.title,
+                content: editorState.content,
+                content_json: editorState.contentJson
+            }
+        })
+
         return newId
+    }
+
+    function deriveDraftTitle(titleCandidate, markdownCandidate) {
+        var titleText = (titleCandidate || "").trim()
+        if (titleText) return titleText
+
+        var md = (markdownCandidate || "")
+        if (!md) return ""
+
+        var lines = md.split(/\r?\n/)
+        for (var i = 0; i < lines.length; i++) {
+            var line = (lines[i] || "").trim()
+            if (!line) continue
+
+            // Remove common heading / emphasis markers for title extraction
+            line = line.replace(/^#{1,6}\s+/, "")
+                       .replace(/\*\*/g, "")
+                       .replace(/\*/g, "")
+                       .replace(/`/g, "")
+                       .trim()
+
+            if (line) return line.substring(0, 100)
+        }
+
+        return ""
     }
 
     function closeTab(noteId) {
@@ -162,6 +209,9 @@ Window {
         AppHeader {
             id: appHeader
             Layout.fillWidth: true
+            syncIconSource: "../assets/icons/sync.svg"
+            importIconSource: "../assets/icons/import.svg"
+            exportIconSource: "../assets/icons/export.svg"
             onLogoClicked: {
                 // 사이클: 0=모두 표시 → 1=사이드바 숨김 → 2=모두 숨김 → 0
                 var sb = sidebar.Layout.preferredWidth > 0
@@ -177,6 +227,15 @@ Window {
                     sidebar.Layout.preferredWidth = Metrics.sidebarWidth
                     noteList.Layout.preferredWidth = Metrics.noteListWidth
                 }
+            }
+            onSyncClicked: {
+                console.log("동기화 실행 중...")
+            }
+            onImportClicked: {
+                console.log("가져오기 실행 중...")
+            }
+            onExportClicked: {
+                console.log("내보내기 실행 중...")
             }
         }
 
@@ -2009,11 +2068,16 @@ Window {
                             onContentUpdated: (newTitle, newMarkdown, newJson) => {
                                 if (!noteController) return
 
-                                var targetNoteId = window.selectedNoteId
                                 if (window.isDraftNewNote) {
-                                    targetNoteId = window.ensureDraftPersisted(newTitle, newMarkdown, newJson)
+                                    window.currentNote = {
+                                        title: newTitle || "",
+                                        content: newMarkdown || "",
+                                        content_json: newJson || ""
+                                    }
+                                    return
                                 }
 
+                                var targetNoteId = window.selectedNoteId
                                 if (targetNoteId) {
                                     noteController.updateNoteWithJson(
                                         targetNoteId, newTitle, newMarkdown, newJson)
@@ -2025,11 +2089,16 @@ Window {
                             onTitleEdited: (newTitle) => {
                                 if (!noteController) return
 
-                                var targetNoteId = window.selectedNoteId
                                 if (window.isDraftNewNote) {
-                                    targetNoteId = window.ensureDraftPersisted(newTitle, noteEditor.content, noteEditor.contentJson)
+                                    window.currentNote = {
+                                        title: newTitle || "",
+                                        content: noteEditor.content || "",
+                                        content_json: noteEditor.contentJson || ""
+                                    }
+                                    return
                                 }
 
+                                var targetNoteId = window.selectedNoteId
                                 if (targetNoteId) {
                                     noteController.updateNote(
                                         targetNoteId, newTitle,
@@ -2040,11 +2109,16 @@ Window {
                             onContentEdited: (newContent) => {
                                 if (!noteController) return
 
-                                var targetNoteId = window.selectedNoteId
                                 if (window.isDraftNewNote) {
-                                    targetNoteId = window.ensureDraftPersisted(noteEditor.title, newContent, noteEditor.contentJson)
+                                    window.currentNote = {
+                                        title: noteEditor.title || "",
+                                        content: newContent || "",
+                                        content_json: noteEditor.contentJson || ""
+                                    }
+                                    return
                                 }
 
+                                var targetNoteId = window.selectedNoteId
                                 if (targetNoteId) {
                                     noteController.updateNote(
                                         targetNoteId, noteEditor.title, newContent)
@@ -2053,10 +2127,40 @@ Window {
 
                             onRequestSave: {
                                 if (window.isDraftNewNote) {
+                                    var rawDraftTitle = (window.currentNote && window.currentNote.title !== undefined)
+                                        ? window.currentNote.title : noteEditor.title
+                                    var draftMarkdown = (window.currentNote && window.currentNote.content !== undefined)
+                                        ? window.currentNote.content : noteEditor.content
+                                    var draftJson = (window.currentNote && window.currentNote.content_json !== undefined)
+                                        ? window.currentNote.content_json : noteEditor.contentJson
+                                    var draftTitle = window.deriveDraftTitle(rawDraftTitle, draftMarkdown)
+                                    if (!draftTitle || !draftTitle.trim()) {
+                                        draftTitle = "새 노트"
+                                    }
+
                                     var targetNoteId = window.ensureDraftPersisted(
-                                        noteEditor.title, noteEditor.content, noteEditor.contentJson)
+                                        draftTitle, draftMarkdown, draftJson)
                                     if (!targetNoteId) return
+
+                                    noteController.updateNoteWithJson(
+                                        targetNoteId, draftTitle, draftMarkdown, draftJson)
+                                    if (draftTitle) window.updateTabTitle(targetNoteId, draftTitle)
+                                } else {
+                                    var activeNoteId = window.selectedNoteId
+                                    if (activeNoteId && noteController) {
+                                        var liveTitle = (window.currentNote && window.currentNote.title !== undefined)
+                                            ? window.currentNote.title : noteEditor.title
+                                        var liveMarkdown = (window.currentNote && window.currentNote.content !== undefined)
+                                            ? window.currentNote.content : noteEditor.content
+                                        var liveJson = (window.currentNote && window.currentNote.content_json !== undefined)
+                                            ? window.currentNote.content_json : noteEditor.contentJson
+
+                                        noteController.updateNoteWithJson(
+                                            activeNoteId, liveTitle, liveMarkdown, liveJson)
+                                        if (liveTitle) window.updateTabTitle(activeNoteId, liveTitle)
+                                    }
                                 }
+
                                 if (noteController) noteController.saveCurrentNote()
                             }
                         }

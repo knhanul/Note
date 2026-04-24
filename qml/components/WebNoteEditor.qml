@@ -101,6 +101,94 @@ ColumnLayout {
                     imageFileDialog.open()
                 } else if (msg.indexOf("EDITOR_IMAGE_PASTED:") === 0) {
                     root.imagePasted(msg.substring(20))
+                } else if (msg === "REQUEST_SAVE") {
+                    // Triggered by Enter key in title or focus out
+                    // Fetch fresh content first, then emit requestSave
+                    webView.runJavaScript(
+                        "(function(){" +
+                        "try { if (window.editorAPI && window.editorAPI.onContentChanged) { window.editorAPI.onContentChanged(); } } catch (_) {}" +
+                        "return JSON.stringify(window.__editorLastPayload || {});" +
+                        "})()",
+                        function(result) {
+                            try {
+                                var payload = JSON.parse(result || "{}")
+                                var hasPayload = payload && (
+                                    payload.title !== undefined ||
+                                    payload.markdown !== undefined ||
+                                    payload.json !== undefined)
+                                if (hasPayload) {
+                                    root.contentUpdated(payload.title || "", payload.markdown || "", payload.json || "")
+                                }
+                            } catch (e) {}
+                            // Emit save request after content is updated
+                            root.requestSave()
+                        }
+                    )
+                }
+            }
+
+            // Inject event listeners for Enter key and focus out after load
+            onLoadingChanged: {
+                if (loadProgress === 100) {
+                    webView.runJavaScript(`
+                        (function() {
+                            function requestSave() {
+                                var now = Date.now();
+                                if (window.__nuniLastSaveReq && (now - window.__nuniLastSaveReq) < 250) {
+                                    return;
+                                }
+                                window.__nuniLastSaveReq = now;
+                                console.log('REQUEST_SAVE');
+                            }
+
+                            function attachHooks() {
+                                var editorContent = document.querySelector('.ProseMirror') ||
+                                                   document.querySelector('[contenteditable="true"]');
+                                if (!editorContent) return false;
+                                if (window.__nuniSaveHookAttached) return true;
+
+                                window.__nuniSaveHookAttached = true;
+
+                                // Fallback hooks:
+                                // React(App.jsx) is primary save trigger, but keep QML-side fallback
+                                // to guarantee REQUEST_SAVE delivery on some WebEngine timing cases.
+                                // Enter save is handled by React editor to avoid duplicate/racy requests.
+
+                                document.addEventListener('focusout', function(e) {
+                                    if (!editorContent.contains(e.target)) return;
+                                    setTimeout(function() {
+                                        var active = document.activeElement;
+                                        var stillInEditor = active && (active === editorContent || editorContent.contains(active));
+                                        if (!stillInEditor) requestSave();
+                                    }, 0);
+                                }, true);
+
+                                return true;
+                            }
+
+                            if (attachHooks()) return 'attached';
+
+                            var tries = 0;
+                            var timer = setInterval(function() {
+                                tries += 1;
+                                if (attachHooks()) {
+                                    clearInterval(timer);
+                                    console.log('EDITOR_LISTENERS_ATTACHED');
+                                } else if (tries >= 20) {
+                                    clearInterval(timer);
+                                    console.log('EDITOR_LISTENERS_ATTACH_TIMEOUT');
+                                }
+                            }, 150);
+
+                            return 'pending';
+                        })();
+                    `, function(result) {
+                        if (result === 'attached' || result === 'pending') {
+                            console.log('[QML] Editor listeners attached successfully');
+                        } else {
+                            console.log('[QML] Editor listeners status:', result);
+                        }
+                    });
                 }
             }
         }
@@ -130,8 +218,10 @@ ColumnLayout {
     function setEditorContent(md, json) {
         var setMd = "window.__loadMd = " + JSON.stringify(md || "") + ";"
         var setJson = "window.__loadJson = " + JSON.stringify(json || "") + ";"
+        var setNoteId = "window.__loadNoteId = " + JSON.stringify(root.noteId || "") + ";"
         webView.runJavaScript(setMd + setJson +
-            "if (window.editorAPI) { window.editorAPI.setContent(window.__loadMd, window.__loadJson); }")
+            setNoteId +
+            "if (window.editorAPI) { window.editorAPI.setContent(window.__loadMd, window.__loadJson, window.__loadNoteId); }")
     }
 
     // Backward-compatible alias

@@ -291,6 +291,16 @@ Rectangle {
         onReleased: root.scale = 1.0
     }
 
+    // Handle folder creation - auto enter edit mode for newly created folder
+    Connections {
+        target: folderController
+        function onFolderAddedForRename(newFolderId) {
+            if (newFolderId === root.folderId && !root.isSmart) {
+                root.isEditing = true
+            }
+        }
+    }
+
     // Divider between smart folders and regular folders
     Rectangle {
         visible: root.isLastSmart
