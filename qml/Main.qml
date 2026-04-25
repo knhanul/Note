@@ -23,6 +23,66 @@ Window {
     property real editorZoom: 1.0
     property bool isDraftNewNote: false
     property string draftFolderId: ""
+    property bool titleTouchedByUser: false
+
+    // Autosave flush helper: called by WebNoteEditor's debounced autosave and focusout flush.
+    // Persists draft (if applicable) and triggers async save. Title is auto-derived only when
+    // the user has not manually touched the title field and it is currently blank.
+    function flushSaveIfDirty() {
+        if (!noteController) {
+            console.log("[flushSaveIfDirty] no noteController")
+            return
+        }
+
+        var liveTitle = (currentNote && currentNote.title !== undefined)
+            ? currentNote.title : (noteEditor ? noteEditor.title : "")
+        var liveMarkdown = (currentNote && currentNote.content !== undefined)
+            ? currentNote.content : (noteEditor ? noteEditor.content : "")
+        var liveJson = (currentNote && currentNote.content_json !== undefined)
+            ? currentNote.content_json : (noteEditor ? noteEditor.contentJson : "")
+
+        console.log("[flushSaveIfDirty] draft=" + isDraftNewNote
+                    + " title=" + (liveTitle ? liveTitle.substring(0,20) : "(empty)")
+                    + " mdLen=" + (liveMarkdown ? liveMarkdown.length : 0)
+                    + " jsonLen=" + (liveJson ? liveJson.length : 0))
+
+        // Auto-derive title only when user hasn't touched it and it's blank
+        var titleForSave = liveTitle
+        if ((!titleForSave || !titleForSave.trim()) && !titleTouchedByUser) {
+            titleForSave = deriveDraftTitle("", liveMarkdown) || ""
+        }
+
+        if (isDraftNewNote) {
+            // Require some content or a title to materialize a draft
+            var effectiveTitle = (titleForSave && titleForSave.trim()) ? titleForSave : "새 노트"
+            if (!liveMarkdown && !titleForSave) {
+                console.log("[flushSaveIfDirty] draft: nothing to save yet")
+                return  // nothing to save yet
+            }
+
+            var newId = ensureDraftPersisted(effectiveTitle, liveMarkdown, liveJson)
+            if (!newId) {
+                console.log("[flushSaveIfDirty] draft: ensureDraftPersisted failed")
+                return
+            }
+
+            noteController.updateNoteWithJson(newId, effectiveTitle, liveMarkdown, liveJson)
+            updateTabTitle(newId, effectiveTitle)
+        } else {
+            var activeNoteId = selectedNoteId
+            if (!activeNoteId) {
+                console.log("[flushSaveIfDirty] existing: no activeNoteId")
+                return
+            }
+
+            var saveTitle = titleForSave || ""
+            noteController.updateNoteWithJson(activeNoteId, saveTitle, liveMarkdown, liveJson)
+            if (saveTitle) updateTabTitle(activeNoteId, saveTitle)
+        }
+
+        console.log("[flushSaveIfDirty] calling saveCurrentNote")
+        noteController.saveCurrentNote()
+    }
 
     function addOrActivateTab(noteId, noteTitle) {
         for (var i = 0; i < openTabs.length; i++) {
@@ -49,6 +109,7 @@ Window {
         isDraftNewNote = true
         draftFolderId = folderController ? folderController.currentFolderId : ""
         selectedNoteId = ""
+        titleTouchedByUser = false
         currentNote = { title: "", content: "", content_json: "" }
         if (noteEditor) {
             noteEditor.resetEditor()
@@ -57,9 +118,17 @@ Window {
     }
 
     function ensureDraftPersisted(newTitle, newMarkdown, newJson) {
-        if (!isDraftNewNote || !noteController) return selectedNoteId
+        console.log("[ensureDraftPersisted] called title=" + (newTitle || "(empty)")
+                    + " mdLen=" + (newMarkdown ? newMarkdown.length : 0))
+        if (!isDraftNewNote || !noteController) {
+            console.log("[ensureDraftPersisted] skip: draft=" + isDraftNewNote + " ctrl=" + !!noteController)
+            return selectedNoteId
+        }
         var titleText = (newTitle || "").trim()
-        if (!titleText) return ""
+        if (!titleText) {
+            console.log("[ensureDraftPersisted] skip: empty title")
+            return ""
+        }
 
         // Save current editor state before transition
         // Prefer latest payload from contentUpdated to avoid losing trailing chars.
@@ -74,7 +143,8 @@ Window {
             targetFolderId = folderController.currentFolderId
         }
 
-        var newId = noteController.createNote(titleText, newMarkdown || "", targetFolderId)
+        var newId = noteController.createNote(titleText, newMarkdown || "", newJson || "", targetFolderId)
+        console.log("[ensureDraftPersisted] createNote returned id=" + newId)
         if (!newId) return ""
 
         isDraftNewNote = false
@@ -152,8 +222,10 @@ Window {
         if (selectedNoteId && noteController) {
             window.isDraftNewNote = false
             window.currentNote = noteController.getNote(selectedNoteId)
-            var title = window.currentNote ? (window.currentNote.title || "제목 없음") : "제목 없음"
-            addOrActivateTab(selectedNoteId, title)
+            var title = window.currentNote ? (window.currentNote.title || "") : ""
+            // Loaded notes: treat existing non-empty title as user-owned so autosave doesn't overwrite it.
+            window.titleTouchedByUser = !!(title && title.trim())
+            addOrActivateTab(selectedNoteId, title || "제목 없음")
         } else {
             if (!window.isDraftNewNote) {
                 window.currentNote = null
@@ -2065,104 +2137,51 @@ Window {
                             editorZoom: window.editorZoom
 
                             // Primary handler: receives title + markdown + JSON in one shot
+                            // Updates in-memory state only; persistence is driven by the debounced autosave.
                             onContentUpdated: (newTitle, newMarkdown, newJson) => {
                                 if (!noteController) return
 
-                                if (window.isDraftNewNote) {
-                                    window.currentNote = {
-                                        title: newTitle || "",
-                                        content: newMarkdown || "",
-                                        content_json: newJson || ""
-                                    }
-                                    return
+                                // Detect title-touched: any non-empty title coming from editor counts
+                                if (newTitle && newTitle.trim()) {
+                                    window.titleTouchedByUser = true
                                 }
 
-                                var targetNoteId = window.selectedNoteId
-                                if (targetNoteId) {
-                                    noteController.updateNoteWithJson(
-                                        targetNoteId, newTitle, newMarkdown, newJson)
-                                    if (newTitle) window.updateTabTitle(targetNoteId, newTitle)
+                                // Update local cache so flushSaveIfDirty sees fresh values.
+                                // Reassigning currentNote would retrigger editor bindings; we mutate members
+                                // and only emit a property reset on title change to refresh tab title.
+                                if (!window.currentNote) window.currentNote = {}
+                                var titleChanged = (window.currentNote.title || "") !== (newTitle || "")
+                                window.currentNote.title = newTitle || ""
+                                window.currentNote.content = newMarkdown || ""
+                                window.currentNote.content_json = newJson || ""
+
+                                if (!window.isDraftNewNote && titleChanged && newTitle) {
+                                    window.updateTabTitle(window.selectedNoteId, newTitle)
                                 }
+                                // Actual DB write happens when autosaveTimer fires (requestAutosave)
+                                // or on focusout (requestFlush).
                             }
 
                             // Fallback: old-format signals (backward compat)
                             onTitleEdited: (newTitle) => {
-                                if (!noteController) return
-
-                                if (window.isDraftNewNote) {
-                                    window.currentNote = {
-                                        title: newTitle || "",
-                                        content: noteEditor.content || "",
-                                        content_json: noteEditor.contentJson || ""
-                                    }
-                                    return
+                                if (newTitle && newTitle.trim()) {
+                                    window.titleTouchedByUser = true
                                 }
-
-                                var targetNoteId = window.selectedNoteId
-                                if (targetNoteId) {
-                                    noteController.updateNote(
-                                        targetNoteId, newTitle,
-                                        window.currentNote ? window.currentNote.content : "")
-                                }
+                                if (!window.currentNote) window.currentNote = {}
+                                window.currentNote.title = newTitle || ""
                             }
 
                             onContentEdited: (newContent) => {
-                                if (!noteController) return
-
-                                if (window.isDraftNewNote) {
-                                    window.currentNote = {
-                                        title: noteEditor.title || "",
-                                        content: newContent || "",
-                                        content_json: noteEditor.contentJson || ""
-                                    }
-                                    return
-                                }
-
-                                var targetNoteId = window.selectedNoteId
-                                if (targetNoteId) {
-                                    noteController.updateNote(
-                                        targetNoteId, noteEditor.title, newContent)
-                                }
+                                // In-memory cache only; autosave timer handles persistence
+                                if (!window.currentNote) window.currentNote = {}
+                                window.currentNote.content = newContent || ""
                             }
 
-                            onRequestSave: {
-                                if (window.isDraftNewNote) {
-                                    var rawDraftTitle = (window.currentNote && window.currentNote.title !== undefined)
-                                        ? window.currentNote.title : noteEditor.title
-                                    var draftMarkdown = (window.currentNote && window.currentNote.content !== undefined)
-                                        ? window.currentNote.content : noteEditor.content
-                                    var draftJson = (window.currentNote && window.currentNote.content_json !== undefined)
-                                        ? window.currentNote.content_json : noteEditor.contentJson
-                                    var draftTitle = window.deriveDraftTitle(rawDraftTitle, draftMarkdown)
-                                    if (!draftTitle || !draftTitle.trim()) {
-                                        draftTitle = "새 노트"
-                                    }
+                            // Debounced autosave (fires after user stops typing ~1.2s)
+                            onRequestAutosave: window.flushSaveIfDirty()
 
-                                    var targetNoteId = window.ensureDraftPersisted(
-                                        draftTitle, draftMarkdown, draftJson)
-                                    if (!targetNoteId) return
-
-                                    noteController.updateNoteWithJson(
-                                        targetNoteId, draftTitle, draftMarkdown, draftJson)
-                                    if (draftTitle) window.updateTabTitle(targetNoteId, draftTitle)
-                                } else {
-                                    var activeNoteId = window.selectedNoteId
-                                    if (activeNoteId && noteController) {
-                                        var liveTitle = (window.currentNote && window.currentNote.title !== undefined)
-                                            ? window.currentNote.title : noteEditor.title
-                                        var liveMarkdown = (window.currentNote && window.currentNote.content !== undefined)
-                                            ? window.currentNote.content : noteEditor.content
-                                        var liveJson = (window.currentNote && window.currentNote.content_json !== undefined)
-                                            ? window.currentNote.content_json : noteEditor.contentJson
-
-                                        noteController.updateNoteWithJson(
-                                            activeNoteId, liveTitle, liveMarkdown, liveJson)
-                                        if (liveTitle) window.updateTabTitle(activeNoteId, liveTitle)
-                                    }
-                                }
-
-                                if (noteController) noteController.saveCurrentNote()
-                            }
+                            // Focus-out flush: stop debounce and save immediately
+                            onRequestFlush: window.flushSaveIfDirty()
                         }
 
                         // ── Tag row (note tags display + edit) ───────────────

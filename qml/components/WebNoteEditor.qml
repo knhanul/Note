@@ -21,9 +21,26 @@ ColumnLayout {
     signal titleEdited(string newTitle)
     signal contentEdited(string newContent)
     signal contentUpdated(string newTitle, string newMarkdown, string newJson)
-    signal requestSave()
+    signal requestSave()        // retained for backward compat (no longer fired by Enter)
+    signal requestAutosave()    // fires after debounce window following user input
+    signal requestFlush()       // fires on focusout to flush pending save
     signal requestImagePaste()
     signal imagePasted(string dataUrl)
+
+    // Internal: suppress content re-injection while editing the same note
+    property bool _editorReady: false
+    property string _loadedNoteId: ""
+
+    // Debounced autosave timer (user-stop detection)
+    Timer {
+        id: autosaveTimer
+        interval: 1200
+        repeat: false
+        onTriggered: {
+            console.log("[WebNoteEditor] autosaveTimer triggered -> requestAutosave")
+            root.requestAutosave()
+        }
+    }
     
     // File dialog for selecting local images
     FileDialog {
@@ -93,8 +110,13 @@ ColumnLayout {
                         function(result) {
                             try {
                                 var payload = JSON.parse(result || "{}")
+                                console.log("[WebNoteEditor] payload ready mdLen=" + (payload.markdown ? payload.markdown.length : 0)
+                                            + " jsonLen=" + (payload.json ? payload.json.length : 0))
                                 root.contentUpdated(payload.title || "", payload.markdown || "", payload.json || "")
-                            } catch (e) {}
+                                autosaveTimer.restart()
+                            } catch (e) {
+                                console.log("[WebNoteEditor] payload parse error: " + e)
+                            }
                         }
                     )
                 } else if (msg === "REQUEST_IMAGE_DIALOG") {
@@ -102,8 +124,23 @@ ColumnLayout {
                 } else if (msg.indexOf("EDITOR_IMAGE_PASTED:") === 0) {
                     root.imagePasted(msg.substring(20))
                 } else if (msg === "REQUEST_SAVE") {
-                    // Triggered by Enter key in title or focus out
-                    // Fetch fresh content first, then emit requestSave
+                    // React editor emits REQUEST_SAVE on every content change (including Enter),
+                    // after an internal debounce. We must grab the payload and restart our
+                    // own autosave timer so the flush happens after the user stops typing.
+                    webView.runJavaScript(
+                        "JSON.stringify(window.__editorLastPayload || {})",
+                        function(result) {
+                            try {
+                                var payload = JSON.parse(result || "{}")
+                                root.contentUpdated(payload.title || "", payload.markdown || "", payload.json || "")
+                                autosaveTimer.restart()
+                            } catch (e) {}
+                        }
+                    )
+                    return
+                } else if (msg === "REQUEST_FLUSH") {
+                    // Triggered by QML-injected focusout hook.
+                    // Fetch fresh payload, then emit flush so caller can save immediately.
                     webView.runJavaScript(
                         "(function(){" +
                         "try { if (window.editorAPI && window.editorAPI.onContentChanged) { window.editorAPI.onContentChanged(); } } catch (_) {}" +
@@ -120,8 +157,8 @@ ColumnLayout {
                                     root.contentUpdated(payload.title || "", payload.markdown || "", payload.json || "")
                                 }
                             } catch (e) {}
-                            // Emit save request after content is updated
-                            root.requestSave()
+                            autosaveTimer.stop()
+                            root.requestFlush()
                         }
                     )
                 }
@@ -159,7 +196,7 @@ ColumnLayout {
                                     setTimeout(function() {
                                         var active = document.activeElement;
                                         var stillInEditor = active && (active === editorContent || editorContent.contains(active));
-                                        if (!stillInEditor) requestSave();
+                                        if (!stillInEditor) console.log('REQUEST_FLUSH');
                                     }, 0);
                                 }, true);
 
@@ -329,19 +366,23 @@ ColumnLayout {
     }
 
     onContentChanged: {
-        if (webView.loadProgress === 100) {
+        // Only re-inject when a different note is loaded, not during user typing.
+        if (webView.loadProgress === 100 && root.noteId !== root._loadedNoteId) {
             setContentTimer.restart()
         }
     }
 
     onNoteIdChanged: {
+        // Reset debounce so pending autosave for previous note doesn't fire against new one
+        autosaveTimer.stop()
         if (webView.loadProgress === 100) {
+            root._loadedNoteId = root.noteId
             setContentTimer.restart()
         }
     }
 
     onContentJsonChanged: {
-        if (webView.loadProgress === 100) {
+        if (webView.loadProgress === 100 && root.noteId !== root._loadedNoteId) {
             setContentTimer.restart()
         }
     }
