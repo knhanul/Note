@@ -181,6 +181,19 @@ export default function App() {
        *    "첫 줄이 잘리는" 레이스 컨디션을 원천 차단한다.
        */
       handleKeyDown(view, event) {
+        // Ctrl+S (or Cmd+S) — immediate save, bypass debounce
+        if ((event.ctrlKey || event.metaKey) && event.key === 's') {
+          event.preventDefault()
+          const ed = editorRef.current
+          if (!ed) return true
+          if (isNewNoteRef.current && hasTypedRef.current) {
+            flushSave(ed, { create: true })
+          } else if (!isNewNoteRef.current) {
+            flushSave(ed, { create: false })
+          }
+          return true
+        }
+
         if (event.key !== 'Enter' || event.shiftKey) return false
         if (event.isComposing || event.keyCode === 229) return false
 

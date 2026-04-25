@@ -5,7 +5,7 @@ import {
   List, ListOrdered, ListChecks, Quote, Minus,
   ImageIcon, TableIcon, Undo2, Redo2,
   AlignLeft, AlignCenter, AlignRight,
-  Highlighter, X,
+  Highlighter, X, Save,
 } from 'lucide-react'
 
 function Btn({ onClick, active, title, disabled, children }) {
@@ -158,6 +158,20 @@ export default function Toolbar({ editor }) {
       </Btn>
       <Btn onClick={handleTable} title="표 삽입">
         <TableIcon size={16} />
+      </Btn>
+
+      <Sep />
+
+      {/* Save Now — triggers immediate save via QML bridge */}
+      <Btn
+        onClick={() => {
+          if (window.editorAPI && window.editorAPI.flushNow) {
+            window.editorAPI.flushNow()
+          }
+        }}
+        title="지금 저장 (Ctrl+S)"
+      >
+        <Save size={16} />
       </Btn>
 
       {/* Link Modal */}

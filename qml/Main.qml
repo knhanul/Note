@@ -25,6 +25,12 @@ Window {
     property string draftFolderId: ""
     property bool titleTouchedByUser: false
 
+    // Manual save shortcut (Ctrl+S)
+    Shortcut {
+        sequence: "Ctrl+S"
+        onActivated: window.flushSaveIfDirty()
+    }
+
     // Autosave flush helper: called by WebNoteEditor's debounced autosave and focusout flush.
     // Persists draft (if applicable) and triggers async save. Title is auto-derived only when
     // the user has not manually touched the title field and it is currently blank.
