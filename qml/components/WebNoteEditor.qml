@@ -24,12 +24,15 @@ ColumnLayout {
     signal requestSave()        // retained for backward compat (no longer fired by Enter)
     signal requestAutosave()    // fires after debounce window following user input
     signal requestFlush()       // fires on focusout to flush pending save
+    signal requestExportCurrentNote(string title, string markdown, string contentJson)
+    signal pdfExportFinished(string filePath, bool success)
     signal requestImagePaste()
     signal imagePasted(string dataUrl)
 
     // Internal: suppress content re-injection while editing the same note
     property bool _editorReady: false
     property string _loadedNoteId: ""
+    property bool _pdfChromeHidden: false
 
     // Debounced autosave timer (user-stop detection)
     Timer {
@@ -161,7 +164,28 @@ ColumnLayout {
                             root.requestFlush()
                         }
                     )
+                } else if (msg === "REQUEST_EXPORT_CURRENT_NOTE") {
+                    webView.runJavaScript(
+                        "JSON.stringify(window.__editorLastPayload || {})",
+                        function(result) {
+                            try {
+                                var payload = JSON.parse(result || "{}")
+                                root.requestExportCurrentNote(
+                                    payload.title || "",
+                                    payload.markdown || "",
+                                    payload.json || ""
+                                )
+                            } catch (e) {
+                                root.requestExportCurrentNote(root.title || "", root.content || "", root.contentJson || "")
+                            }
+                        }
+                    )
                 }
+            }
+
+            onPdfPrintingFinished: (filePath, success) => {
+                root.restoreAfterPdf()
+                root.pdfExportFinished(filePath, success)
             }
 
             // Inject event listeners for Enter key and focus out after load
@@ -269,6 +293,53 @@ ColumnLayout {
     // Get markdown content from editor
     function getMarkdown(callback) {
         webView.runJavaScript("if (window.editorAPI) { window.editorAPI.getMarkdown(); }", callback)
+    }
+
+    function getCurrentHtml(callback) {
+        webView.runJavaScript("if (window.editorAPI) { window.editorAPI.getHTML(); } else { ''; }", callback)
+    }
+
+    function exportCurrentPdf(outputPath) {
+        if (!outputPath || outputPath.length === 0) return
+        prepareForPdf()
+        webView.printToPdf(outputPath)
+    }
+
+    function prepareForPdf() {
+        if (root._pdfChromeHidden) return
+        root._pdfChromeHidden = true
+        webView.runJavaScript(`
+            (function() {
+                var ids = ['editorToolbarWrap', 'editorBubbleMenuWrap'];
+                ids.forEach(function(id) {
+                    var el = document.getElementById(id);
+                    if (el) {
+                        el.dataset.nuniPrevDisplay = el.style.display || '';
+                        el.style.display = 'none';
+                    }
+                });
+                return true;
+            })();
+        `)
+    }
+
+    function restoreAfterPdf() {
+        if (!root._pdfChromeHidden) return
+        root._pdfChromeHidden = false
+        webView.runJavaScript(`
+            (function() {
+                var ids = ['editorToolbarWrap', 'editorBubbleMenuWrap'];
+                ids.forEach(function(id) {
+                    var el = document.getElementById(id);
+                    if (el) {
+                        var prev = (el.dataset && el.dataset.nuniPrevDisplay !== undefined)
+                            ? el.dataset.nuniPrevDisplay : '';
+                        el.style.display = prev;
+                    }
+                });
+                return true;
+            })();
+        `)
     }
     
     // Format functions (called from toolbar)

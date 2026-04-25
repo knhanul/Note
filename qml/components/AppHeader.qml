@@ -9,9 +9,11 @@ Rectangle {
     signal logoClicked()
     signal syncClicked()
     signal importClicked()
+    signal currentNoteExportClicked()
     signal exportClicked()
 
     property string syncIconSource: ""
+    property string currentNoteExportIconSource: ""
     property string importIconSource: ""
     property string exportIconSource: ""
 
@@ -101,6 +103,37 @@ Rectangle {
         anchors.rightMargin: Metrics.xl
         anchors.verticalCenter: parent.verticalCenter
         spacing: Metrics.sm
+
+        Rectangle {
+            id: currentNoteExportBtn
+            Layout.preferredWidth: 76
+            Layout.preferredHeight: 32
+            radius: 6
+            color: currentNoteExportMA.containsMouse ? Colors.primary600 : Colors.primary500
+            border.width: 0
+
+            Text {
+                id: currentNoteExportLabel
+                anchors.centerIn: parent
+                text: "노트 변환"
+                font.family: Typography.fontPrimary
+                font.pixelSize: Typography.bodySmall
+                font.weight: Typography.weightMedium
+                color: "white"
+            }
+
+            MouseArea {
+                id: currentNoteExportMA
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.currentNoteExportClicked()
+            }
+
+            ToolTip.visible: currentNoteExportMA.containsMouse
+            ToolTip.delay: 400
+            ToolTip.text: "현재 노트를 다른 형식으로 변환"
+        }
 
         Rectangle {
             id: importBtn

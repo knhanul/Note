@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Window
 import QtQuick.Layouts
 import QtQuick.Controls
+import QtQuick.Dialogs
 import theme
 import components
 
@@ -24,6 +25,14 @@ Window {
     property bool isDraftNewNote: false
     property string draftFolderId: ""
     property bool titleTouchedByUser: false
+    property string exportDraftTitle: ""
+    property string exportDraftMarkdown: ""
+    property string exportDraftJson: ""
+    property string exportFormat: "pdf"
+    property string exportOutputDir: ""
+    property string exportStatusMessage: ""
+    property bool exportStatusError: false
+    property string exportLastOutputPath: ""
 
     // Manual save shortcut (Ctrl+S)
     Shortcut {
@@ -88,6 +97,83 @@ Window {
 
         console.log("[flushSaveIfDirty] calling saveCurrentNote")
         noteController.saveCurrentNote()
+    }
+
+    function openCurrentExportDialog(title, markdown, contentJson) {
+        exportDraftTitle = (title || (currentNote ? currentNote.title : "") || "무제")
+        exportDraftMarkdown = (markdown !== undefined && markdown !== null)
+            ? markdown
+            : ((currentNote && currentNote.content) ? currentNote.content : "")
+        exportDraftJson = (contentJson !== undefined && contentJson !== null)
+            ? contentJson
+            : ((currentNote && currentNote.content_json) ? currentNote.content_json : "")
+        exportStatusMessage = ""
+        exportStatusError = false
+        exportLastOutputPath = ""
+        currentNoteExportDialog.visible = true
+    }
+
+    function _buildCurrentExportPath(fmt) {
+        var safeTitle = (currentExportController && currentExportController.safeFilename)
+            ? currentExportController.safeFilename(exportDraftTitle || "무제")
+            : (exportDraftTitle || "무제")
+        var normalized = (exportOutputDir || "").replace(/\\/g, "/")
+        if (!normalized) return ""
+        return normalized + "/" + safeTitle + "." + fmt
+    }
+
+    function startCurrentNoteExport() {
+        if (!exportOutputDir || exportOutputDir.length === 0) {
+            exportStatusError = true
+            exportStatusMessage = "출력 폴더를 선택해주세요."
+            return
+        }
+
+        var fmt = (exportFormat || "").toLowerCase()
+        if (fmt === "pdf") {
+            if (!noteEditor || !noteEditor.exportCurrentPdf) {
+                exportStatusError = true
+                exportStatusMessage = "PDF 내보내기를 실행할 수 없습니다."
+                return
+            }
+            var pdfPath = _buildCurrentExportPath("pdf")
+            if (!pdfPath) {
+                exportStatusError = true
+                exportStatusMessage = "출력 경로를 만들 수 없습니다."
+                return
+            }
+            flushSaveIfDirty()
+            exportStatusError = false
+            exportStatusMessage = "PDF 생성 중..."
+            exportLastOutputPath = ""
+            noteEditor.exportCurrentPdf(pdfPath)
+            return
+        }
+
+        if (!currentExportController) {
+            exportStatusError = true
+            exportStatusMessage = "내보내기 컨트롤러를 찾을 수 없습니다."
+            return
+        }
+
+        flushSaveIfDirty()
+        var result = currentExportController.exportCurrentNote(
+            exportDraftTitle || "무제",
+            exportDraftMarkdown || "",
+            exportDraftJson || "",
+            fmt,
+            exportOutputDir
+        )
+
+        if (result && result.ok) {
+            exportStatusError = false
+            exportStatusMessage = result.message || "내보내기 완료"
+            exportLastOutputPath = result.outputPath || ""
+        } else {
+            exportStatusError = true
+            exportStatusMessage = (result && result.message) ? result.message : "내보내기에 실패했습니다."
+            exportLastOutputPath = ""
+        }
     }
 
     function addOrActivateTab(noteId, noteTitle) {
@@ -288,6 +374,7 @@ Window {
             id: appHeader
             Layout.fillWidth: true
             syncIconSource: "../assets/icons/sync.svg"
+            currentNoteExportIconSource: "../assets/icons/export.svg"
             importIconSource: "../assets/icons/import.svg"
             exportIconSource: "../assets/icons/export.svg"
             onLogoClicked: {
@@ -311,6 +398,18 @@ Window {
             }
             onImportClicked: {
                 console.log("가져오기 실행 중...")
+            }
+            onCurrentNoteExportClicked: {
+                if (!(window.selectedNoteId !== "" || window.isDraftNewNote)) {
+                    window.exportStatusError = true
+                    window.exportStatusMessage = "먼저 내보낼 노트를 열어주세요."
+                    return
+                }
+                window.openCurrentExportDialog(
+                    window.currentNote ? (window.currentNote.title || "") : "",
+                    window.currentNote ? (window.currentNote.content || "") : "",
+                    window.currentNote ? (window.currentNote.content_json || "") : ""
+                )
             }
             onExportClicked: {
                 console.log("내보내기 실행 중...")
@@ -2188,6 +2287,22 @@ Window {
 
                             // Focus-out flush: stop debounce and save immediately
                             onRequestFlush: window.flushSaveIfDirty()
+
+                            onRequestExportCurrentNote: (newTitle, newMarkdown, newJson) => {
+                                window.openCurrentExportDialog(newTitle, newMarkdown, newJson)
+                            }
+
+                            onPdfExportFinished: (filePath, success) => {
+                                if (success) {
+                                    window.exportStatusError = false
+                                    window.exportStatusMessage = "PDF 내보내기가 완료되었습니다."
+                                    window.exportLastOutputPath = filePath || ""
+                                } else {
+                                    window.exportStatusError = true
+                                    window.exportStatusMessage = "PDF 내보내기에 실패했습니다."
+                                    window.exportLastOutputPath = ""
+                                }
+                            }
                         }
 
                         // ── Tag row (note tags display + edit) ───────────────
@@ -2450,6 +2565,265 @@ Window {
                     }
                 }
             }
+        }
+    }
+
+    // ── Current Note Export Dialog ──────────────────────────────────────────
+    Rectangle {
+        id: currentNoteExportDialog
+        visible: false
+        anchors.centerIn: parent
+        width: 460
+        height: 360
+        radius: Metrics.radiusXxl
+        color: Colors.bgPrimary
+        border.color: Colors.borderLight
+        border.width: 1
+        z: 9050
+
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: -9999
+            color: Qt.rgba(0, 0, 0, 0.35)
+            z: -1
+            MouseArea { anchors.fill: parent }
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: Metrics.cardPadding
+            spacing: Metrics.md
+
+            Text {
+                text: "현재 노트 내보내기"
+                font.family: Typography.fontPrimary
+                font.weight: Typography.weightSemibold
+                font.pixelSize: Typography.h4
+                color: Colors.textPrimary
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: "문서명: " + (window.exportDraftTitle || "무제")
+                font.family: Typography.fontPrimary
+                font.pixelSize: Typography.bodySmall
+                color: Colors.textSecondary
+                elide: Text.ElideRight
+            }
+
+            Text {
+                text: "포맷"
+                font.family: Typography.fontPrimary
+                font.weight: Typography.weightMedium
+                font.pixelSize: Typography.bodySmall
+                color: Colors.textPrimary
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Metrics.xs
+
+                Repeater {
+                    model: ["md", "txt", "pdf", "hwpx", "docx"]
+                    delegate: Rectangle {
+                        Layout.fillWidth: true
+                        height: 34
+                        radius: Metrics.radiusMd
+                        color: window.exportFormat === modelData ? Colors.primary500 : Colors.bgSecondary
+                        border.width: 1
+                        border.color: window.exportFormat === modelData ? Colors.primary600 : Colors.borderLight
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: (modelData || "").toUpperCase()
+                            font.family: Typography.fontPrimary
+                            font.weight: Typography.weightSemibold
+                            font.pixelSize: 12
+                            color: window.exportFormat === modelData ? Colors.textInverse : Colors.textSecondary
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: window.exportFormat = modelData
+                        }
+                    }
+                }
+            }
+
+            Text {
+                Layout.fillWidth: true
+                visible: (window.exportFormat || "").toLowerCase() === "hwpx"
+                text: "HWPX는 현재 이미지/표 품질 보존을 위해 DOCX로 먼저 생성한 뒤, 필요 시 한글에서 HWPX로 저장하는 방식으로 내보냅니다."
+                font.family: Typography.fontPrimary
+                font.pixelSize: Typography.caption
+                color: Colors.textSecondary
+                wrapMode: Text.Wrap
+            }
+
+            Text {
+                text: "출력 폴더"
+                font.family: Typography.fontPrimary
+                font.weight: Typography.weightMedium
+                font.pixelSize: Typography.bodySmall
+                color: Colors.textPrimary
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Metrics.xs
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 34
+                    radius: Metrics.radiusMd
+                    color: Colors.bgSecondary
+                    border.width: 1
+                    border.color: Colors.borderLight
+
+                    Text {
+                        anchors.fill: parent
+                        anchors.leftMargin: Metrics.sm
+                        anchors.rightMargin: Metrics.sm
+                        verticalAlignment: Text.AlignVCenter
+                        text: window.exportOutputDir || "폴더를 선택하세요"
+                        font.family: Typography.fontPrimary
+                        font.pixelSize: 12
+                        color: window.exportOutputDir ? Colors.textPrimary : Colors.textTertiary
+                        elide: Text.ElideMiddle
+                    }
+                }
+
+                Rectangle {
+                    width: 84
+                    height: 34
+                    radius: Metrics.radiusMd
+                    color: folderPickMA.containsMouse ? Colors.primary500 : Colors.primary400
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "선택"
+                        font.family: Typography.fontPrimary
+                        font.pixelSize: 12
+                        font.weight: Typography.weightSemibold
+                        color: Colors.textInverse
+                    }
+
+                    MouseArea {
+                        id: folderPickMA
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: currentExportFolderDialog.open()
+                    }
+                }
+            }
+
+            Text {
+                Layout.fillWidth: true
+                visible: window.exportStatusMessage.length > 0
+                text: window.exportStatusMessage
+                font.family: Typography.fontPrimary
+                font.pixelSize: Typography.caption
+                color: window.exportStatusError ? Colors.accentRose : Colors.success
+                wrapMode: Text.Wrap
+            }
+
+            Item { Layout.fillHeight: true }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Metrics.sm
+
+                Item { Layout.fillWidth: true }
+
+                Rectangle {
+                    width: 90
+                    height: 34
+                    radius: Metrics.radiusMd
+                    color: closeExportMA.containsMouse ? Colors.bgTertiary : Colors.bgSecondary
+                    border.width: 1
+                    border.color: Colors.borderLight
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "닫기"
+                        font.family: Typography.fontPrimary
+                        font.pixelSize: 12
+                        color: Colors.textSecondary
+                    }
+
+                    MouseArea {
+                        id: closeExportMA
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: currentNoteExportDialog.visible = false
+                    }
+                }
+
+                Rectangle {
+                    width: 90
+                    height: 34
+                    radius: Metrics.radiusMd
+                    color: exportNowMA.containsMouse ? Colors.primary500 : Colors.primary400
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "내보내기"
+                        font.family: Typography.fontPrimary
+                        font.pixelSize: 12
+                        font.weight: Typography.weightSemibold
+                        color: Colors.textInverse
+                    }
+
+                    MouseArea {
+                        id: exportNowMA
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: window.startCurrentNoteExport()
+                    }
+                }
+
+                Rectangle {
+                    visible: window.exportLastOutputPath.length > 0
+                    width: 90
+                    height: 34
+                    radius: Metrics.radiusMd
+                    color: openExportDirMA.containsMouse ? Colors.success : "#16A34A"
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "폴더 열기"
+                        font.family: Typography.fontPrimary
+                        font.pixelSize: 12
+                        font.weight: Typography.weightSemibold
+                        color: "white"
+                    }
+
+                    MouseArea {
+                        id: openExportDirMA
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: {
+                            if (currentExportController) {
+                                currentExportController.openDirectory(window.exportOutputDir)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    FolderDialog {
+        id: currentExportFolderDialog
+        currentFolder: window.exportOutputDir ? ("file:///" + window.exportOutputDir.replace(/\\/g, "/")) : ""
+        onAccepted: {
+            var path = currentExportFolderDialog.currentFolder.toString()
+            if (path.indexOf("file://") === 0) {
+                path = path.substring(7)
+                if (path.charAt(0) === '/') path = path.substring(1)
+            }
+            window.exportOutputDir = path
         }
     }
 

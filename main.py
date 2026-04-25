@@ -22,6 +22,7 @@ from PyQt6.QtGui import QFontDatabase, QFont, QIcon
 from services.library_service import LibraryService
 from controllers.folder_controller import FolderController
 from controllers.note_controller import NoteController
+from controllers.current_export_controller import CurrentExportController
 
 
 def setup_fonts(app: QApplication):
@@ -98,6 +99,7 @@ def main():
     # Create controllers with library service and engine as parent
     folder_controller = FolderController(library_service, engine)
     note_controller = NoteController(library_service, folder_controller, engine)
+    current_export_controller = CurrentExportController(library_service, engine)
     
     # Get the directory containing this script
     current_dir = base_dir
@@ -110,6 +112,7 @@ def main():
     engine.rootContext().setContextProperty("libraryService", library_service)
     engine.rootContext().setContextProperty("folderController", folder_controller)
     engine.rootContext().setContextProperty("noteController", note_controller)
+    engine.rootContext().setContextProperty("currentExportController", current_export_controller)
 
     # Branding context
     engine.rootContext().setContextProperty("appBrand",    branding["brand"])

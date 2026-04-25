@@ -316,6 +316,7 @@ export default function App() {
 
       getMarkdown() { return editor.storage.markdown.getMarkdown() },
       getJSON()     { return JSON.stringify(editor.getJSON()) },
+      getHTML()     { return editor.getHTML() },
       getTitle()    { return extractFirstLineTitle(editor.getText()) },
       getPayload()  { return buildPayload(editor) },
 
@@ -332,6 +333,13 @@ export default function App() {
         } else if (!isNewNoteRef.current) {
           flushSave(ed, { create: false })
         }
+      },
+
+      requestExport() {
+        const ed = editorRef.current
+        if (!ed) return
+        publishPayload(ed)
+        console.log('REQUEST_EXPORT_CURRENT_NOTE')
       },
 
       // Toolbar 호환 헬퍼
@@ -354,11 +362,13 @@ export default function App() {
   return (
     <div className="flex flex-col bg-white text-slate-900 font-sans" style={{ height: '100vh' }}>
       {/* Toolbar area: both toolbars in one stable container */}
-      <div className="flex-none border-b border-slate-200">
+      <div id="editorToolbarWrap" className="flex-none border-b border-slate-200">
         <Toolbar editor={editor} />
         <TableToolbar editor={editor} />
       </div>
-      <BubbleMenuBar editor={editor} />
+      <div id="editorBubbleMenuWrap">
+        <BubbleMenuBar editor={editor} />
+      </div>
       <div className="flex-1 overflow-auto min-h-0">
         <EditorContent editor={editor} className="h-full" />
       </div>
