@@ -23,6 +23,7 @@ from services.library_service import LibraryService
 from controllers.folder_controller import FolderController
 from controllers.note_controller import NoteController
 from controllers.current_export_controller import CurrentExportController
+from controllers.folder_import_controller import FolderImportController
 
 
 def setup_fonts(app: QApplication):
@@ -100,7 +101,10 @@ def main():
     folder_controller = FolderController(library_service, engine)
     note_controller = NoteController(library_service, folder_controller, engine)
     current_export_controller = CurrentExportController(library_service, engine)
-    
+    folder_import_controller = FolderImportController(
+        library_service, folder_controller, note_controller, engine
+    )
+
     # Get the directory containing this script
     current_dir = base_dir
     qml_dir = current_dir / "qml"
@@ -113,6 +117,7 @@ def main():
     engine.rootContext().setContextProperty("folderController", folder_controller)
     engine.rootContext().setContextProperty("noteController", note_controller)
     engine.rootContext().setContextProperty("currentExportController", current_export_controller)
+    engine.rootContext().setContextProperty("folderImportController", folder_import_controller)
 
     # Branding context
     engine.rootContext().setContextProperty("appBrand",    branding["brand"])

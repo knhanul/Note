@@ -33,6 +33,14 @@ Window {
     property string exportStatusMessage: ""
     property bool exportStatusError: false
     property string exportLastOutputPath: ""
+    property bool folderExportMode: false
+    property string folderExportScope: "folder"  // folder | all | favorites
+    property string folderExportFolderId: ""
+    property string folderExportLabel: ""
+    property string importStatusMessage: ""
+    property bool importStatusError: false
+    property bool importBusy: false
+    property bool exportBusy: false
 
     // Manual save shortcut (Ctrl+S)
     Shortcut {
@@ -100,6 +108,7 @@ Window {
     }
 
     function openCurrentExportDialog(title, markdown, contentJson) {
+        folderExportMode = false
         exportDraftTitle = (title || (currentNote ? currentNote.title : "") || "무제")
         exportDraftMarkdown = (markdown !== undefined && markdown !== null)
             ? markdown
@@ -111,6 +120,120 @@ Window {
         exportStatusError = false
         exportLastOutputPath = ""
         currentNoteExportDialog.visible = true
+    }
+
+    function openFolderExportDialog() {
+        if (!folderController) {
+            exportStatusError = true
+            exportStatusMessage = "폴더 컨트롤러를 찾을 수 없습니다."
+            return
+        }
+        var fid = folderController.currentFolderId || ""
+        var fname = folderController.currentFolderName || "폴더"
+        var scope = "folder"
+        if (fid === "smart:all") {
+            scope = "all"
+        } else if (fid === "smart:favorites") {
+            scope = "favorites"
+        } else if (!fid) {
+            exportStatusError = true
+            exportStatusMessage = "내보낼 폴더를 선택해주세요."
+            return
+        }
+
+        folderExportMode = true
+        folderExportScope = scope
+        folderExportFolderId = (scope === "folder") ? fid : ""
+        folderExportLabel = fname
+
+        // PDF는 폴더 일괄 내보내기에서 지원하지 않음 → 기본 hwpx로 보정
+        if ((exportFormat || "").toLowerCase() === "pdf") {
+            exportFormat = "hwpx"
+        }
+        exportStatusMessage = ""
+        exportStatusError = false
+        exportLastOutputPath = ""
+        currentNoteExportDialog.visible = true
+    }
+
+    function runFolderImport(srcDir) {
+        if (!folderImportController) {
+            window.importStatusError = true
+            window.importStatusMessage = "가져오기 컨트롤러를 찾을 수 없습니다."
+            importStatusTimer.restart()
+            return
+        }
+        if (!srcDir) return
+
+        var parentId = ""
+        if (folderController) {
+            var fid = folderController.currentFolderId || ""
+            if (fid && !folderController.isSmartFolder(fid)) {
+                parentId = fid
+            }
+        }
+
+        window.importBusy = true
+        window.importStatusError = false
+        window.importStatusMessage = "가져오는 중..."
+
+        var result = folderImportController.importDirectory(srcDir, parentId)
+        window.importBusy = false
+
+        if (result && result.ok) {
+            window.importStatusError = false
+            window.importStatusMessage = result.message || "가져오기 완료"
+            // 가져온 최상위 폴더로 이동
+            if (result.rootFolderId && folderController) {
+                folderController.selectFolder(result.rootFolderId)
+            }
+        } else {
+            window.importStatusError = true
+            window.importStatusMessage = (result && result.message)
+                ? result.message : "가져오기에 실패했습니다."
+        }
+        importStatusTimer.restart()
+    }
+
+    function startFolderExport() {
+        if (!exportOutputDir || exportOutputDir.length === 0) {
+            exportStatusError = true
+            exportStatusMessage = "출력 폴더를 선택해주세요."
+            return
+        }
+        var fmt = (exportFormat || "").toLowerCase()
+        if (fmt === "pdf") {
+            exportStatusError = true
+            exportStatusMessage = "PDF는 폴더 일괄 내보내기에서 지원하지 않습니다."
+            return
+        }
+        if (!currentExportController) {
+            exportStatusError = true
+            exportStatusMessage = "내보내기 컨트롤러를 찾을 수 없습니다."
+            return
+        }
+
+        window.exportBusy = true
+        window.exportStatusMessage = "내보내는 중..."
+
+        flushSaveIfDirty()
+        var result = currentExportController.exportFolderNotes(
+            folderExportScope,
+            folderExportFolderId,
+            fmt,
+            exportOutputDir
+        )
+        window.exportBusy = false
+
+        if (result && result.ok) {
+            exportStatusError = false
+            exportStatusMessage = result.message || "폴더 내보내기 완료"
+            exportLastOutputPath = result.outputPath || ""
+        } else {
+            exportStatusError = true
+            exportStatusMessage = (result && result.message) ? result.message : "폴더 내보내기에 실패했습니다."
+            exportLastOutputPath = (result && result.outputPath) ? result.outputPath : ""
+        }
     }
 
     function _buildCurrentExportPath(fmt) {
@@ -143,10 +266,12 @@ Window {
                 return
             }
             flushSaveIfDirty()
+            window.exportBusy = true
             exportStatusError = false
             exportStatusMessage = "PDF 생성 중..."
             exportLastOutputPath = ""
             noteEditor.exportCurrentPdf(pdfPath)
+            // PDF export is async; onPdfExportFinished will set exportBusy=false
             return
         }
 
@@ -156,6 +281,9 @@ Window {
             return
         }
 
+        window.exportBusy = true
+        window.exportStatusMessage = "내보내는 중..."
+
         flushSaveIfDirty()
         var result = currentExportController.exportCurrentNote(
             exportDraftTitle || "무제",
@@ -164,6 +292,7 @@ Window {
             fmt,
             exportOutputDir
         )
+        window.exportBusy = false
 
         if (result && result.ok) {
             exportStatusError = false
@@ -397,7 +526,7 @@ Window {
                 console.log("동기화 실행 중...")
             }
             onImportClicked: {
-                console.log("가져오기 실행 중...")
+                folderImportDialog.open()
             }
             onCurrentNoteExportClicked: {
                 if (!(window.selectedNoteId !== "" || window.isDraftNewNote)) {
@@ -412,7 +541,7 @@ Window {
                 )
             }
             onExportClicked: {
-                console.log("내보내기 실행 중...")
+                window.openFolderExportDialog()
             }
         }
 
@@ -2293,6 +2422,7 @@ Window {
                             }
 
                             onPdfExportFinished: (filePath, success) => {
+                                window.exportBusy = false
                                 if (success) {
                                     window.exportStatusError = false
                                     window.exportStatusMessage = "PDF 내보내기가 완료되었습니다."
@@ -2595,7 +2725,7 @@ Window {
             spacing: Metrics.md
 
             Text {
-                text: "현재 노트 내보내기"
+                text: window.folderExportMode ? "폴더 일괄 내보내기" : "현재 노트 내보내기"
                 font.family: Typography.fontPrimary
                 font.weight: Typography.weightSemibold
                 font.pixelSize: Typography.h4
@@ -2604,11 +2734,17 @@ Window {
 
             Text {
                 Layout.fillWidth: true
-                text: "문서명: " + (window.exportDraftTitle || "무제")
+                text: window.folderExportMode
+                    ? ("범위: " + (window.folderExportLabel || "폴더")
+                        + (window.folderExportScope === "folder" ? " (하위 폴더 포함)"
+                            : window.folderExportScope === "favorites" ? " (즐겨 찾기 노트)"
+                            : " (서재 전체)"))
+                    : ("문서명: " + (window.exportDraftTitle || "무제"))
                 font.family: Typography.fontPrimary
                 font.pixelSize: Typography.bodySmall
                 color: Colors.textSecondary
                 elide: Text.ElideRight
+                wrapMode: Text.NoWrap
             }
 
             Text {
@@ -2624,7 +2760,9 @@ Window {
                 spacing: Metrics.xs
 
                 Repeater {
-                    model: ["md", "txt", "pdf", "hwpx", "docx"]
+                    model: window.folderExportMode
+                        ? ["md", "txt", "hwpx", "docx"]
+                        : ["md", "txt", "pdf", "hwpx", "docx"]
                     delegate: Rectangle {
                         Layout.fillWidth: true
                         height: 34
@@ -2756,7 +2894,10 @@ Window {
                         id: closeExportMA
                         anchors.fill: parent
                         hoverEnabled: true
-                        onClicked: currentNoteExportDialog.visible = false
+                        onClicked: {
+                            currentNoteExportDialog.visible = false
+                            window.folderExportMode = false
+                        }
                     }
                 }
 
@@ -2779,7 +2920,13 @@ Window {
                         id: exportNowMA
                         anchors.fill: parent
                         hoverEnabled: true
-                        onClicked: window.startCurrentNoteExport()
+                        onClicked: {
+                            if (window.folderExportMode) {
+                                window.startFolderExport()
+                            } else {
+                                window.startCurrentNoteExport()
+                            }
+                        }
                     }
                 }
 
@@ -2804,9 +2951,13 @@ Window {
                         anchors.fill: parent
                         hoverEnabled: true
                         onClicked: {
-                            if (currentExportController) {
-                                currentExportController.openDirectory(window.exportOutputDir)
+                            if (!currentExportController) return
+                            var dir = window.exportLastOutputPath || window.exportOutputDir
+                            // 단일 노트 모드일 때 exportLastOutputPath는 파일 경로일 수 있음 → 출력 폴더로 보정
+                            if (!window.folderExportMode) {
+                                dir = window.exportOutputDir
                             }
+                            currentExportController.openDirectory(dir)
                         }
                     }
                 }
@@ -2824,6 +2975,129 @@ Window {
                 if (path.charAt(0) === '/') path = path.substring(1)
             }
             window.exportOutputDir = path
+        }
+    }
+
+    Timer {
+        id: importStatusTimer
+        interval: 5000
+        repeat: false
+        onTriggered: {
+            if (!window.importBusy) {
+                window.importStatusMessage = ""
+                window.importStatusError = false
+            }
+        }
+    }
+
+    // ── Busy Indicator Overlay ───────────────────────────────────────────────
+    Rectangle {
+        id: busyOverlay
+        visible: window.importBusy || window.exportBusy
+        anchors.fill: parent
+        color: Qt.rgba(0, 0, 0, 0.35)
+        z: 20000
+        enabled: false
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: 120
+            height: 120
+            radius: Metrics.radiusXxl
+            color: Colors.bgPrimary
+            border.color: Colors.borderLight
+            border.width: 1
+
+            ColumnLayout {
+                anchors.centerIn: parent
+                spacing: Metrics.md
+
+                BusyIndicator {
+                    Layout.alignment: Qt.AlignHCenter
+                    running: window.importBusy || window.exportBusy
+                    implicitWidth: 48
+                    implicitHeight: 48
+                }
+
+                Text {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: window.importBusy ? "가져오는 중..." : "내보내는 중..."
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.bodySmall
+                    color: Colors.textSecondary
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        id: importStatusBanner
+        visible: window.importStatusMessage.length > 0
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: parent.top
+        anchors.topMargin: 16
+        z: 10000
+        radius: Metrics.radiusMd
+        color: window.importStatusError ? Colors.accentRose : Colors.success
+        height: 40
+        width: Math.min(parent.width - 64, Math.max(260, statusLabel.implicitWidth + 32))
+
+        Text {
+            id: statusLabel
+            anchors.centerIn: parent
+            anchors.margins: 16
+            text: window.importStatusMessage
+            color: "white"
+            font.family: Typography.fontPrimary
+            font.pixelSize: Typography.bodySmall
+            font.weight: Typography.weightSemibold
+            elide: Text.ElideRight
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            onClicked: {
+                window.importStatusMessage = ""
+                window.importStatusError = false
+            }
+        }
+    }
+
+    FolderDialog {
+        id: folderImportDialog
+        title: "가져올 폴더 선택"
+        onAccepted: {
+            // Qt 6.3+: 선택 결과는 selectedFolder. 이전 버전 호환을 위해 currentFolder도 확인.
+            var picked = ""
+            try {
+                if (folderImportDialog.selectedFolder !== undefined && folderImportDialog.selectedFolder !== null) {
+                    picked = folderImportDialog.selectedFolder.toString()
+                }
+            } catch (e) { picked = "" }
+            if (!picked || picked.length === 0) {
+                picked = folderImportDialog.currentFolder ? folderImportDialog.currentFolder.toString() : ""
+            }
+            console.log("[import] picked URL=" + picked)
+
+            var raw = picked
+            if (raw.indexOf("file://") === 0) {
+                raw = raw.substring(7)
+                if (raw.charAt(0) === '/' && raw.length >= 3 && raw.charAt(2) === ':') {
+                    // Strip leading '/' for Windows paths like "/E:/foo"
+                    raw = raw.substring(1)
+                }
+            }
+            // Decode percent-encoded chars (e.g. spaces, Korean folder names)
+            try { raw = decodeURIComponent(raw) } catch (e) { /* leave raw as-is */ }
+            console.log("[import] resolved path=" + raw)
+
+            if (!raw) {
+                window.importStatusError = true
+                window.importStatusMessage = "선택된 폴더 경로를 읽지 못했습니다."
+                importStatusTimer.restart()
+                return
+            }
+            window.runFolderImport(raw)
         }
     }
 

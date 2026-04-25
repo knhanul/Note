@@ -23,6 +23,12 @@ class FolderService:
             descendants.append(child_id)
 
         return descendants
+
+    def get_descendant_ids(self, folder_id: str) -> List[str]:
+        """Public: list all descendant folder IDs (excluding `folder_id` itself)."""
+        if not folder_id:
+            return []
+        return self._get_descendant_ids(folder_id)
     
     def get_all(self) -> List[Dict[str, Any]]:
         """Get all folders ordered by sort_order."""

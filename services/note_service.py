@@ -49,6 +49,18 @@ class NoteService:
 
         return notes
 
+    def get_all_by_folder_ids(self, folder_ids: List[str],
+                              include_deleted: bool = False) -> List[Dict[str, Any]]:
+        """Get all notes whose folder_id is one of the supplied IDs."""
+        if not folder_ids:
+            return []
+        placeholders = ",".join(["?"] * len(folder_ids))
+        query = f"SELECT * FROM notes WHERE folder_id IN ({placeholders})"
+        if not include_deleted:
+            query += " AND deleted_at IS NULL"
+        query += " ORDER BY updated_at DESC"
+        return [self._parse_tags(n) for n in self.db.fetch_all(query, tuple(folder_ids))]
+
     def get_pinned(self, ensure_note_id: str = None) -> List[Dict[str, Any]]:
         """Get all pinned, non-deleted notes."""
         result = [self._parse_tags(n) for n in self.db.fetch_all(
