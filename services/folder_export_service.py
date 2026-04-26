@@ -31,16 +31,16 @@ class FolderExportService:
         self._exporter = note_export_service or CurrentNoteExportService()
 
     # ── Public entry points ────────────────────────────────────────────────
-    def export_folder(self, folder_id: str, fmt: str, out_dir: str) -> Dict[str, Any]:
-        return self._run("folder", fmt=fmt, out_dir=out_dir, folder_id=folder_id)
+    def export_folder(self, folder_id: str, fmt: str, out_dir: str, progress_callback=None) -> Dict[str, Any]:
+        return self._run("folder", fmt=fmt, out_dir=out_dir, folder_id=folder_id, progress_callback=progress_callback)
 
-    def export_all(self, fmt: str, out_dir: str, root_label: str = "전체 노트") -> Dict[str, Any]:
-        return self._run("all", fmt=fmt, out_dir=out_dir, root_label=root_label)
+    def export_all(self, fmt: str, out_dir: str, root_label: str = "전체 노트", progress_callback=None) -> Dict[str, Any]:
+        return self._run("all", fmt=fmt, out_dir=out_dir, root_label=root_label, progress_callback=progress_callback)
 
     def export_favorites(
-        self, fmt: str, out_dir: str, root_label: str = "즐겨 찾기"
+        self, fmt: str, out_dir: str, root_label: str = "즐겨 찾기", progress_callback=None
     ) -> Dict[str, Any]:
-        return self._run("favorites", fmt=fmt, out_dir=out_dir, root_label=root_label)
+        return self._run("favorites", fmt=fmt, out_dir=out_dir, root_label=root_label, progress_callback=progress_callback)
 
     # ── Core orchestration ─────────────────────────────────────────────────
     def _run(
@@ -51,6 +51,7 @@ class FolderExportService:
         out_dir: str,
         folder_id: Optional[str] = None,
         root_label: str = "",
+        progress_callback=None,
     ) -> Dict[str, Any]:
         fmt = (fmt or "").lower().strip()
         if fmt not in self.SUPPORTED_FORMATS:
@@ -72,14 +73,14 @@ class FolderExportService:
             base_dir.mkdir(parents=True, exist_ok=True)
 
             folder_ids = [folder_id] + self._folders.get_descendant_ids(folder_id)
-            return self._export_tree(folder_ids, base_dir, fmt, label, root_id=folder_id)
+            return self._export_tree(folder_ids, base_dir, fmt, label, root_id=folder_id, progress_callback=progress_callback)
 
         if scope == "favorites":
             label = root_label or "즐겨 찾기"
             base_dir = target_root / self._safe_dir_name(label)
             base_dir.mkdir(parents=True, exist_ok=True)
             notes = self._notes.get_pinned()
-            files, failures = self._export_flat(notes, base_dir, fmt)
+            files, failures = self._export_flat(notes, base_dir, fmt, progress_callback=progress_callback)
             return self._summary(label, files, failures, base_dir)
 
         # scope == "all"
@@ -88,7 +89,7 @@ class FolderExportService:
         base_dir.mkdir(parents=True, exist_ok=True)
         all_folders = self._folders.get_all()
         folder_ids = [f["id"] for f in all_folders]
-        return self._export_tree(folder_ids, base_dir, fmt, label, root_id=None)
+        return self._export_tree(folder_ids, base_dir, fmt, label, root_id=None, progress_callback=progress_callback)
 
     # ── Tree export (preserves folder hierarchy) ───────────────────────────
     def _export_tree(
@@ -98,23 +99,28 @@ class FolderExportService:
         fmt: str,
         label: str,
         root_id: Optional[str],
+        progress_callback=None,
     ) -> Dict[str, Any]:
         all_folders_map = {f["id"]: f for f in self._folders.get_all()}
         rel_paths = self._build_relative_paths(folder_ids, all_folders_map, root_id)
 
         notes = self._notes.get_all_by_folder_ids(folder_ids)
+        total_notes = len(notes)
         files: List[str] = []
         failures: List[Dict[str, str]] = []
         used_names: Dict[Path, set] = {}
 
-        for note in notes:
+        for idx, note in enumerate(notes):
             sub_rel = rel_paths.get(note.get("folder_id"), Path(""))
             sub_dir = base_dir / sub_rel
+            title = note.get("title") or "무제"
+            if progress_callback:
+                progress_callback(idx + 1, total_notes, f"보내는 중: {title}")
             try:
                 sub_dir.mkdir(parents=True, exist_ok=True)
             except Exception as exc:
                 failures.append(
-                    {"title": note.get("title") or "", "error": f"폴더 생성 실패: {exc}"}
+                    {"title": title, "error": f"폴더 생성 실패: {exc}"}
                 )
                 continue
 
@@ -123,26 +129,30 @@ class FolderExportService:
                 files.append(written)
             else:
                 failures.append(
-                    {"title": note.get("title") or "", "error": "변환 실패"}
+                    {"title": title, "error": "변환 실패"}
                 )
 
         return self._summary(label, files, failures, base_dir)
 
     # ── Flat export (no hierarchy) ─────────────────────────────────────────
     def _export_flat(
-        self, notes: List[Dict[str, Any]], target_dir: Path, fmt: str
+        self, notes: List[Dict[str, Any]], target_dir: Path, fmt: str, progress_callback=None
     ) -> Tuple[List[str], List[Dict[str, str]]]:
+        total_notes = len(notes)
         files: List[str] = []
         failures: List[Dict[str, str]] = []
         used_names: Dict[Path, set] = {}
 
-        for note in notes:
+        for idx, note in enumerate(notes):
+            title = note.get("title") or "무제"
+            if progress_callback:
+                progress_callback(idx + 1, total_notes, f"보내는 중: {title}")
             written = self._export_one(note, target_dir, fmt, used_names)
             if written:
                 files.append(written)
             else:
                 failures.append(
-                    {"title": note.get("title") or "", "error": "변환 실패"}
+                    {"title": title, "error": "변환 실패"}
                 )
         return files, failures
 

@@ -41,6 +41,11 @@ Window {
     property bool importStatusError: false
     property bool importBusy: false
     property bool exportBusy: false
+    property bool importIncludeSubfolders: true
+    property int importProgressValue: 0
+    property int importProgressTotal: 0
+    property int exportProgressValue: 0
+    property int exportProgressTotal: 0
 
     // Manual save shortcut (Ctrl+S)
     Shortcut {
@@ -156,7 +161,7 @@ Window {
         currentNoteExportDialog.visible = true
     }
 
-    function runFolderImport(srcDir) {
+    function runFolderImport(srcDir, includeSubfolders) {
         if (!folderImportController) {
             window.importStatusError = true
             window.importStatusMessage = "가져오기 컨트롤러를 찾을 수 없습니다."
@@ -176,23 +181,10 @@ Window {
         window.importBusy = true
         window.importStatusError = false
         window.importStatusMessage = "가져오는 중..."
+        window.importProgressValue = 0
+        window.importProgressTotal = 0
 
-        var result = folderImportController.importDirectory(srcDir, parentId)
-        window.importBusy = false
-
-        if (result && result.ok) {
-            window.importStatusError = false
-            window.importStatusMessage = result.message || "가져오기 완료"
-            // 가져온 최상위 폴더로 이동
-            if (result.rootFolderId && folderController) {
-                folderController.selectFolder(result.rootFolderId)
-            }
-        } else {
-            window.importStatusError = true
-            window.importStatusMessage = (result && result.message)
-                ? result.message : "가져오기에 실패했습니다."
-        }
-        importStatusTimer.restart()
+        folderImportController.importDirectoryAsync(srcDir, parentId, includeSubfolders)
     }
 
     function startFolderExport() {
@@ -215,25 +207,16 @@ Window {
 
         window.exportBusy = true
         window.exportStatusMessage = "내보내는 중..."
+        window.exportProgressValue = 0
+        window.exportProgressTotal = 0
 
         flushSaveIfDirty()
-        var result = currentExportController.exportFolderNotes(
+        currentExportController.exportFolderNotesAsync(
             folderExportScope,
             folderExportFolderId,
             fmt,
             exportOutputDir
         )
-        window.exportBusy = false
-
-        if (result && result.ok) {
-            exportStatusError = false
-            exportStatusMessage = result.message || "폴더 내보내기 완료"
-            exportLastOutputPath = result.outputPath || ""
-        } else {
-            exportStatusError = true
-            exportStatusMessage = (result && result.message) ? result.message : "폴더 내보내기에 실패했습니다."
-            exportLastOutputPath = (result && result.outputPath) ? result.outputPath : ""
-        }
     }
 
     function _buildCurrentExportPath(fmt) {
@@ -282,27 +265,16 @@ Window {
         }
 
         window.exportBusy = true
-        window.exportStatusMessage = "내보내는 중..."
+        window.exportStatusMessage = "보내는 중..."
 
         flushSaveIfDirty()
-        var result = currentExportController.exportCurrentNote(
+        currentExportController.exportCurrentNoteAsync(
             exportDraftTitle || "무제",
             exportDraftMarkdown || "",
             exportDraftJson || "",
             fmt,
             exportOutputDir
         )
-        window.exportBusy = false
-
-        if (result && result.ok) {
-            exportStatusError = false
-            exportStatusMessage = result.message || "내보내기 완료"
-            exportLastOutputPath = result.outputPath || ""
-        } else {
-            exportStatusError = true
-            exportStatusMessage = (result && result.message) ? result.message : "내보내기에 실패했습니다."
-            exportLastOutputPath = ""
-        }
     }
 
     function addOrActivateTab(noteId, noteTitle) {
@@ -477,7 +449,13 @@ Window {
             window.selectedNoteId = ""
         }
         function onFilteredNotesChanged() {
-            // ListView will refresh but keep the selection
+            var prevSelected = window.selectedNoteId
+            notesListView.model = null
+            notesListView.model = noteController ? noteController.filteredNotes : []
+            window.selectedNoteId = prevSelected
+        }
+        function onNoteSelected(noteId) {
+            window.selectedNoteId = noteId
         }
     }
 
@@ -491,6 +469,59 @@ Window {
         function onLibraryAdded(libraryId) {
             if (libraryRepeater && libraryService) {
                 libraryRepeater.model = libraryService.getAllLibraries()
+            }
+        }
+    }
+
+    Connections {
+        target: folderImportController
+        function onImportProgress(current, total, message) {
+            window.importProgressValue = current
+            window.importProgressTotal = total
+            window.importStatusMessage = message + " (" + current + "/" + total + ")"
+        }
+        function onImportFinished(ok, message, rootFolderId, noteCount, folderCount, failedCount) {
+            window.importBusy = false
+            if (ok) {
+                window.importStatusError = false
+                window.importStatusMessage = message || "가져오기 완료"
+                if (folderController) {
+                    // Refresh folder list first
+                    folderController.foldersChanged()
+                    // Also refresh notes list
+                    if (noteController) {
+                        noteController.notesChanged()
+                        noteController.filteredNotesChanged()
+                    }
+                    if (rootFolderId) {
+                        folderController.selectFolder(rootFolderId)
+                    }
+                }
+            } else {
+                window.importStatusError = true
+                window.importStatusMessage = message || "가져오기에 실패했습니다."
+            }
+            importStatusTimer.restart()
+        }
+    }
+
+    Connections {
+        target: currentExportController
+        function onExportProgress(current, total, message) {
+            window.exportProgressValue = current
+            window.exportProgressTotal = total
+            window.exportStatusMessage = message + " (" + current + "/" + total + ")"
+        }
+        function onExportFinished(ok, message, outputPath, count, failedCount) {
+            window.exportBusy = false
+            if (ok) {
+                window.exportStatusError = false
+                window.exportStatusMessage = message || "보내기 완료"
+                window.exportLastOutputPath = outputPath || ""
+            } else {
+                window.exportStatusError = true
+                window.exportStatusMessage = message || "보내기에 실패했습니다."
+                window.exportLastOutputPath = outputPath || ""
             }
         }
     }
@@ -526,7 +557,7 @@ Window {
                 console.log("동기화 실행 중...")
             }
             onImportClicked: {
-                folderImportDialog.open()
+                importOptionsDialog.visible = true
             }
             onCurrentNoteExportClicked: {
                 if (!(window.selectedNoteId !== "" || window.isDraftNewNote)) {
@@ -1996,8 +2027,7 @@ Window {
                                 tags: modelRef && modelRef.tags ? modelRef.tags : []
                                 isPinned: noteItem.pinState
                                 isSelected: {
-                                    var selected = window.selectedNoteId === noteItem.noteId
-                                    console.log("[QML] isSelected check: selectedNoteId=" + window.selectedNoteId + ", noteId=" + noteItem.noteId + ", result=" + selected)
+                                    var selected = noteController && noteController.currentNoteId === noteItem.noteId
                                     return selected
                                 }
 
@@ -2029,15 +2059,12 @@ Window {
                                         if (noteController) {
                                             noteController.selectNote(noteItem.noteId)
                                         }
-                                        window.selectedNoteId = noteItem.noteId
                                     }
                                 }
 
                                 onPinClicked: {
                                     console.log("[QML] Pin clicked for note:", noteItem.noteId, "model id:", modelRef ? modelRef.id : "null")
                                     if (noteItem.noteId) {
-                                        // Select the note first so it's highlighted
-                                        window.selectedNoteId = noteItem.noteId
                                         if (noteController) {
                                             noteController.selectNote(noteItem.noteId)
                                             noteController.togglePinned(noteItem.noteId)
@@ -3063,6 +3090,64 @@ Window {
         }
     }
 
+    // ── Progress overlay for import/export ───────────────────────────────────────
+    Rectangle {
+        id: progressOverlay
+        visible: window.importBusy || window.exportBusy
+        anchors.fill: parent
+        color: Qt.rgba(0, 0, 0, 0.45)
+        z: 30000
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: 360
+            height: 120
+            radius: Metrics.radiusXxl
+            color: Colors.bgPrimary
+            border.color: Colors.borderLight
+            border.width: 1
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: Metrics.xl
+                spacing: Metrics.md
+
+                Text {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: window.importBusy ? "가져오는 중..." : "보내는 중..."
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.body
+                    font.weight: Typography.weightSemibold
+                    color: Colors.textPrimary
+                }
+
+                ProgressBar {
+                    Layout.fillWidth: true
+                    from: 0
+                    to: Math.max(1, window.importBusy ? window.importProgressTotal : window.exportProgressTotal)
+                    value: window.importBusy ? window.importProgressValue : window.exportProgressValue
+                    indeterminate: (window.importBusy ? window.importProgressTotal : window.exportProgressTotal) <= 1
+                }
+
+                Text {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: window.importBusy
+                        ? (window.importProgressValue + "/" + window.importProgressTotal)
+                        : (window.exportProgressValue + "/" + window.exportProgressTotal)
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.caption
+                    color: Colors.textSecondary
+                    visible: (window.importBusy ? window.importProgressTotal : window.exportProgressTotal) > 1
+                }
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            // Block all clicks while progress overlay is visible
+        }
+    }
+
     FolderDialog {
         id: folderImportDialog
         title: "가져올 폴더 선택"
@@ -3097,7 +3182,114 @@ Window {
                 importStatusTimer.restart()
                 return
             }
-            window.runFolderImport(raw)
+            window.runFolderImport(raw, window.importIncludeSubfolders)
+        }
+    }
+
+    // ── Import Options Dialog ───────────────────────────────────────────────────
+    Rectangle {
+        id: importOptionsDialog
+        visible: false
+        anchors.centerIn: parent
+        width: 400
+        height: 180
+        radius: Metrics.radiusXxl
+        color: Colors.bgPrimary
+        border.color: Colors.borderLight
+        border.width: 1
+        z: 20001
+
+        Rectangle {
+            anchors.fill: parent
+            color: Qt.rgba(0, 0, 0, 0.35)
+            z: -1
+        }
+
+        ColumnLayout {
+            anchors.centerIn: parent
+            spacing: Metrics.lg
+            width: parent.width - 40
+
+            Text {
+                text: "가져오기 옵션"
+                font.family: Typography.fontPrimary
+                font.pixelSize: Typography.h4
+                font.weight: Typography.weightSemibold
+                color: Colors.textPrimary
+                Layout.alignment: Qt.AlignHCenter
+            }
+
+            CheckBox {
+                id: includeSubfoldersCheckbox
+                text: "하위 폴더 구조 포함"
+                checked: window.importIncludeSubfolders
+                onCheckedChanged: {
+                    window.importIncludeSubfolders = checked
+                }
+                Layout.alignment: Qt.AlignHCenter
+                font.family: Typography.fontPrimary
+                font.pixelSize: Typography.body
+                contentItem: Text {
+                    text: includeSubfoldersCheckbox.text
+                    font: includeSubfoldersCheckbox.font
+                    color: Colors.textPrimary
+                    verticalAlignment: Text.AlignVCenter
+                    leftPadding: includeSubfoldersCheckbox.indicator.width + 8
+                }
+            }
+
+            RowLayout {
+                spacing: Metrics.md
+                Layout.alignment: Qt.AlignHCenter
+
+                Rectangle {
+                    width: 100
+                    height: 36
+                    radius: Metrics.radiusMd
+                    color: Colors.borderLight
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "취소"
+                        font.family: Typography.fontPrimary
+                        font.pixelSize: Typography.bodySmall
+                        color: Colors.textSecondary
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: {
+                            importOptionsDialog.visible = false
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: 100
+                    height: 36
+                    radius: Metrics.radiusMd
+                    color: Colors.primary400
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "다음"
+                        font.family: Typography.fontPrimary
+                        font.pixelSize: Typography.bodySmall
+                        font.weight: Typography.weightSemibold
+                        color: Colors.textInverse
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: {
+                            importOptionsDialog.visible = false
+                            folderImportDialog.open()
+                        }
+                    }
+                }
+            }
         }
     }
 

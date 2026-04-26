@@ -63,6 +63,7 @@ class NoteController(QObject):
     noteAdded = pyqtSignal(str)  # note_id
     noteRemoved = pyqtSignal(str)  # note_id
     noteUpdated = pyqtSignal(str)  # note_id
+    noteSelected = pyqtSignal(str)  # note_id
     saveStatusChanged = pyqtSignal()  # For save status updates
     libraryChanged = pyqtSignal()  # Emitted when library changes
 
@@ -497,18 +498,29 @@ class NoteController(QObject):
     @pyqtSlot(str, str, str, str, result=str)
     def createNote(self, title: str, content: str = "", content_json: str = "", folder_id: str = "") -> str:
         """Create a new note in the specified folder."""
+        print(f"[NoteController] createNote called: folder_id={folder_id}, currentFolderId={self._folder_controller.currentFolderId}")
+
         # Use current folder if not specified
         if not folder_id:
             folder_id = self._folder_controller.currentFolderId
+            print(f"[NoteController] Using current folder: {folder_id}")
 
         # Smart folders are virtual, so fallback to first regular folder
-        if self._folder_controller.isSmartFolder(folder_id):
+        if folder_id and self._folder_controller.isSmartFolder(folder_id):
             folder_id = self._folder_controller.getFirstRegularFolderId()
+            print(f"[NoteController] Smart folder, using first regular: {folder_id}")
+
+        # If still no folder, get first regular folder (creates default if none exists)
+        if not folder_id:
+            folder_id = self._folder_controller.getFirstRegularFolderId()
+            print(f"[NoteController] No folder, getting first regular: {folder_id}")
 
         if not folder_id:
+            print(f"[NoteController] No folder_id available, cannot create note")
             return ""
 
         note_id = str(uuid.uuid4())[:8]
+        print(f"[NoteController] Creating note {note_id} in folder {folder_id}")
 
         tok_content, tok_json = self._store_data_urls_and_tokenize(note_id, content, content_json)
 
@@ -523,6 +535,10 @@ class NoteController(QObject):
             self._last_saved_version = 0
             self._is_dirty = False
             self._save_status = "saved"
+
+            # Select the folder where the note was created
+            if folder_id and self._folder_controller:
+                self._folder_controller.selectFolder(folder_id)
 
             self.notesChanged.emit()
             self.filteredNotesChanged.emit()
@@ -710,6 +726,7 @@ class NoteController(QObject):
             self._pending_json = None
             self.notesChanged.emit()
             self.filteredNotesChanged.emit()
+            self.noteSelected.emit(note_id)
             self.saveStatusChanged.emit()
             return True
         return False

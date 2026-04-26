@@ -8,3 +8,4 @@ python-docx>=1.1.0
 python-hwpx>=2.9.0
 pywin32>=306
 md2hwpx>=0.1.5
+gethwp>=1.1.1

@@ -281,10 +281,30 @@ class FolderController(QObject):
 
     @pyqtSlot(result=str)
     def getFirstRegularFolderId(self) -> str:
-        """Get first regular (DB) folder id for note creation fallback."""
+        """Get first regular (DB) folder id for note creation fallback.
+
+        If no folders exist, creates a default folder named '내 노트' at root.
+        """
         folders = self._folder_service.get_all()
+        print(f"[FolderController] getFirstRegularFolderId: found {len(folders)} folders")
         if folders:
+            print(f"[FolderController] Returning first folder: {folders[0]['id']}")
             return folders[0]["id"]
+
+        # Create default folder if none exists
+        print(f"[FolderController] No folders found, creating default folder")
+        default_name = "내 노트"
+        default_color = "#3B82F6"
+        folder_id = str(uuid.uuid4())[:8]
+        created = self._folder_service.create(folder_id, default_name, default_color, None)
+        print(f"[FolderController] Folder creation result: {created}, folder_id={folder_id}")
+        if created:
+            print(f"[FolderController] Created default folder: {default_name} ({folder_id})")
+            self.foldersChanged.emit()
+            self.currentFolderChanged.emit()
+            return folder_id
+
+        print(f"[FolderController] Failed to create default folder")
         return ""
     
     @pyqtSlot(result=int)
