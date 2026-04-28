@@ -155,6 +155,16 @@ class FolderImportService:
         created_folders: List[str] = [root_folder_id]
         failures: List[Dict[str, str]] = []
 
+        # ── Pre-scan: directories that contain (or lead to) supported files ──
+        dirs_with_files: set = set()
+        for _current_dir, _sub_dirs, files in os.walk(src):
+            _current_path = Path(_current_dir).resolve()
+            if any((_current_path / f).suffix.lower() in self.SUPPORTED_EXTS for f in files):
+                p = _current_path
+                while p and p != src.parent.resolve():
+                    dirs_with_files.add(p)
+                    p = p.parent.resolve()
+
         # Count total files for progress
         total_files = 0
         for _current_dir, _sub_dirs, files in os.walk(src):
@@ -168,24 +178,25 @@ class FolderImportService:
             current_path = Path(current_dir).resolve()
             current_folder_id = path_to_folder.get(current_path)
             if current_folder_id is None:
-                # Subdirectory whose creation failed earlier; skip its tree.
                 sub_dirs[:] = []
                 continue
 
             sub_dirs.sort()
             files.sort()
 
-            # If not including subfolders, skip subdirectory processing after root
             if not include_subfolders and current_path != src.resolve():
                 sub_dirs[:] = []
                 continue
 
             print(f"[FolderImport] Processing directory: {current_path} ({len(sub_dirs)} subdirs, {len(files)} files)")
 
-            # Mirror sub-folders
+            # Only create sub-folders that are on a path to supported files
             kept_subs: List[str] = []
             for sub in sub_dirs:
                 sub_path = (current_path / sub).resolve()
+                if sub_path not in dirs_with_files:
+                    print(f"[FolderImport] Skipping empty folder: '{sub}'")
+                    continue
                 new_id = self._create_folder(sub, current_folder_id, folder_color)
                 if new_id:
                     path_to_folder[sub_path] = new_id
@@ -193,9 +204,7 @@ class FolderImportService:
                     kept_subs.append(sub)
                     print(f"[FolderImport] Created folder: '{sub}' -> {new_id}")
                 else:
-                    failures.append(
-                        {"path": str(sub_path), "error": "폴더 생성 실패"}
-                    )
+                    failures.append({"path": str(sub_path), "error": "폴더 생성 실패"})
                     print(f"[FolderImport] Failed to create folder: '{sub}'")
             sub_dirs[:] = kept_subs
 

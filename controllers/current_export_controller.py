@@ -70,7 +70,7 @@ class _BatchExportWorker(QObject):
     """Worker for batch (folder) export."""
 
     progress = pyqtSignal(int, int, str)
-    finished = pyqtSignal(object)
+    finished = pyqtSignal(int, str, str, int, int)  # ok, message, outputPath, count, failedCount
 
     def __init__(self, library_service, service, scope, folder_id, fmt, out_dir):
         super().__init__()
@@ -158,6 +158,11 @@ class CurrentExportController(QObject):
         self._service = CurrentNoteExportService()
         self._thread: QThread | None = None
 
+    @pyqtSlot(int, str, str)
+    def _relaySingleExportFinished(self, ok, message, outputPath):
+        """Relay 3-arg single export finished to 5-arg exportFinished."""
+        self.exportFinished.emit(ok, message, outputPath, 1, 0)
+
     @pyqtSlot(str, result=str)
     def safeFilename(self, name: str) -> str:
         return self._service.safe_filename(name)
@@ -218,7 +223,7 @@ class CurrentExportController(QObject):
         self._thread = _SingleExportThread(worker, self)
 
         worker.progress.connect(self.exportProgress)
-        worker.finished.connect(self.exportFinished)
+        worker.finished.connect(self._relaySingleExportFinished)
         worker.finished.connect(self._thread.quit)
         worker.finished.connect(worker.deleteLater)
         self._thread.finished.connect(self._thread.deleteLater)
