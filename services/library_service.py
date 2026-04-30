@@ -93,10 +93,17 @@ class LibraryService(QObject):
         library_id = str(uuid.uuid4())[:8]
         now = datetime.now().isoformat()
         
-        # Database file path
-        db_filename = f"{library_id}.db"
-        db_path = str(self._libraries_dir / db_filename)
-        
+        # Database file path derived from library name for readability
+        safe_name = "".join(c if c not in '\\/:*?"<>|' else '_' for c in name.strip())
+        db_filename = f"{safe_name}.db"
+        db_path = self._libraries_dir / db_filename
+        counter = 1
+        while db_path.exists():
+            db_filename = f"{safe_name}_{counter}.db"
+            db_path = self._libraries_dir / db_filename
+            counter += 1
+        db_path = str(db_path)
+
         # Ensure parent directory exists
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         

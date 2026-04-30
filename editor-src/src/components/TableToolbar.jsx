@@ -1,5 +1,24 @@
+import { useState } from 'react'
+
 export default function TableToolbar({ editor }) {
   if (!editor || !editor.isActive('table')) return null
+
+  const parseTableWidth = () => {
+    const attrs = editor.getAttributes('table')
+    if (attrs && attrs.style) {
+      const m = attrs.style.match(/width:\s*(\d+)%/)
+      if (m) return parseInt(m[1], 10)
+    }
+    return 100
+  }
+
+  const [widthVal, setWidthVal] = useState(parseTableWidth())
+
+  const applyWidth = (w) => {
+    const pct = Math.max(20, Math.min(100, parseInt(w, 10) || 100))
+    setWidthVal(pct)
+    editor.chain().focus().updateAttributes('table', { style: `width: ${pct}%` }).run()
+  }
 
   const btn = (label, action, danger = false) => (
     <button
@@ -40,6 +59,23 @@ export default function TableToolbar({ editor }) {
       {sep()}
 
       {btn('표 삭제', () => editor.chain().focus().deleteTable().run(), true)}
+
+      {sep()}
+
+      {/* Outer size controls */}
+      <span className="text-primary-600 font-semibold text-xs mr-0.5">너비</span>
+      <input
+        type="number"
+        min={20}
+        max={100}
+        value={widthVal}
+        onChange={(e) => setWidthVal(e.target.value)}
+        onBlur={() => applyWidth(widthVal)}
+        onKeyDown={(e) => { if (e.key === 'Enter') applyWidth(widthVal) }}
+        className="w-12 px-1 py-0.5 text-xs border border-primary-200 rounded text-center focus:outline-none focus:ring-1 focus:ring-primary-400"
+      />
+      <span className="text-primary-500 text-xs">%</span>
+      {btn('자동', () => applyWidth(100))}
     </div>
   )
 }

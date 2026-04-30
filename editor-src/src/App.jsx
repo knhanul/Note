@@ -347,7 +347,11 @@ export default function App() {
       formatItalic:       () => editor.chain().focus().toggleItalic().run(),
       formatHeading:      () => editor.chain().focus().toggleHeading({ level: 1 }).run(),
       formatCode:         () => editor.chain().focus().toggleCode().run(),
-      insertTable:        () => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
+      insertTable(rows = 3, cols = 3) {
+        const r = Math.max(1, Math.min(20, parseInt(rows, 10) || 3))
+        const c = Math.max(1, Math.min(20, parseInt(cols, 10) || 3))
+        editor.chain().focus().insertTable({ rows: r, cols: c, withHeaderRow: true }).run()
+      },
       insertBulletList:   () => editor.chain().focus().toggleBulletList().run(),
       insertNumberedList: () => editor.chain().focus().toggleOrderedList().run(),
       insertHorizontalRule: () => editor.chain().focus().setHorizontalRule().run(),

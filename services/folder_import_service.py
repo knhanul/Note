@@ -43,6 +43,10 @@ class FolderImportService:
     """Imports a directory tree of documents into the current library."""
 
     SUPPORTED_EXTS = {".md", ".markdown", ".txt", ".html", ".htm", ".docx", ".hwp", ".hwpx"}
+    IMPORT_MODE_FAST_TEXT = "fast_text"
+    IMPORT_MODE_STRUCTURED = "structured"
+    IMPORT_MODE_AUTO = "auto"
+    DEFAULT_IMPORT_MODE = IMPORT_MODE_AUTO
 
     def __init__(
         self,
@@ -58,10 +62,24 @@ class FolderImportService:
         parent_folder_id: Optional[str] = None,
         folder_color: str = "#3B82F6",
         include_subfolders: bool = True,
+        import_mode: str = DEFAULT_IMPORT_MODE,
         progress_callback=None,
     ) -> Dict[str, Any]:
+        """Import documents from a directory tree.
+
+        import_mode:
+        - fast_text: legacy gethwp-based fast text extraction
+        - structured: structured HWPX importer path only
+        - auto: structured first, fallback to fast_text
+        """
         if not src_dir:
             raise ValueError("가져올 폴더가 지정되지 않았습니다.")
+        mode = self._normalize_import_mode(import_mode)
+        if mode != (import_mode or self.DEFAULT_IMPORT_MODE).strip().lower():
+            print(f"[FolderImport] Unknown import_mode='{import_mode}', fallback to auto")
+
+        print(f"[FolderImport] import_mode={mode}")
+
         src = Path(src_dir)
         if not src.exists() or not src.is_dir():
             raise ValueError(f"폴더를 찾을 수 없습니다: {src_dir}")
@@ -103,7 +121,7 @@ class FolderImportService:
                 if progress_callback:
                     progress_callback(processed, total_files, f"읽는 중: {fpath.name}")
                 try:
-                    title, markdown = self._read_note(fpath)
+                    title, markdown = self._read_note(fpath, import_mode=mode)
                 except Exception as exc:  # noqa: BLE001
                     failures.append({"path": str(fpath), "error": str(exc)})
                     print(f"[FolderImport] Failed to read file {fpath.name}: {exc}")
@@ -222,7 +240,7 @@ class FolderImportService:
                 if progress_callback:
                     progress_callback(processed, total_files, f"읽는 중: {fname}")
                 try:
-                    title, markdown = self._read_note(fpath)
+                    title, markdown = self._read_note(fpath, import_mode=mode)
                 except Exception as exc:  # noqa: BLE001
                     failures.append({"path": str(fpath), "error": str(exc)})
                     print(f"[FolderImport] Failed to read file {fname}: {exc}")
@@ -270,7 +288,7 @@ class FolderImportService:
         ok = self._folders.create(folder_id, clean, color, parent_id)
         return folder_id if ok else None
 
-    def _read_note(self, fpath: Path) -> Tuple[str, str]:
+    def _read_note(self, fpath: Path, import_mode: str = DEFAULT_IMPORT_MODE) -> Tuple[str, str]:
         ext = fpath.suffix.lower()
         title = fpath.stem
         filename_line = f"# {fpath.stem}\n\n"
@@ -284,7 +302,7 @@ class FolderImportService:
         if ext == ".docx":
             return title, filename_line + self._docx_to_markdown(fpath)
         if ext in (".hwp", ".hwpx"):
-            return title, filename_line + self._hwp_to_markdown(fpath)
+            return title, filename_line + self._hwp_to_markdown(fpath, import_mode=import_mode)
         return title, filename_line
 
     @staticmethod
@@ -372,16 +390,113 @@ class FolderImportService:
         return re.sub(r"\n{3,}", "\n\n", joined).strip()
 
     @staticmethod
-    def _hwp_to_markdown(fpath: Path) -> str:
+    def _hwp_to_markdown(fpath: Path, import_mode: str = DEFAULT_IMPORT_MODE) -> str:
+        """Convert HWP/HWPX to markdown using mode-aware fallback chain.
+
+        Developer flow:
+        1) structured path (.hwpx direct, .hwp via COM->HWPX)
+        2) fast_text path (legacy gethwp)
+        """
+        ext = fpath.suffix.lower()
+        mode = FolderImportService._normalize_import_mode(import_mode)
+        print(f"[FolderImport] Reading HWP file: {fpath} (mode={mode})")
+
+        use_structured = mode in {
+            FolderImportService.IMPORT_MODE_STRUCTURED,
+            FolderImportService.IMPORT_MODE_AUTO,
+        }
+        use_fast_text = mode in {
+            FolderImportService.IMPORT_MODE_FAST_TEXT,
+            FolderImportService.IMPORT_MODE_AUTO,
+        }
+
+        if use_structured:
+            structured_markdown = FolderImportService._try_structured_import(fpath, ext)
+            if structured_markdown:
+                return structured_markdown
+
+        if not use_fast_text:
+            print("[FolderImport] fast_text path disabled by import_mode")
+            return ""
+
+        return FolderImportService._read_via_gethwp(fpath, ext)
+
+    @staticmethod
+    def _normalize_import_mode(import_mode: str) -> str:
+        mode = (import_mode or FolderImportService.DEFAULT_IMPORT_MODE).strip().lower()
+        if mode in {
+            FolderImportService.IMPORT_MODE_FAST_TEXT,
+            FolderImportService.IMPORT_MODE_STRUCTURED,
+            FolderImportService.IMPORT_MODE_AUTO,
+        }:
+            return mode
+        return FolderImportService.DEFAULT_IMPORT_MODE
+
+    @staticmethod
+    def _try_structured_import(fpath: Path, ext: str) -> str:
+        if ext == ".hwpx":
+            return FolderImportService._parse_hwpx_with_importer(fpath)
+        if ext == ".hwp":
+            return FolderImportService._parse_hwp_via_com_then_importer(fpath)
+        return ""
+
+    @staticmethod
+    def _parse_hwpx_with_importer(hwpx_path: Path) -> str:
+        try:
+            from services.hwpx_importer import hwpx_to_markdown
+
+            parsed = (hwpx_to_markdown(str(hwpx_path)) or "").strip()
+            if parsed:
+                print("[FolderImport] HWPX importer success")
+                return parsed
+            print("[FolderImport] HWPX importer failed, fallback to gethwp")
+            return ""
+        except Exception as exc:  # noqa: BLE001
+            print(f"[FolderImport] HWPX importer failed, fallback to gethwp: {exc}")
+            return ""
+
+    @staticmethod
+    def _parse_hwp_via_com_then_importer(hwp_path: Path) -> str:
+        converted_hwpx: Path | None = None
+        try:
+            from services.hwp_converter import convert_hwp_to_hwpx_via_com
+
+            converted = convert_hwp_to_hwpx_via_com(str(hwp_path))
+            if not converted:
+                print("[FolderImport] HWP COM conversion failed, fallback to gethwp")
+                return ""
+
+            converted_hwpx = Path(converted)
+            return FolderImportService._parse_hwpx_with_importer(converted_hwpx)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[FolderImport] HWP COM/importer failed, fallback to gethwp: {exc}")
+            return ""
+        finally:
+            FolderImportService._cleanup_temp_hwpx(converted_hwpx)
+
+    @staticmethod
+    def _cleanup_temp_hwpx(hwpx_path: Path | None) -> None:
+        if hwpx_path is None:
+            return
+        try:
+            parent_dir = hwpx_path.parent
+            if hwpx_path.exists():
+                hwpx_path.unlink()
+            if parent_dir.exists() and parent_dir.name.startswith("hwp_import_"):
+                parent_dir.rmdir()
+        except Exception:
+            pass
+
+    @staticmethod
+    def _read_via_gethwp(fpath: Path, ext: str) -> str:
+
         try:
             import gethwp
         except Exception as exc:  # noqa: BLE001
-            print(f"[FolderImport] Failed to import gethwp library: {exc}")
+            print(f"[FolderImport] gethwp unavailable: {exc}")
             return ""
 
         try:
-            print(f"[FolderImport] Reading HWP file: {fpath}")
-            ext = fpath.suffix.lower()
             if ext == ".hwp":
                 text = gethwp.read_hwp(str(fpath))
             elif ext == ".hwpx":
@@ -393,9 +508,7 @@ class FolderImportService:
                 print(f"[FolderImport] HWP file returned empty text")
                 return ""
 
-            # Convert plain text to markdown (preserve line breaks)
-            # HWP text may contain paragraph separators
-            lines = text.split('\n')
+            lines = text.split("\n")
             blocks = []
             for line in lines:
                 line = line.strip()
@@ -405,6 +518,6 @@ class FolderImportService:
             joined = "\n\n".join(b for b in blocks if b)
             print(f"[FolderImport] HWP conversion complete: {len(blocks)} paragraphs, {len(joined)} chars")
             return re.sub(r"\n{3,}", "\n\n", joined).strip()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"[FolderImport] HWP conversion failed: {exc}")
             return ""

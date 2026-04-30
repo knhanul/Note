@@ -71,7 +71,13 @@
 /* ───────────────────────────────────────
    Tables
 ─────────────────────────────────────── */
-.ProseMirror .tableWrapper { overflow-x: auto; padding: .5rem 0; }
+.ProseMirror .tableWrapper {
+  overflow-x: auto;
+  padding: .5rem 0;
+  resize: horizontal;
+  min-width: 120px;
+  max-width: 100%;
+}
 
 .ProseMirror table {
   border-collapse: collapse;
@@ -113,6 +119,11 @@
   pointer-events: none;
   top: 0;
   width: 4px;
+}
+
+/* Column resize cursor */
+.ProseMirror.resize-cursor {
+  cursor: col-resize;
 }
 
 /* ───────────────────────────────────────

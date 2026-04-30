@@ -66,8 +66,21 @@ export default function Toolbar({ editor }) {
     setShowImageModal(false)
   }
 
+  const [showTableModal, setShowTableModal] = useState(false)
+  const [tableRows, setTableRows] = useState(3)
+  const [tableCols, setTableCols] = useState(3)
+
   const handleTable = () => {
-    editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
+    setTableRows(3)
+    setTableCols(3)
+    setShowTableModal(true)
+  }
+
+  const applyTable = () => {
+    const rows = Math.max(1, Math.min(20, parseInt(tableRows, 10) || 1))
+    const cols = Math.max(1, Math.min(20, parseInt(tableCols, 10) || 1))
+    editor.chain().focus().insertTable({ rows, cols, withHeaderRow: true }).run()
+    setShowTableModal(false)
   }
 
   return (
@@ -223,6 +236,51 @@ export default function Toolbar({ editor }) {
             <div className="flex justify-end gap-2 mt-3">
               <button onClick={() => setShowImageModal(false)} className="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded">취소</button>
               <button onClick={applyImage} className="px-3 py-1.5 text-sm bg-primary-600 text-white hover:bg-primary-700 rounded">확인</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Table Modal */}
+      {showTableModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setShowTableModal(false)}>
+          <div className="bg-white rounded-lg shadow-xl p-4 w-80" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <span className="font-medium text-slate-700">표 삽입</span>
+              <button onClick={() => setShowTableModal(false)} className="text-slate-400 hover:text-slate-600">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex gap-3 mb-4">
+              <div className="flex-1">
+                <label className="block text-xs text-slate-500 mb-1">행</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={tableRows}
+                  onChange={e => setTableRows(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  onKeyDown={e => { if (e.key === 'Enter') applyTable() }}
+                  autoFocus
+                />
+              </div>
+              <div className="flex-1">
+                <label className="block text-xs text-slate-500 mb-1">열</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={tableCols}
+                  onChange={e => setTableCols(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  onKeyDown={e => { if (e.key === 'Enter') applyTable() }}
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowTableModal(false)} className="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded">취소</button>
+              <button onClick={applyTable} className="px-3 py-1.5 text-sm bg-primary-600 text-white hover:bg-primary-700 rounded">확인</button>
             </div>
           </div>
         </div>

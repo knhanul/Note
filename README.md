@@ -88,6 +88,20 @@ python main.py
 - PyQt6 6.5+
 - Qt 6.5+ (included with PyQt6)
 
+## HWP/HWPX Import Flow (Developer)
+
+- Entry: `FolderImportService._hwp_to_markdown()`
+- Import modes:
+  - `fast_text`: legacy `gethwp` text extraction only
+  - `structured`: `hwpx_importer` path only
+  - `auto` (default): structured first, then `fast_text` fallback
+- Structured path:
+  - `.hwpx` → `services.hwpx_importer.hwpx_to_markdown()`
+  - `.hwp` → `services.hwp_converter.convert_hwp_to_hwpx_via_com()` → `hwpx_importer`
+- Fallback path:
+  - Any structured failure falls back to `gethwp` when mode allows it
+  - Import failures return empty markdown safely (no app crash)
+
 ## License
 
 MIT License - See LICENSE file for details.
