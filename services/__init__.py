@@ -6,6 +6,7 @@ from .folder_service import FolderService
 from .image_service import ImageService
 from .library_service import LibraryService
 from .settings_service import SettingsService
+from .template_service import TemplateService
 from .folder_import_service import FolderImportService
 from .folder_export_service import FolderExportService
 from .current_note_export_service import CurrentNoteExportService
@@ -17,6 +18,7 @@ __all__ = [
     'ImageService',
     'LibraryService',
     'SettingsService',
+    'TemplateService',
     'FolderImportService',
     'FolderExportService',
     'CurrentNoteExportService',

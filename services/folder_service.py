@@ -58,7 +58,8 @@ class FolderService:
             return False
     
     def update(self, folder_id: str, name: Optional[str] = None, 
-               color: Optional[str] = None) -> bool:
+               color: Optional[str] = None,
+               default_template_id: Optional[str] = None) -> bool:
         """Update folder name and/or color."""
         try:
             updates = []
@@ -70,6 +71,9 @@ class FolderService:
             if color is not None:
                 updates.append("color = ?")
                 params.append(color)
+            if default_template_id is not None:
+                updates.append("default_template_id = ?")
+                params.append(default_template_id)
             
             if not updates:
                 return False
@@ -112,6 +116,25 @@ class FolderService:
             (folder_id,)
         )
         return result['count'] if result else 0
+
+    def set_default_template(self, folder_id: str, template_id: Optional[str]) -> bool:
+        """Set or clear the default template for a folder."""
+        try:
+            cursor = self.db.execute(
+                "UPDATE folders SET default_template_id = ?, updated_at = ? WHERE id = ?",
+                (template_id, Database.now_iso(), folder_id)
+            )
+            self.db.commit()
+            return cursor.rowcount > 0
+        except Exception:
+            return False
+
+    def get_default_template_id(self, folder_id: str) -> Optional[str]:
+        """Get the default template id for a folder."""
+        folder = self.get_by_id(folder_id)
+        if not folder:
+            return None
+        return folder.get('default_template_id')
     
     def has_children(self, folder_id: str) -> bool:
         """Check if folder has sub-folders."""

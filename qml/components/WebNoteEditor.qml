@@ -430,9 +430,9 @@ ColumnLayout {
     }
 
     // Reset editor content without overriding bound properties
-    function resetEditor() {
+    function resetEditor(markdown, json) {
         if (webView.loadProgress === 100) {
-            webView.runJavaScript("if (window.editorAPI) { window.editorAPI.setContent('', ''); }")
+            setEditorContent(markdown || "", json || "")
         }
     }
 

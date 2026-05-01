@@ -55,6 +55,19 @@ class Database:
                 FOREIGN KEY (parent_id) REFERENCES folders (id) ON DELETE SET NULL
             )
         """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS templates (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
+                content TEXT NOT NULL DEFAULT '',
+                description TEXT DEFAULT '',
+                sort_order INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
         
         # Notes table
         cursor.execute("""
@@ -113,8 +126,16 @@ class Database:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_notes_deleted ON notes (deleted_at)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_note_images_note ON note_images (note_id)")
         cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_note_images_note_checksum ON note_images (note_id, checksum)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_templates_sort ON templates (sort_order, created_at)")
         
         conn.commit()
+
+        # Migration: add default_template_id column to folders if not present
+        try:
+            cursor.execute("ALTER TABLE folders ADD COLUMN default_template_id TEXT DEFAULT NULL")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # Column already exists
 
         # Migration: add content_json column if not present
         try:

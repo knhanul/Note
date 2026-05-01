@@ -46,6 +46,19 @@ Window {
     property int importProgressTotal: 0
     property int exportProgressValue: 0
     property int exportProgressTotal: 0
+    property var templateSelectionItems: []
+    property string templateDialogFolderId: ""
+    property string templateDialogFolderName: ""
+    property string templateDialogFolderPath: ""
+    property string templateSelectedDefaultId: ""
+    property string templateEditId: ""
+    property string templateEditName: ""
+    property string templateEditTitle: ""
+    property string templateEditContent: ""
+    property string templateStatusMessage: ""
+    property bool templateStatusError: false
+    property int folderSettingsMenuIndex: 0
+    property string folderRenameEditName: ""
 
     // Manual save shortcut (Ctrl+S)
     Shortcut {
@@ -187,6 +200,226 @@ Window {
         folderImportController.importDirectoryAsync(srcDir, parentId, includeSubfolders)
     }
 
+    function resolveNoteCreationFolderId(folderId) {
+        if (!folderController) return ""
+        var fid = folderId || ""
+        if (!fid || folderController.isSmartFolder(fid)) {
+            fid = folderController.getFirstRegularFolderId()
+        }
+        return fid || ""
+    }
+
+    function resolveTemplateDialogFolderId(folderId) {
+        if (!folderController) return ""
+        var fid = folderId || ""
+        if (!fid || folderController.isSmartFolder(fid)) return ""
+        return fid
+    }
+
+    function getTemplateById(templateId) {
+        if (!templateId || !templateController) return null
+        var templateObj = templateController.getTemplate(templateId)
+        if (!templateObj || templateObj.id === undefined) return null
+        return templateObj
+    }
+
+    function getDefaultTemplateForFolder(folderId) {
+        if (!folderController || !templateController || !folderId) return null
+        var templateId = folderController.getFolderDefaultTemplateId(folderId)
+        if (!templateId) return null
+        return getTemplateById(templateId)
+    }
+
+    function refreshTemplateSelectionItems() {
+        var items = [{ id: "", name: "기본 템플릿 없음" }]
+        var list = templateController ? templateController.templates : []
+        for (var i = 0; i < list.length; i++) {
+            items.push({
+                id: list[i].id,
+                name: (list[i].name && list[i].name.length > 0) ? list[i].name : "이름 없는 템플릿"
+            })
+        }
+        templateSelectionItems = items
+    }
+
+    function indexOfTemplateSelection(templateId) {
+        var targetId = templateId || ""
+        for (var i = 0; i < templateSelectionItems.length; i++) {
+            if ((templateSelectionItems[i].id || "") === targetId) {
+                return i
+            }
+        }
+        return 0
+    }
+
+    function extractTitleFromContent(content) {
+        if (!content) return ""
+        var lines = content.split(/\r?\n/)
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i].trim()
+            if (!line) continue
+            var m = line.match(/^#+\s+(.*)$/)
+            if (m) return m[1].trim()
+            return line
+        }
+        return ""
+    }
+
+    function clearTemplateEditor() {
+        templateEditId = ""
+        templateEditName = ""
+        templateEditTitle = ""
+        templateEditContent = ""
+    }
+
+    function loadTemplateEditor(templateId) {
+        var templateObj = getTemplateById(templateId)
+        if (!templateObj) {
+            clearTemplateEditor()
+            return
+        }
+        templateEditId = templateObj.id || ""
+        templateEditName = templateObj.name || ""
+        templateEditContent = templateObj.content || ""
+        templateEditTitle = templateObj.title || extractTitleFromContent(templateEditContent)
+    }
+
+    function openTemplateManagerDialog() {
+        if (!folderController) return
+
+        var selectedFolderId = folderController.currentFolderId || ""
+        if (!selectedFolderId || folderController.isSmartFolder(selectedFolderId)) {
+            return
+        }
+
+        refreshTemplateSelectionItems()
+        templateDialogFolderId = resolveTemplateDialogFolderId(selectedFolderId)
+        templateDialogFolderName = "현재 폴더 없음"
+        templateSelectedDefaultId = ""
+        folderSettingsMenuIndex = 0
+
+        if (templateDialogFolderId && folderController) {
+            var folderObj = folderController.getFolder(templateDialogFolderId)
+            templateDialogFolderName = (folderObj && folderObj.name !== undefined)
+                ? folderObj.name : (folderController.currentFolderName || "현재 폴더")
+            folderRenameEditName = templateDialogFolderName
+            templateDialogFolderPath = folderController.getFolderPath(templateDialogFolderId) || ""
+            templateSelectedDefaultId = folderController.getFolderDefaultTemplateId(templateDialogFolderId) || ""
+        }
+
+        templateStatusMessage = ""
+        templateStatusError = false
+        clearTemplateEditor()
+        templateManagerDialog.visible = true
+    }
+
+    function saveFolderNameSetting() {
+        if (!folderController || !templateDialogFolderId) return
+
+        var cleanName = (folderRenameEditName || "").trim()
+        if (!cleanName) {
+            templateStatusError = true
+            templateStatusMessage = "폴더 이름을 입력해주세요."
+            return
+        }
+
+        if (folderController.renameFolder(templateDialogFolderId, cleanName)) {
+            templateDialogFolderName = cleanName
+            templateStatusError = false
+            templateStatusMessage = "폴더 이름이 변경되었습니다."
+        } else {
+            templateStatusError = true
+            templateStatusMessage = "폴더 이름 변경에 실패했습니다."
+        }
+    }
+
+    function canOpenFolderSettingsDialog() {
+        if (!folderController) return false
+        var fid = folderController.currentFolderId || ""
+        return !!fid && !folderController.isSmartFolder(fid)
+    }
+
+    function saveTemplateEditor() {
+        if (!templateController) return
+
+        var cleanName = (templateEditName || "").trim()
+        if (!cleanName) {
+            templateStatusError = true
+            templateStatusMessage = "템플릿 이름을 입력해주세요."
+            return
+        }
+
+        var derivedTitle = extractTitleFromContent(templateEditContent)
+        var ok = false
+        if (templateEditId) {
+            ok = templateController.updateTemplate(
+                templateEditId,
+                cleanName,
+                derivedTitle,
+                templateEditContent || ""
+            )
+            if (ok) {
+                templateStatusError = false
+                templateStatusMessage = "템플릿이 저장되었습니다."
+            }
+        } else {
+            var newId = templateController.createTemplate(
+                cleanName,
+                derivedTitle,
+                templateEditContent || ""
+            )
+            ok = !!newId
+            if (ok) {
+                refreshTemplateSelectionItems()
+                loadTemplateEditor(newId)
+                templateStatusError = false
+                templateStatusMessage = "템플릿이 생성되었습니다."
+            }
+        }
+
+        if (!ok) {
+            templateStatusError = true
+            templateStatusMessage = "템플릿 저장에 실패했습니다."
+            return
+        }
+
+        refreshTemplateSelectionItems()
+    }
+
+    function deleteCurrentTemplate() {
+        if (!templateController || !templateEditId) return
+
+        var deletedId = templateEditId
+        if (templateController.deleteTemplate(deletedId)) {
+            if (templateSelectedDefaultId === deletedId) {
+                templateSelectedDefaultId = ""
+            }
+            clearTemplateEditor()
+            refreshTemplateSelectionItems()
+            templateStatusError = false
+            templateStatusMessage = "템플릿이 삭제되었습니다."
+        } else {
+            templateStatusError = true
+            templateStatusMessage = "템플릿 삭제에 실패했습니다."
+        }
+    }
+
+    function applySelectedFolderTemplate() {
+        if (!folderController || !templateDialogFolderId) {
+            templateStatusError = true
+            templateStatusMessage = "기본 템플릿을 설정할 일반 폴더를 먼저 선택해주세요."
+            return
+        }
+
+        if (folderController.setFolderDefaultTemplate(templateDialogFolderId, templateSelectedDefaultId || "")) {
+            templateStatusError = false
+            templateStatusMessage = "폴더 기본 템플릿이 저장되었습니다."
+        } else {
+            templateStatusError = true
+            templateStatusMessage = "폴더 기본 템플릿 저장에 실패했습니다."
+        }
+    }
+
     function startFolderExport() {
         if (!exportOutputDir || exportOutputDir.length === 0) {
             exportStatusError = true
@@ -300,13 +533,27 @@ Window {
 
     function startDraftNote() {
         isDraftNewNote = true
-        draftFolderId = folderController ? folderController.currentFolderId : ""
+        draftFolderId = resolveNoteCreationFolderId(folderController ? folderController.currentFolderId : "")
         selectedNoteId = ""
-        titleTouchedByUser = false
-        currentNote = { title: "", content: "", content_json: "" }
+        var templateObj = getDefaultTemplateForFolder(draftFolderId)
+        var folderObj = (folderController && draftFolderId)
+            ? folderController.getFolder(draftFolderId) : null
+        var folderName = (folderObj && folderObj.name !== undefined)
+            ? (folderObj.name || "") : ""
+        var renderedTemplate = (templateObj && templateObj.id !== undefined && templateController)
+            ? templateController.renderTemplate(templateObj.id, draftFolderId, folderName)
+            : null
+        var initialTitle = (renderedTemplate && renderedTemplate.title !== undefined)
+            ? (renderedTemplate.title || "")
+            : (templateObj ? (templateObj.title || "") : "")
+        var initialContent = (renderedTemplate && renderedTemplate.content !== undefined)
+            ? (renderedTemplate.content || "")
+            : (templateObj ? (templateObj.content || "") : "")
+        titleTouchedByUser = !!(initialTitle && initialTitle.trim())
+        currentNote = { title: initialTitle, content: initialContent, content_json: "" }
         if (noteEditor) {
-            noteEditor.resetEditor()
-            noteEditor.focusTitle()
+            noteEditor.resetEditor(initialContent, "")
+            noteEditor.focusContent()
         }
     }
 
@@ -438,6 +685,13 @@ Window {
         function onFoldersChanged() {
             foldersListView.model = null
             foldersListView.model = folderController ? folderController.folders : []
+        }
+    }
+
+    Connections {
+        target: templateController
+        function onTemplatesChanged() {
+            window.refreshTemplateSelectionItems()
         }
     }
 
@@ -953,6 +1207,35 @@ Window {
                             }
 
                             Item { Layout.fillWidth: true }
+
+                            Rectangle {
+                                id: manageTemplateButton
+                                visible: sidebar.sidebarTabIdx === 0
+                                width: 28
+                                height: 20
+                                radius: Metrics.radiusMd
+                                color: canOpenFolderSettingsDialog() && manageTemplateArea.containsMouse ? Colors.primary100 : "transparent"
+                                border.width: 1
+                                border.color: canOpenFolderSettingsDialog() && manageTemplateArea.containsMouse ? Colors.primary200 : "transparent"
+                                opacity: canOpenFolderSettingsDialog() ? 1.0 : 0.4
+
+                                MouseArea {
+                                    id: manageTemplateArea
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    enabled: canOpenFolderSettingsDialog()
+                                    onClicked: window.openTemplateManagerDialog()
+                                }
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "⚙"
+                                    font.family: Typography.fontPrimary
+                                    font.weight: Typography.weightSemibold
+                                    font.pixelSize: 11
+                                    color: manageTemplateArea.containsMouse ? Colors.primary600 : Colors.textTertiary
+                                }
+                            }
 
                             // Add folder button (폴더 탭에서만 표시)
                             Rectangle {
@@ -3002,6 +3285,598 @@ Window {
                 if (path.charAt(0) === '/') path = path.substring(1)
             }
             window.exportOutputDir = path
+        }
+    }
+
+    Rectangle {
+        id: templateManagerBackdrop
+        visible: templateManagerDialog.visible
+        anchors.fill: parent
+        color: Qt.rgba(0, 0, 0, 0.35)
+        z: 20001
+    }
+
+    Rectangle {
+        id: templateManagerDialog
+        visible: false
+        anchors.centerIn: parent
+        width: 940
+        height: 620
+        radius: Metrics.radiusXxl
+        color: Colors.bgPrimary
+        border.color: Colors.borderLight
+        border.width: 1
+        z: 20002
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: Metrics.md
+            spacing: Metrics.sm
+
+            RowLayout {
+                Layout.fillWidth: true
+
+                Text {
+                    text: "폴더 설정"
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.h4
+                    font.weight: Typography.weightSemibold
+                    color: Colors.textPrimary
+                }
+
+                Item { Layout.fillWidth: true }
+
+                Rectangle {
+                    width: 86
+                    height: 34
+                    radius: Metrics.radiusMd
+                    color: closeFolderSettingsHeaderMA.containsMouse ? Colors.bgTertiary : Colors.bgSecondary
+                    border.width: 1
+                    border.color: Colors.borderLight
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "닫기"
+                        font.family: Typography.fontPrimary
+                        font.pixelSize: 12
+                        color: Colors.textSecondary
+                    }
+
+                    MouseArea {
+                        id: closeFolderSettingsHeaderMA
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: templateManagerDialog.visible = false
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: Metrics.md
+
+                Rectangle {
+                    Layout.preferredWidth: 220
+                    Layout.fillHeight: true
+                    radius: Metrics.radiusLg
+                    color: Colors.bgSecondary
+                    border.width: 1
+                    border.color: Colors.borderLight
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: Metrics.sm
+                        spacing: Metrics.sm
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: templateDialogFolderId
+                                ? ("현재 폴더: " + templateDialogFolderName)
+                                : "현재 폴더를 선택해주세요"
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.bodySmall
+                            color: Colors.textPrimary
+                            wrapMode: Text.Wrap
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 1
+                            color: Colors.borderLight
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 40
+                            radius: Metrics.radiusMd
+                            color: folderSettingsMenuIndex === 0 ? Colors.primary50 : (folderRenameMenuMA.containsMouse ? Colors.bgPrimary : "transparent")
+                            border.width: 1
+                            border.color: folderSettingsMenuIndex === 0 ? Colors.primary200 : Colors.borderLight
+
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.left: parent.left
+                                anchors.leftMargin: Metrics.md
+                                text: "폴더 이름 변경"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodySmall
+                                font.weight: folderSettingsMenuIndex === 0 ? Typography.weightSemibold : Typography.weightRegular
+                                color: folderSettingsMenuIndex === 0 ? Colors.primary700 : Colors.textSecondary
+                            }
+
+                            MouseArea {
+                                id: folderRenameMenuMA
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: folderSettingsMenuIndex = 0
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 40
+                            radius: Metrics.radiusMd
+                            color: folderSettingsMenuIndex === 1 ? Colors.primary50 : (templateSettingsMenuMA.containsMouse ? Colors.bgPrimary : "transparent")
+                            border.width: 1
+                            border.color: folderSettingsMenuIndex === 1 ? Colors.primary200 : Colors.borderLight
+
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.left: parent.left
+                                anchors.leftMargin: Metrics.md
+                                text: "템플릿 설정"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodySmall
+                                font.weight: folderSettingsMenuIndex === 1 ? Typography.weightSemibold : Typography.weightRegular
+                                color: folderSettingsMenuIndex === 1 ? Colors.primary700 : Colors.textSecondary
+                            }
+
+                            MouseArea {
+                                id: templateSettingsMenuMA
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: folderSettingsMenuIndex = 1
+                            }
+                        }
+
+                        Item { Layout.fillHeight: true }
+                    }
+                }
+
+                StackLayout {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    currentIndex: folderSettingsMenuIndex
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        radius: Metrics.radiusLg
+                        color: Colors.bgSecondary
+                        border.width: 1
+                        border.color: Colors.borderLight
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: Metrics.sm
+                            spacing: Metrics.md
+
+                            Text {
+                                text: "폴더 이름 변경"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.h5
+                                font.weight: Typography.weightSemibold
+                                color: Colors.textPrimary
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: "선택한 폴더의 이름을 변경합니다."
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodySmall
+                                color: Colors.textSecondary
+                            }
+
+                            TextField {
+                                Layout.fillWidth: true
+                                placeholderText: "폴더 이름"
+                                text: window.folderRenameEditName
+                                onTextChanged: window.folderRenameEditName = text
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+
+                                Item { Layout.fillWidth: true }
+
+                                Rectangle {
+                                    width: 120
+                                    height: 34
+                                    radius: Metrics.radiusMd
+                                    color: renameFolderSaveMA.containsMouse ? Colors.primary500 : Colors.primary400
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "이름 저장"
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: 12
+                                        font.weight: Typography.weightSemibold
+                                        color: Colors.textInverse
+                                    }
+
+                                    MouseArea {
+                                        id: renameFolderSaveMA
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        onClicked: window.saveFolderNameSetting()
+                                    }
+                                }
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                visible: window.templateStatusMessage.length > 0
+                                text: window.templateStatusMessage
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.caption
+                                color: window.templateStatusError ? Colors.accentRose : Colors.success
+                                wrapMode: Text.Wrap
+                            }
+
+                            Item { Layout.fillHeight: true }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        radius: Metrics.radiusLg
+                        color: Colors.bgSecondary
+                        border.width: 1
+                        border.color: Colors.borderLight
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: Metrics.sm
+                            spacing: Metrics.sm
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                height: 64
+                                radius: Metrics.radiusLg
+                                color: Colors.bgPrimary
+                                border.width: 1
+                                border.color: Colors.borderLight
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: Metrics.sm
+                                    spacing: Metrics.sm
+
+                                    Text {
+                                        text: templateDialogFolderPath ? ("이 폴더의 기본 템플릿: " + templateDialogFolderPath) : "이 폴더의 기본 템플릿"
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.bodySmall
+                                        color: Colors.textPrimary
+                                        Layout.fillWidth: true
+                                        wrapMode: Text.Wrap
+                                    }
+
+                                    ComboBox {
+                                        id: defaultTemplateCombo
+                                        Layout.preferredWidth: 240
+                                        model: window.templateSelectionItems
+                                        textRole: "name"
+                                        currentIndex: window.indexOfTemplateSelection(window.templateSelectedDefaultId)
+                                        onActivated: {
+                                            if (currentIndex >= 0 && currentIndex < window.templateSelectionItems.length) {
+                                                window.templateSelectedDefaultId = window.templateSelectionItems[currentIndex].id || ""
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        width: 108
+                                        height: 34
+                                        radius: Metrics.radiusMd
+                                        color: applyDefaultTemplateMA.containsMouse ? Colors.primary500 : Colors.primary400
+
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "기본 적용"
+                                            font.family: Typography.fontPrimary
+                                            font.pixelSize: 12
+                                            font.weight: Typography.weightSemibold
+                                            color: Colors.textInverse
+                                        }
+
+                                        MouseArea {
+                                            id: applyDefaultTemplateMA
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            enabled: templateDialogFolderId.length > 0
+                                            onClicked: window.applySelectedFolderTemplate()
+                                        }
+                                    }
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                spacing: Metrics.md
+
+                                Rectangle {
+                                    Layout.preferredWidth: 200
+                                    Layout.fillHeight: true
+                                    radius: Metrics.radiusMd
+                                    color: Colors.bgPrimary
+                                    border.width: 1
+                                    border.color: Colors.borderLight
+
+                                    ColumnLayout {
+                                        anchors.fill: parent
+                                        anchors.margins: Metrics.sm
+                                        spacing: Metrics.sm
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+
+                                            Text {
+                                                text: "템플릿 목록"
+                                                font.family: Typography.fontPrimary
+                                                font.pixelSize: Typography.bodySmall
+                                                font.weight: Typography.weightSemibold
+                                                color: Colors.textPrimary
+                                            }
+
+                                            Item { Layout.fillWidth: true }
+
+                                            Rectangle {
+                                                width: 78
+                                                height: 28
+                                                radius: Metrics.radiusMd
+                                                color: newTemplateMA.containsMouse ? Colors.primary100 : Colors.bgPrimary
+                                                border.width: 1
+                                                border.color: Colors.borderLight
+
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    text: "새 템플릿"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: 11
+                                                    color: Colors.textPrimary
+                                                }
+
+                                                MouseArea {
+                                                    id: newTemplateMA
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    onClicked: {
+                                                        window.clearTemplateEditor()
+                                                        if (templateController) {
+                                                            var example = templateController.getDefaultExampleTemplate()
+                                                            if (example) {
+                                                                window.templateEditContent = example.content || ""
+                                                            }
+                                                        }
+                                                        window.templateStatusMessage = ""
+                                                        window.templateStatusError = false
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            Layout.fillHeight: true
+                                            radius: Metrics.radiusMd
+                                            color: Colors.bgPrimary
+                                            border.width: 1
+                                            border.color: Colors.borderLight
+
+                                            ListView {
+                                                id: templateListView
+                                                anchors.fill: parent
+                                                anchors.margins: 6
+                                                model: templateController ? templateController.templates : []
+                                                clip: true
+                                                spacing: 6
+
+                                                delegate: Rectangle {
+                                                    width: templateListView.width
+                                                    height: 54
+                                                    radius: Metrics.radiusMd
+                                                    color: (window.templateEditId === (modelData ? modelData.id : ""))
+                                                        ? Colors.primary50 : (templateDelegateArea.containsMouse ? Colors.bgSecondary : "transparent")
+                                                    border.width: 1
+                                                    border.color: (window.templateEditId === (modelData ? modelData.id : ""))
+                                                        ? Colors.primary200 : Colors.borderLight
+
+                                                    Column {
+                                                        anchors.fill: parent
+                                                        anchors.margins: 10
+                                                        spacing: 4
+
+                                                        Text {
+                                                            width: parent.width
+                                                            text: modelData ? (modelData.name || "이름 없는 템플릿") : ""
+                                                            font.family: Typography.fontPrimary
+                                                            font.pixelSize: 12
+                                                            font.weight: Typography.weightSemibold
+                                                            color: Colors.textPrimary
+                                                            elide: Text.ElideRight
+                                                        }
+
+                                                        Text {
+                                                            width: parent.width
+                                                            text: modelData ? (modelData.title || "제목 없음") : ""
+                                                            font.family: Typography.fontPrimary
+                                                            font.pixelSize: 11
+                                                            color: Colors.textSecondary
+                                                            elide: Text.ElideRight
+                                                        }
+                                                    }
+
+                                                    MouseArea {
+                                                        id: templateDelegateArea
+                                                        anchors.fill: parent
+                                                        hoverEnabled: true
+                                                        onClicked: window.loadTemplateEditor(modelData ? modelData.id : "")
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    radius: Metrics.radiusMd
+                                    color: Colors.bgPrimary
+                                    border.width: 1
+                                    border.color: Colors.borderLight
+
+                                    ColumnLayout {
+                                        anchors.fill: parent
+                                        anchors.margins: Metrics.sm
+                                        spacing: Metrics.sm
+
+                                        Text {
+                                            text: templateEditId ? "템플릿 편집" : "템플릿 만들기"
+                                            font.family: Typography.fontPrimary
+                                            font.pixelSize: Typography.bodySmall
+                                            font.weight: Typography.weightSemibold
+                                            color: Colors.textPrimary
+                                        }
+
+                                        TextField {
+                                            Layout.fillWidth: true
+                                            placeholderText: "템플릿 이름"
+                                            text: window.templateEditName
+                                            onTextChanged: window.templateEditName = text
+                                        }
+
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            Layout.fillHeight: true
+                                            radius: Metrics.radiusMd
+                                            color: Colors.surface
+                                            border.width: 1
+                                            border.color: window.templateEditContent.length > 0 ? Colors.borderMedium : Colors.borderLight
+
+                                            ScrollView {
+                                                anchors.fill: parent
+                                                anchors.margins: Metrics.sm
+                                                clip: true
+
+                                                TextArea {
+                                                    width: parent.width
+                                                    placeholderText: "템플릿 본문 (첫 줄이 노트 제목이 됩니다)"
+                                                    text: window.templateEditContent
+                                                    wrapMode: TextEdit.Wrap
+                                                    onTextChanged: window.templateEditContent = text
+                                                    background: Item {}
+                                                }
+                                            }
+                                        }
+
+                                        Text {
+                                            Layout.fillWidth: true
+                                            visible: window.templateStatusMessage.length > 0
+                                            text: window.templateStatusMessage
+                                            font.family: Typography.fontPrimary
+                                            font.pixelSize: Typography.caption
+                                            color: window.templateStatusError ? Colors.accentRose : Colors.success
+                                            wrapMode: Text.Wrap
+                                        }
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            spacing: Metrics.sm
+
+                                            Rectangle {
+                                                width: 86
+                                                height: 34
+                                                radius: Metrics.radiusMd
+                                                color: clearTemplateMA.containsMouse ? Colors.bgTertiary : Colors.bgPrimary
+                                                border.width: 1
+                                                border.color: Colors.borderLight
+
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    text: "초기화"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: 12
+                                                    color: Colors.textSecondary
+                                                }
+
+                                                MouseArea {
+                                                    id: clearTemplateMA
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    onClicked: window.clearTemplateEditor()
+                                                }
+                                            }
+
+                                            Rectangle {
+                                                width: 86
+                                                height: 34
+                                                radius: Metrics.radiusMd
+                                                visible: window.templateEditId.length > 0
+                                                color: deleteTemplateMA.containsMouse ? Colors.accentRose : Colors.accentRoseLight
+
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    text: "삭제"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: 12
+                                                    font.weight: Typography.weightSemibold
+                                                    color: deleteTemplateMA.containsMouse ? "white" : Colors.accentRose
+                                                }
+
+                                                MouseArea {
+                                                    id: deleteTemplateMA
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    onClicked: window.deleteCurrentTemplate()
+                                                }
+                                            }
+
+                                            Item { Layout.fillWidth: true }
+
+                                            Rectangle {
+                                                width: 96
+                                                height: 34
+                                                radius: Metrics.radiusMd
+                                                color: saveTemplateMA.containsMouse ? Colors.primary500 : Colors.primary400
+
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    text: window.templateEditId ? "저장" : "생성"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: 12
+                                                    font.weight: Typography.weightSemibold
+                                                    color: Colors.textInverse
+                                                }
+
+                                                MouseArea {
+                                                    id: saveTemplateMA
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    onClicked: window.saveTemplateEditor()
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

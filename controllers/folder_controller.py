@@ -271,6 +271,49 @@ class FolderController(QObject):
             folder['note_count'] = self._folder_service.get_note_count(folder_id)
             return QVariant(folder)
         return QVariant()
+
+    @pyqtSlot(str, result=str)
+    def getFolderPath(self, folder_id: str) -> str:
+        """Get full folder path as breadcrumb string."""
+        if not folder_id or self._is_smart_folder_id(folder_id):
+            return ""
+        folders = self._folder_service.get_all()
+        folders_map = {f['id']: f for f in folders}
+        parts = []
+        current_id = folder_id
+        visited = set()
+        while current_id and current_id not in visited:
+            visited.add(current_id)
+            folder = folders_map.get(current_id)
+            if not folder:
+                break
+            parts.append(folder.get('name', ''))
+            current_id = folder.get('parent_id')
+        if not parts:
+            return ""
+        return ' / '.join(reversed(parts))
+
+    @pyqtSlot(str, result=str)
+    def getFolderDefaultTemplateId(self, folder_id: str) -> str:
+        """Get the default template id for a folder."""
+        if not folder_id or self._is_smart_folder_id(folder_id):
+            return ""
+        template_id = self._folder_service.get_default_template_id(folder_id)
+        return template_id or ""
+
+    @pyqtSlot(str, str, result=bool)
+    def setFolderDefaultTemplate(self, folder_id: str, template_id: str) -> bool:
+        """Set or clear a folder's default template."""
+        if not folder_id or self._is_smart_folder_id(folder_id):
+            return False
+
+        clean_template_id = (template_id or "").strip() or None
+        result = self._folder_service.set_default_template(folder_id, clean_template_id)
+        if result:
+            self.foldersChanged.emit()
+            if self._current_folder_id == folder_id:
+                self.currentFolderChanged.emit()
+        return result
     
     @pyqtSlot(str, result=bool)
     def selectFolder(self, folder_id: str) -> bool:
