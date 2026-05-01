@@ -4,8 +4,6 @@ from __future__ import annotations
 import base64
 import html
 import re
-import subprocess
-import sys
 import tempfile
 from io import BytesIO
 from pathlib import Path

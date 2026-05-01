@@ -20,6 +20,7 @@ from PyQt6.QtCore import QUrl, QObject, pyqtSignal, pyqtProperty, QTimer
 from PyQt6.QtGui import QFontDatabase, QFont, QIcon
 
 from services.library_service import LibraryService
+from services.settings_service import SettingsService
 from controllers.folder_controller import FolderController
 from controllers.note_controller import NoteController
 from controllers.current_export_controller import CurrentExportController
@@ -94,11 +95,14 @@ def main():
     # Create QML engine first
     engine = QQmlApplicationEngine()
     
-    # Create library service first (manages multiple databases)
-    library_service = LibraryService(engine)
+    # Create settings service first (persists last selections)
+    settings_service = SettingsService()
+
+    # Create library service with settings
+    library_service = LibraryService(engine, settings_service)
     
-    # Create controllers with library service and engine as parent
-    folder_controller = FolderController(library_service, engine)
+    # Create controllers with library service, settings, and engine as parent
+    folder_controller = FolderController(library_service, settings_service, engine)
     note_controller = NoteController(library_service, folder_controller, engine)
     current_export_controller = CurrentExportController(library_service, engine)
     folder_import_controller = FolderImportController(

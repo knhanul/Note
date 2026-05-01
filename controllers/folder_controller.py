@@ -6,6 +6,7 @@ import uuid
 from services.database import Database
 from services.folder_service import FolderService
 from services.library_service import LibraryService
+from services.settings_service import SettingsService
 
 
 class FolderController(QObject):
@@ -27,10 +28,11 @@ class FolderController(QObject):
     folderDeleteFailed = pyqtSignal(str, str)  # folder_name, reason
     libraryChanged = pyqtSignal()  # Emitted when library changes
     
-    def __init__(self, library_service: LibraryService, parent=None):
+    def __init__(self, library_service: LibraryService, settings_service: Optional[SettingsService] = None, parent=None):
         super().__init__(parent)
         self._current_folder_id: Optional[str] = None
         self._library_service = library_service
+        self._settings = settings_service
         self._collapsed_folder_ids: set = set()  # Track collapsed (hidden) folders
         
         # Connect to library changes
@@ -45,8 +47,13 @@ class FolderController(QObject):
         if db:
             self._db = db
             self._folder_service = FolderService(self._db)
-            self._current_folder_id = None
             self._load_folders()
+            # Restore last folder if it still exists, otherwise pick first folder
+            last_folder_id = self._settings.get_last_folder_id() if self._settings else None
+            if last_folder_id and self._folder_service.exists(last_folder_id):
+                self._current_folder_id = last_folder_id
+            else:
+                self._current_folder_id = None
             self.libraryChanged.emit()
             self.foldersChanged.emit()
             self.currentFolderChanged.emit()
@@ -163,6 +170,8 @@ class FolderController(QObject):
         """Set current folder ID."""
         if self._current_folder_id != folder_id:
             self._current_folder_id = folder_id
+            if self._settings and folder_id:
+                self._settings.set_last_folder_id(folder_id)
             self.currentFolderChanged.emit()
     
     @pyqtProperty(str, notify=currentFolderChanged)

@@ -35,6 +35,12 @@ node_modules/
 
 # 로그
 *.log
+app_output.log
+
+# 런타임 데이터 (사용자 DB/이미지/설정 - GitHub에 올라가면 안 됨)
+app_data/
+*.db
+nuni_note_settings.json
 
 # OS
 .DS_Store

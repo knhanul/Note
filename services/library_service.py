@@ -8,6 +8,7 @@ from typing import Optional, List, Dict, Any
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot, pyqtProperty
 
 from services.database import Database
+from services.settings_service import SettingsService
 
 
 class LibraryService(QObject):
@@ -20,8 +21,11 @@ class LibraryService(QObject):
     libraryRemoved = pyqtSignal(str)  # library_id
     libraryRenamed = pyqtSignal(str, str)  # library_id, new_name
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, settings_service: Optional[SettingsService] = None):
         super().__init__(parent)
+        
+        # Settings service for persisting last selection
+        self._settings = settings_service
         
         # Program directory (where the main script is located)
         prog_dir = Path(__file__).parent.parent
@@ -61,20 +65,48 @@ class LibraryService(QObject):
         
         conn.commit()
     
+    def _cleanup_missing_libraries(self):
+        """Remove libraries whose database files no longer exist from metadata."""
+        all_libs = self._meta_db.fetch_all(
+            "SELECT * FROM libraries ORDER BY created_at ASC"
+        )
+        removed = False
+        for lib in all_libs:
+            db_path = Path(lib['db_path'])
+            if not db_path.exists():
+                self._meta_db.execute(
+                    "DELETE FROM libraries WHERE id = ?", (lib['id'],)
+                )
+                removed = True
+        if removed:
+            self._meta_db.commit()
+            self.librariesChanged.emit()
+
     def _ensure_default_library(self):
-        """Create or load default library."""
+        """Restore last library or create/load default library."""
+        # Clean up entries whose DB files are missing
+        self._cleanup_missing_libraries()
+
         libraries = self.get_all_libraries()
-        
+
         if not libraries:
             # Create default library
             self.create_library("내 서재", "기본 서재입니다", is_default=True)
+            return
+
+        # Try to restore last used library
+        if self._settings:
+            last_id = self._settings.get_last_library_id()
+            if last_id and self.get_library(last_id):
+                self.set_current_library(last_id)
+                return
+
+        # Fallback to default library
+        default = next((lib for lib in libraries if lib.get('is_default')), None)
+        if default:
+            self.set_current_library(default['id'])
         else:
-            # Find default library
-            default = next((lib for lib in libraries if lib.get('is_default')), None)
-            if default:
-                self.set_current_library(default['id'])
-            else:
-                self.set_current_library(libraries[0]['id'])
+            self.set_current_library(libraries[0]['id'])
     
     def get_all_libraries(self) -> List[Dict[str, Any]]:
         """Get all libraries."""
@@ -238,6 +270,10 @@ class LibraryService(QObject):
         self._current_db = Database(library['db_path'])
         self._current_db.init_schema()
         self._current_library_id = library_id
+
+        # Persist last selected library
+        if self._settings:
+            self._settings.set_last_library_id(library_id)
         
         self.currentLibraryChanged.emit()
         return True

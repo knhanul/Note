@@ -111,39 +111,10 @@ class FolderImportService:
 
             for fpath in files:
                 processed += 1
-                ext = fpath.suffix.lower()
-                if ext not in self.SUPPORTED_EXTS:
-                    print(f"[FolderImport] Skipping file (unsupported ext): {fpath.name} ({ext})")
-                    if progress_callback:
-                        progress_callback(processed, total_files, f"스킵: {fpath.name}")
-                    continue
-                print(f"[FolderImport] Processing file: {fpath.name} ({ext})")
-                if progress_callback:
-                    progress_callback(processed, total_files, f"읽는 중: {fpath.name}")
-                try:
-                    title, markdown = self._read_note(fpath, import_mode=mode)
-                except Exception as exc:  # noqa: BLE001
-                    failures.append({"path": str(fpath), "error": str(exc)})
-                    print(f"[FolderImport] Failed to read file {fpath.name}: {exc}")
-                    if progress_callback:
-                        progress_callback(processed, total_files, f"오류: {fpath.name}")
-                    continue
-
-                note_id = uuid.uuid4().hex[:8]
-                if progress_callback:
-                    progress_callback(processed, total_files, f"저장 중: {fpath.name}")
-                if self._notes.create(
-                    note_id=note_id,
-                    folder_id=target_folder_id,
-                    title=title or fpath.stem or "무제",
-                    content=markdown or "",
-                    content_json="",
-                ):
-                    imported_notes.append(note_id)
-                    print(f"[FolderImport] Imported note: '{title or fpath.stem}' -> {note_id}")
-                else:
-                    failures.append({"path": str(fpath), "error": "노트 생성 실패"})
-                    print(f"[FolderImport] Failed to create note: {fpath.name}")
+                self._process_file(
+                    fpath, target_folder_id, processed, total_files,
+                    mode, progress_callback, imported_notes, failures,
+                )
 
             print(f"[FolderImport] Import complete: {len(imported_notes)} notes, 0 folders, {len(failures)} failures")
             if failures:
@@ -229,40 +200,11 @@ class FolderImportService:
             # Import files
             for fname in files:
                 fpath = current_path / fname
-                ext = fpath.suffix.lower()
                 processed += 1
-                if ext not in self.SUPPORTED_EXTS:
-                    print(f"[FolderImport] Skipping file (unsupported ext): {fname} ({ext})")
-                    if progress_callback:
-                        progress_callback(processed, total_files, f"스킵: {fname}")
-                    continue
-                print(f"[FolderImport] Processing file: {fname} ({ext})")
-                if progress_callback:
-                    progress_callback(processed, total_files, f"읽는 중: {fname}")
-                try:
-                    title, markdown = self._read_note(fpath, import_mode=mode)
-                except Exception as exc:  # noqa: BLE001
-                    failures.append({"path": str(fpath), "error": str(exc)})
-                    print(f"[FolderImport] Failed to read file {fname}: {exc}")
-                    if progress_callback:
-                        progress_callback(processed, total_files, f"오류: {fname}")
-                    continue
-
-                note_id = uuid.uuid4().hex[:8]
-                if progress_callback:
-                    progress_callback(processed, total_files, f"저장 중: {fname}")
-                if self._notes.create(
-                    note_id=note_id,
-                    folder_id=current_folder_id,
-                    title=title or fpath.stem or "무제",
-                    content=markdown or "",
-                    content_json="",
-                ):
-                    imported_notes.append(note_id)
-                    print(f"[FolderImport] Imported note: '{title or fpath.stem}' -> {note_id}")
-                else:
-                    failures.append({"path": str(fpath), "error": "노트 생성 실패"})
-                    print(f"[FolderImport] Failed to create note: {fname}")
+                self._process_file(
+                    fpath, current_folder_id, processed, total_files,
+                    mode, progress_callback, imported_notes, failures,
+                )
 
         print(f"[FolderImport] Import complete: {len(imported_notes)} notes, {len(created_folders)} folders, {len(failures)} failures")
         if failures:
@@ -280,6 +222,53 @@ class FolderImportService:
         }
 
     # ── helpers ────────────────────────────────────────────────────────────
+    def _process_file(
+        self,
+        fpath: Path,
+        folder_id: str,
+        processed: int,
+        total_files: int,
+        mode: str,
+        progress_callback,
+        imported_notes: List[str],
+        failures: List[Dict[str, str]],
+    ) -> None:
+        """Process a single file: read, convert, and create a note record."""
+        ext = fpath.suffix.lower()
+        if ext not in self.SUPPORTED_EXTS:
+            print(f"[FolderImport] Skipping file (unsupported ext): {fpath.name} ({ext})")
+            if progress_callback:
+                progress_callback(processed, total_files, f"스킵: {fpath.name}")
+            return
+
+        print(f"[FolderImport] Processing file: {fpath.name} ({ext})")
+        if progress_callback:
+            progress_callback(processed, total_files, f"읽는 중: {fpath.name}")
+        try:
+            title, markdown = self._read_note(fpath, import_mode=mode)
+        except Exception as exc:  # noqa: BLE001
+            failures.append({"path": str(fpath), "error": str(exc)})
+            print(f"[FolderImport] Failed to read file {fpath.name}: {exc}")
+            if progress_callback:
+                progress_callback(processed, total_files, f"오류: {fpath.name}")
+            return
+
+        note_id = uuid.uuid4().hex[:8]
+        if progress_callback:
+            progress_callback(processed, total_files, f"저장 중: {fpath.name}")
+        if self._notes.create(
+            note_id=note_id,
+            folder_id=folder_id,
+            title=title or fpath.stem or "무제",
+            content=markdown or "",
+            content_json="",
+        ):
+            imported_notes.append(note_id)
+            print(f"[FolderImport] Imported note: '{title or fpath.stem}' -> {note_id}")
+        else:
+            failures.append({"path": str(fpath), "error": "노트 생성 실패"})
+            print(f"[FolderImport] Failed to create note: {fpath.name}")
+
     def _create_folder(
         self, name: str, parent_id: Optional[str], color: str
     ) -> Optional[str]:
