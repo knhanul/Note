@@ -21,6 +21,13 @@ Window {
     property string selectedNoteId: ""
     property var currentNote: null
     property var openTabs: []   // [{id, title}, ...]
+    property bool noteSelectionMode: false
+    property var selectedNoteIds: []
+    property var selectableFolderItems: []
+    property string batchActionMode: ""    // move | copy
+    property string batchTargetFolderId: ""
+    property string batchTargetFolderName: ""
+    property string batchFolderHintMessage: ""
     property real editorZoom: 1.0
     property bool isDraftNewNote: false
     property string draftFolderId: ""
@@ -214,6 +221,259 @@ Window {
         var fid = folderId || ""
         if (!fid || folderController.isSmartFolder(fid)) return ""
         return fid
+    }
+
+    function refreshSelectableFolderItems() {
+        var items = []
+        if (folderController && folderController.folders) {
+            for (var i = 0; i < folderController.folders.length; i++) {
+                var folder = folderController.folders[i]
+                if (folder && !folder.is_smart) {
+                    items.push(folder)
+                }
+            }
+        }
+        selectableFolderItems = items
+
+        if (batchTargetFolderId) {
+            var stillValid = false
+            for (var j = 0; j < items.length; j++) {
+                if (items[j] && String(items[j].id || "") === batchTargetFolderId) {
+                    stillValid = true
+                    break
+                }
+            }
+            if (!stillValid) {
+                batchTargetFolderId = ""
+                batchTargetFolderName = ""
+            }
+        }
+
+        if (batchActionMode || batchFolderPickerDialog.visible) {
+            refreshBatchFolderHint()
+        }
+    }
+
+    function getCurrentRegularFolderId() {
+        if (!folderController) return ""
+        var currentId = String(folderController.currentFolderId || "").trim()
+        if (!currentId || folderController.isSmartFolder(currentId)) return ""
+        return currentId
+    }
+
+    function getDefaultBatchTargetFolderId() {
+        var currentId = getCurrentRegularFolderId()
+        for (var i = 0; i < selectableFolderItems.length; i++) {
+            var item = selectableFolderItems[i]
+            if (item && item.id && String(item.id) !== currentId) {
+                return String(item.id)
+            }
+        }
+        return ""
+    }
+
+    function hasBatchFolderTargets() {
+        return getDefaultBatchTargetFolderId() !== ""
+    }
+
+    function isBatchTargetFolderUsable(folderId) {
+        var cleanId = String(folderId || "").trim()
+        if (!cleanId) return false
+        if (!batchActionMode) return false
+
+        var currentId = getCurrentRegularFolderId()
+        if (currentId && cleanId === currentId) {
+            return false
+        }
+
+        for (var i = 0; i < selectableFolderItems.length; i++) {
+            var item = selectableFolderItems[i]
+            if (item && String(item.id || "") === cleanId) {
+                return true
+            }
+        }
+        return false
+    }
+
+    function refreshBatchFolderHint() {
+        if (!selectableFolderItems || selectableFolderItems.length === 0) {
+            batchFolderHintMessage = "선택할 수 있는 대상 폴더가 없습니다."
+            return
+        }
+
+        var currentId = getCurrentRegularFolderId()
+        var hasAlternateFolder = false
+        for (var i = 0; i < selectableFolderItems.length; i++) {
+            var item = selectableFolderItems[i]
+            if (item && String(item.id || "") !== currentId) {
+                hasAlternateFolder = true
+                break
+            }
+        }
+
+        if (!hasAlternateFolder) {
+            batchFolderHintMessage = "현재 폴더와 다른 대상 폴더가 필요합니다."
+        } else {
+            batchFolderHintMessage = "이동/복사할 대상 폴더를 선택하세요. 스마트 폴더는 제외됩니다."
+        }
+    }
+
+    function clearNoteSelectionState() {
+        noteSelectionMode = false
+        selectedNoteIds = []
+        batchActionMode = ""
+        batchTargetFolderId = ""
+        batchTargetFolderName = ""
+        batchFolderHintMessage = ""
+        batchFolderPickerDialog.visible = false
+        batchDeleteConfirmDialog.visible = false
+    }
+
+    function enterNoteSelectionMode() {
+        noteSelectionMode = true
+        if (!selectedNoteIds) selectedNoteIds = []
+        refreshSelectableFolderItems()
+    }
+
+    function exitNoteSelectionMode() {
+        clearNoteSelectionState()
+    }
+
+    function collectSelectedNoteIds() {
+        var result = []
+        var seen = {}
+        for (var i = 0; i < (selectedNoteIds || []).length; i++) {
+            var noteId = String(selectedNoteIds[i] || "").trim()
+            if (noteId && !seen[noteId]) {
+                seen[noteId] = true
+                result.push(noteId)
+            }
+        }
+        return result
+    }
+
+    function isNoteSelected(noteId) {
+        var cleanId = String(noteId || "").trim()
+        if (!cleanId) return false
+        return selectedNoteIds.indexOf(cleanId) !== -1
+    }
+
+    function toggleNoteSelection(noteId) {
+        var cleanId = String(noteId || "").trim()
+        if (!cleanId) return
+        var ids = collectSelectedNoteIds().slice()
+        var idx = ids.indexOf(cleanId)
+        if (idx >= 0) {
+            ids.splice(idx, 1)
+        } else {
+            ids.push(cleanId)
+        }
+        selectedNoteIds = ids
+        noteSelectionMode = true
+    }
+
+    function selectedNoteCount() {
+        return collectSelectedNoteIds().length
+    }
+
+    function getVisibleNoteIds() {
+        var ids = []
+        if (!noteController || !noteController.filteredNotes) return ids
+        for (var i = 0; i < noteController.filteredNotes.length; i++) {
+            var note = noteController.filteredNotes[i]
+            var noteId = note && note.id ? String(note.id).trim() : ""
+            if (noteId) ids.push(noteId)
+        }
+        return ids
+    }
+
+    function isAllVisibleNotesSelected() {
+        var ids = getVisibleNoteIds()
+        if (!ids.length) return false
+        for (var i = 0; i < ids.length; i++) {
+            if (!isNoteSelected(ids[i])) return false
+        }
+        return true
+    }
+
+    function toggleSelectAllVisibleNotes() {
+        var ids = getVisibleNoteIds()
+        if (!ids.length) return
+
+        if (isAllVisibleNotesSelected()) {
+            clearNoteSelectionState()
+            return
+        }
+
+        selectedNoteIds = ids
+        noteSelectionMode = true
+    }
+
+    function syncSelectionAfterFolderChange() {
+        clearNoteSelectionState()
+    }
+
+    function applyBatchNoteAction() {
+        if (!noteController) return false
+        var ids = collectSelectedNoteIds()
+        if (!ids.length || !batchTargetFolderId) return false
+
+        var ok = false
+        if (batchActionMode === "move") {
+            ok = noteController.moveNotesToFolder(ids, batchTargetFolderId)
+        } else if (batchActionMode === "copy") {
+            ok = noteController.copyNotesToFolder(ids, batchTargetFolderId)
+        }
+
+        if (ok) {
+            clearNoteSelectionState()
+        }
+        return ok
+    }
+
+    function openBatchFolderPicker(actionMode) {
+        if (!folderController) return
+        refreshSelectableFolderItems()
+        batchActionMode = actionMode
+        batchTargetFolderId = getDefaultBatchTargetFolderId()
+        batchTargetFolderName = ""
+        for (var i = 0; i < selectableFolderItems.length; i++) {
+            var folder = selectableFolderItems[i]
+            if (folder && String(folder.id || "") === batchTargetFolderId) {
+                batchTargetFolderName = folder.name || ""
+                break
+            }
+        }
+        refreshBatchFolderHint()
+        batchFolderPickerDialog.visible = true
+    }
+
+    function openBatchDeleteConfirm() {
+        if (!selectedNoteCount()) return
+        batchDeleteConfirmDialog.visible = true
+    }
+
+    function closeTabsForDeletedNotes(noteIds) {
+        var idSet = {}
+        for (var i = 0; i < (noteIds || []).length; i++) {
+            var cleanId = String(noteIds[i] || "").trim()
+            if (cleanId) idSet[cleanId] = true
+        }
+
+        var remaining = []
+        for (var j = 0; j < openTabs.length; j++) {
+            var tab = openTabs[j]
+            if (tab && !idSet[tab.id]) {
+                remaining.push(tab)
+            }
+        }
+        openTabs = remaining
+
+        if (selectedNoteId && idSet[selectedNoteId]) {
+            if (noteController) noteController.selectNote("")
+            selectedNoteId = ""
+            currentNote = null
+        }
     }
 
     function getTemplateById(templateId) {
@@ -681,10 +941,15 @@ Window {
             foldersListView.model = folderController ? folderController.folders : []
             window.openTabs = []
             window.selectedNoteId = ""
+            window.syncSelectionAfterFolderChange()
         }
         function onFoldersChanged() {
             foldersListView.model = null
             foldersListView.model = folderController ? folderController.folders : []
+            window.refreshSelectableFolderItems()
+        }
+        function onCurrentFolderChanged() {
+            window.syncSelectionAfterFolderChange()
         }
     }
 
@@ -701,6 +966,7 @@ Window {
             notesListView.model = null
             notesListView.model = noteController ? noteController.filteredNotes : []
             window.selectedNoteId = ""
+            window.syncSelectionAfterFolderChange()
         }
         function onFilteredNotesChanged() {
             var prevSelected = window.selectedNoteId
@@ -1808,6 +2074,37 @@ Window {
                                 color: Colors.textTertiary
                             }
 
+                            Rectangle {
+                                width: 60
+                                height: 28
+                                radius: Metrics.radiusMd
+                                color: noteSelectionMode ? Colors.primary500 : (selectModeArea.containsMouse ? Colors.primary100 : Colors.bgSecondary)
+                                border.width: 1
+                                border.color: noteSelectionMode ? Colors.primary500 : Colors.borderLight
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: noteSelectionMode ? "선택 중" : "선택"
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: 11
+                                    font.weight: Typography.weightSemibold
+                                    color: noteSelectionMode ? Colors.textInverse : Colors.textSecondary
+                                }
+
+                                MouseArea {
+                                    id: selectModeArea
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    onClicked: {
+                                        if (noteSelectionMode) {
+                                            window.exitNoteSelectionMode()
+                                        } else {
+                                            window.enterNoteSelectionMode()
+                                        }
+                                    }
+                                }
+                            }
+
                             Item { Layout.fillWidth: true }
 
                             Rectangle {
@@ -1838,6 +2135,142 @@ Window {
                                     font.weight: Typography.weightSemibold
                                     font.pixelSize: 18
                                     color: addNoteArea.containsMouse ? Colors.primary600 : Colors.textSecondary
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            visible: noteSelectionMode
+                            Layout.fillWidth: true
+                            height: 40
+                            radius: Metrics.radiusMd
+                            color: Colors.bgSecondary
+                            border.width: 1
+                            border.color: Colors.borderLight
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.margins: Metrics.xs
+                                spacing: 4
+
+                                Text {
+                                    text: selectedNoteCount()
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: 10
+                                    font.weight: Typography.weightSemibold
+                                    color: Colors.textPrimary
+                                }
+
+                                Rectangle {
+                                    width: 28
+                                    height: 28
+                                    radius: Metrics.radiusMd
+                                    color: Colors.bgSecondary
+                                    border.width: 1
+                                    border.color: Colors.borderLight
+                                    opacity: (notesListView.count || 0) > 0 ? 1.0 : 0.5
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: window.isAllVisibleNotesSelected() ? "☑" : "☐"
+                                        font.pixelSize: 14
+                                        color: Colors.textSecondary
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        enabled: (notesListView.count || 0) > 0
+                                        onClicked: window.toggleSelectAllVisibleNotes()
+                                    }
+                                }
+
+                                Item { Layout.fillWidth: true }
+
+                                Rectangle {
+                                    width: 28
+                                    height: 28
+                                    radius: Metrics.radiusMd
+                                    color: selectedNoteCount() > 0 && window.hasBatchFolderTargets() ? Colors.primary500 : Colors.bgTertiary
+                                    opacity: selectedNoteCount() > 0 && window.hasBatchFolderTargets() ? 1.0 : 0.85
+                                    border.width: selectedNoteCount() > 0 && window.hasBatchFolderTargets() ? 0 : 1
+                                    border.color: Colors.borderLight
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "📤"
+                                        font.pixelSize: 13
+                                        color: selectedNoteCount() > 0 && window.hasBatchFolderTargets() ? Colors.textInverse : Colors.textTertiary
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        enabled: selectedNoteCount() > 0 && window.hasBatchFolderTargets()
+                                        onClicked: window.openBatchFolderPicker("move")
+                                    }
+                                }
+
+                                Rectangle {
+                                    width: 28
+                                    height: 28
+                                    radius: Metrics.radiusMd
+                                    color: selectedNoteCount() > 0 && window.hasBatchFolderTargets() ? Colors.primary400 : Colors.bgTertiary
+                                    opacity: selectedNoteCount() > 0 && window.hasBatchFolderTargets() ? 1.0 : 0.85
+                                    border.width: selectedNoteCount() > 0 && window.hasBatchFolderTargets() ? 0 : 1
+                                    border.color: Colors.borderLight
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "📋"
+                                        font.pixelSize: 13
+                                        color: selectedNoteCount() > 0 && window.hasBatchFolderTargets() ? Colors.textInverse : Colors.textTertiary
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        enabled: selectedNoteCount() > 0 && window.hasBatchFolderTargets()
+                                        onClicked: window.openBatchFolderPicker("copy")
+                                    }
+                                }
+
+                                Rectangle {
+                                    width: 28
+                                    height: 28
+                                    radius: Metrics.radiusMd
+                                    color: selectedNoteCount() > 0 ? "#DC2626" : Colors.bgTertiary
+                                    opacity: selectedNoteCount() > 0 ? 1.0 : 0.85
+                                    border.width: selectedNoteCount() > 0 ? 0 : 1
+                                    border.color: Colors.borderLight
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "🗑"
+                                        font.pixelSize: 13
+                                        color: selectedNoteCount() > 0 ? Colors.textInverse : Colors.textTertiary
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        enabled: selectedNoteCount() > 0
+                                        onClicked: window.openBatchDeleteConfirm()
+                                    }
+                                }
+
+                                Rectangle {
+                                    width: 28
+                                    height: 28
+                                    radius: Metrics.radiusMd
+                                    color: Colors.bgSecondary
+                                    border.width: 1
+                                    border.color: Colors.borderLight
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "✕"
+                                        font.pixelSize: 14
+                                        color: Colors.textSecondary
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        onClicked: window.exitNoteSelectionMode()
+                                    }
                                 }
                             }
                         }
@@ -2309,6 +2742,8 @@ Window {
                                 updatedDate: modelRef && modelRef.updated_at ? noteController.formatDate(modelRef.updated_at) : ""
                                 tags: modelRef && modelRef.tags ? modelRef.tags : []
                                 isPinned: noteItem.pinState
+                                selectionMode: window.noteSelectionMode
+                                isBatchHighlighted: window.noteSelectionMode && window.isNoteSelected(noteItem.noteId)
                                 isSelected: {
                                     var selected = noteController && noteController.currentNoteId === noteItem.noteId
                                     return selected
@@ -2336,11 +2771,21 @@ Window {
                                     }
                                 }
 
+                                onSelectionClicked: {
+                                    if (noteItem.noteId) {
+                                        window.toggleNoteSelection(noteItem.noteId)
+                                    }
+                                }
+
                                 onClicked: {
                                     if (noteItem.noteId) {
-                                        console.log("[QML] Note clicked:", noteItem.noteId)
-                                        if (noteController) {
-                                            noteController.selectNote(noteItem.noteId)
+                                        if (window.noteSelectionMode) {
+                                            window.toggleNoteSelection(noteItem.noteId)
+                                        } else {
+                                            console.log("[QML] Note clicked:", noteItem.noteId)
+                                            if (noteController) {
+                                                noteController.selectNote(noteItem.noteId)
+                                            }
                                         }
                                     }
                                 }
@@ -4161,6 +4606,341 @@ Window {
                         onClicked: {
                             importOptionsDialog.visible = false
                             folderImportDialog.open()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Batch Folder Picker Dialog ──────────────────────────────────────────────
+    Rectangle {
+        id: batchFolderPickerBackdrop
+        visible: batchFolderPickerDialog.visible
+        anchors.fill: parent
+        color: Qt.rgba(0, 0, 0, 0.35)
+        z: 8998
+
+        MouseArea {
+            anchors.fill: parent
+        }
+    }
+
+    Rectangle {
+        id: batchFolderPickerDialog
+        visible: false
+        anchors.centerIn: parent
+        width: 520
+        height: 560
+        radius: Metrics.radiusXxl
+        color: Colors.bgPrimary
+        border.color: Colors.borderLight
+        border.width: 1
+        z: 8999
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: Metrics.md
+            spacing: Metrics.sm
+
+            RowLayout {
+                Layout.fillWidth: true
+
+                Text {
+                    text: batchActionMode === "move" ? "폴더로 이동" : "폴더로 복사"
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.h4
+                    font.weight: Typography.weightSemibold
+                    color: Colors.textPrimary
+                }
+
+                Item { Layout.fillWidth: true }
+
+                Rectangle {
+                    width: 72
+                    height: 32
+                    radius: Metrics.radiusMd
+                    color: closeBatchFolderMA.containsMouse ? Colors.bgTertiary : Colors.bgSecondary
+                    border.width: 1
+                    border.color: Colors.borderLight
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "닫기"
+                        font.family: Typography.fontPrimary
+                        font.pixelSize: 12
+                        color: Colors.textSecondary
+                    }
+
+                    MouseArea {
+                        id: closeBatchFolderMA
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: {
+                            batchFolderPickerDialog.visible = false
+                            batchActionMode = ""
+                            batchTargetFolderId = ""
+                            batchTargetFolderName = ""
+                        }
+                    }
+                }
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: batchFolderHintMessage
+                font.family: Typography.fontPrimary
+                font.pixelSize: Typography.bodySmall
+                color: Colors.textSecondary
+                wrapMode: Text.Wrap
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                radius: Metrics.radiusLg
+                color: Colors.bgSecondary
+                border.color: Colors.borderLight
+                border.width: 1
+
+                ListView {
+                    id: batchFolderListView
+                    anchors.fill: parent
+                    anchors.margins: Metrics.sm
+                    clip: true
+                    model: selectableFolderItems
+                    spacing: 4
+
+                    delegate: Rectangle {
+                        property var folderData: modelData
+                        property string folderId: folderData && folderData.id ? folderData.id : ""
+                        property bool isSelected: batchTargetFolderId === folderId
+
+                        width: batchFolderListView.width
+                        height: 40
+                        radius: Metrics.radiusMd
+                        color: isSelected ? Colors.primary50 : (batchFolderHover.containsMouse ? Colors.bgPrimary : "transparent")
+                        border.width: 1
+                        border.color: isSelected ? Colors.primary200 : Colors.borderLight
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: Metrics.md + ((folderData && folderData.depth ? folderData.depth : 0) * 14)
+                            anchors.rightMargin: Metrics.md
+                            spacing: Metrics.sm
+
+                            Rectangle {
+                                width: 14
+                                height: 14
+                                radius: 3
+                                color: folderData && folderData.color ? folderData.color : Colors.primary400
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: folderData && folderData.name ? folderData.name : "폴더"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodySmall
+                                font.weight: isSelected ? Typography.weightSemibold : Typography.weightRegular
+                                color: isSelected ? Colors.primary700 : Colors.textPrimary
+                                elide: Text.ElideRight
+                            }
+                        }
+
+                        MouseArea {
+                            id: batchFolderHover
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: {
+                                batchTargetFolderId = folderId
+                                batchTargetFolderName = folderData && folderData.name ? folderData.name : ""
+                            }
+                        }
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+
+                Text {
+                    text: batchTargetFolderName ? ("선택 폴더: " + batchTargetFolderName) : "선택된 폴더 없음"
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.caption
+                    color: Colors.textTertiary
+                }
+
+                Item { Layout.fillWidth: true }
+
+                Rectangle {
+                    width: 92
+                    height: 34
+                    radius: Metrics.radiusMd
+                    color: cancelBatchFolderMA.containsMouse ? Colors.bgTertiary : Colors.bgSecondary
+                    border.width: 1
+                    border.color: Colors.borderLight
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "취소"
+                        font.family: Typography.fontPrimary
+                        font.pixelSize: 12
+                        color: Colors.textSecondary
+                    }
+
+                    MouseArea {
+                        id: cancelBatchFolderMA
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: {
+                            batchFolderPickerDialog.visible = false
+                            batchActionMode = ""
+                            batchTargetFolderId = ""
+                            batchTargetFolderName = ""
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: 92
+                    height: 34
+                    radius: Metrics.radiusMd
+                    color: confirmBatchFolderMA.containsMouse ? Colors.primary500 : Colors.primary400
+                    opacity: window.isBatchTargetFolderUsable(batchTargetFolderId) ? 1.0 : 0.6
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: batchActionMode === "move" ? "이동" : "복사"
+                        font.family: Typography.fontPrimary
+                        font.pixelSize: 12
+                        font.weight: Typography.weightSemibold
+                        color: Colors.textInverse
+                    }
+
+                    MouseArea {
+                        id: confirmBatchFolderMA
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        enabled: window.isBatchTargetFolderUsable(batchTargetFolderId)
+                        onClicked: {
+                            if (window.applyBatchNoteAction()) {
+                                batchFolderPickerDialog.visible = false
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Batch Delete Confirmation Dialog ───────────────────────────────────────
+    Rectangle {
+        id: batchDeleteConfirmBackdrop
+        visible: batchDeleteConfirmDialog.visible
+        anchors.fill: parent
+        color: Qt.rgba(0, 0, 0, 0.35)
+        z: 9000
+
+        MouseArea {
+            anchors.fill: parent
+        }
+    }
+
+    Rectangle {
+        id: batchDeleteConfirmDialog
+        visible: false
+        anchors.centerIn: parent
+        width: 360
+        height: 180
+        radius: Metrics.radiusXxl
+        color: Colors.bgPrimary
+        border.color: Colors.borderLight
+        border.width: 1
+        z: 9001
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: Metrics.cardPadding
+            spacing: Metrics.md
+
+            Text {
+                text: "노트 삭제"
+                font.family: Typography.fontPrimary
+                font.weight: Typography.weightSemibold
+                font.pixelSize: Typography.h4
+                color: Colors.textPrimary
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: selectedNoteCount() + "개의 노트를 삭제할까요?"
+                font.family: Typography.fontPrimary
+                font.weight: Typography.weightRegular
+                font.pixelSize: Typography.body
+                color: Colors.textSecondary
+                wrapMode: Text.Wrap
+            }
+
+            Item { Layout.fillHeight: true }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Metrics.sm
+
+                Item { Layout.fillWidth: true }
+
+                Rectangle {
+                    width: 80
+                    height: 34
+                    radius: Metrics.radiusMd
+                    color: cancelBatchDeleteMA.containsMouse ? Colors.bgTertiary : Colors.bgSecondary
+                    border.color: Colors.borderLight
+                    border.width: 1
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "취소"
+                        font.family: Typography.fontPrimary
+                        font.pixelSize: 13
+                        color: Colors.textSecondary
+                    }
+
+                    MouseArea {
+                        id: cancelBatchDeleteMA
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: batchDeleteConfirmDialog.visible = false
+                    }
+                }
+
+                Rectangle {
+                    width: 80
+                    height: 34
+                    radius: Metrics.radiusMd
+                    color: confirmBatchDeleteMA.containsMouse ? "#B91C1C" : "#DC2626"
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "삭제"
+                        font.family: Typography.fontPrimary
+                        font.weight: Typography.weightSemibold
+                        font.pixelSize: 13
+                        color: "white"
+                    }
+
+                    MouseArea {
+                        id: confirmBatchDeleteMA
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: {
+                            var ids = window.collectSelectedNoteIds()
+                            if (noteController && ids.length > 0) {
+                                if (noteController.deleteNotes(ids)) {
+                                    batchDeleteConfirmDialog.visible = false
+                                    window.closeTabsForDeletedNotes(ids)
+                                    window.clearNoteSelectionState()
+                                }
+                            }
                         }
                     }
                 }

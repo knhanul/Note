@@ -12,10 +12,13 @@ Item {
     property string updatedDate: ""
     property var tags: []
     property bool isSelected: false
+    property bool isBatchHighlighted: false
+    property bool selectionMode: false
     property bool isHovered: false
     property bool isPinned: false
 
     signal clicked()
+    signal selectionClicked()
     signal pinClicked()
     signal deleteClicked()
 
@@ -27,13 +30,45 @@ Item {
         anchors.fill: parent
         anchors.margins: 2
         hovered: root.isHovered
-        selected: root.isSelected
+        selected: root.isSelected || root.isBatchHighlighted
         radius: Metrics.radiusXl
 
         RowLayout {
             anchors.fill: parent
             anchors.margins: Metrics.sm
             spacing: Metrics.sm
+
+            Rectangle {
+                visible: root.selectionMode
+                width: 20
+                height: 20
+                radius: Metrics.radiusSm
+                color: root.isBatchHighlighted ? Colors.primary500 : Colors.bgPrimary
+                border.color: root.isBatchHighlighted ? Colors.primary500 : Colors.borderLight
+                border.width: 1
+                Layout.alignment: Qt.AlignVCenter
+
+                Text {
+                    anchors.centerIn: parent
+                    text: root.isBatchHighlighted ? "✓" : ""
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: 11
+                    font.weight: Typography.weightBold
+                    color: "white"
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onClicked: root.selectionClicked()
+                }
+            }
+
+            Item {
+                visible: !root.selectionMode
+                width: 20
+                height: 20
+            }
 
             ColumnLayout {
                 Layout.fillWidth: true
@@ -44,9 +79,9 @@ Item {
                     Layout.fillWidth: true
                     text: root.title
                     font.family: Typography.fontPrimary
-                    font.weight: root.isSelected ? Typography.weightSemibold : Typography.weightMedium
+                    font.weight: (root.isSelected || root.isBatchHighlighted) ? Typography.weightSemibold : Typography.weightMedium
                     font.pixelSize: 13
-                    color: root.isSelected ? Colors.textInverse : Colors.textPrimary
+                    color: (root.isSelected || root.isBatchHighlighted) ? Colors.textInverse : Colors.textPrimary
                     elide: Text.ElideRight
                     maximumLineCount: 1
                 }
@@ -65,13 +100,13 @@ Item {
                     font.family: Typography.fontPrimary
                     font.weight: Typography.weightRegular
                     font.pixelSize: 11
-                    color: root.isSelected ? Qt.rgba(1, 1, 1, 0.7) : Colors.textTertiary
+                    color: (root.isSelected || root.isBatchHighlighted) ? Qt.rgba(1, 1, 1, 0.7) : Colors.textTertiary
                 }
             }
 
             // Spacer for star + delete buttons
             Item {
-                width: root.isHovered ? 44 : 20
+                width: (root.isHovered && !root.selectionMode) ? 44 : 20
                 height: 20
                 Behavior on width { NumberAnimation { duration: Metrics.durationFast } }
             }
@@ -96,11 +131,11 @@ Item {
         width: 20
         height: 20
         radius: Metrics.radiusFull
-        visible: root.isHovered
+        visible: root.isHovered && !root.selectionMode
         opacity: root.isHovered ? 1 : 0
         color: deleteBtnMA.containsMouse
-            ? (root.isSelected ? Qt.rgba(1, 0.3, 0.3, 0.4) : "#FEE2E2")
-            : (root.isSelected ? Qt.rgba(1, 1, 1, 0.15) : Colors.bgTertiary)
+            ? ((root.isSelected || root.isBatchHighlighted) ? Qt.rgba(1, 0.3, 0.3, 0.4) : "#FEE2E2")
+            : ((root.isSelected || root.isBatchHighlighted) ? Qt.rgba(1, 1, 1, 0.15) : Colors.bgTertiary)
         z: 11
 
         Behavior on opacity { NumberAnimation { duration: Metrics.durationFast } }
@@ -111,7 +146,7 @@ Item {
             font.pixelSize: 10
             color: deleteBtnMA.containsMouse
                 ? "#DC2626"
-                : (root.isSelected ? Colors.textInverse : Colors.textTertiary)
+                : ((root.isSelected || root.isBatchHighlighted) ? Colors.textInverse : Colors.textTertiary)
         }
 
         MouseArea {
@@ -133,14 +168,15 @@ Item {
         width: 20
         height: 20
         radius: Metrics.radiusFull
-        color: root.isSelected ? Qt.rgba(1, 1, 1, 0.2) : (root.isPinned ? Colors.accentOrangeLight : Colors.bgTertiary)
+        visible: !root.selectionMode
+        color: (root.isSelected || root.isBatchHighlighted) ? Qt.rgba(1, 1, 1, 0.2) : (root.isPinned ? Colors.accentOrangeLight : Colors.bgTertiary)
         z: 10
 
         Text {
             anchors.centerIn: parent
             text: root.isPinned ? "★" : "☆"
             font.pixelSize: 12
-            color: root.isPinned ? Colors.accentOrange : (root.isSelected ? Colors.textInverse : Colors.textTertiary)
+            color: root.isPinned ? Colors.accentOrange : ((root.isSelected || root.isBatchHighlighted) ? Colors.textInverse : Colors.textTertiary)
         }
 
         MouseArea {

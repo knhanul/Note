@@ -593,6 +593,132 @@ class NoteController(QObject):
             return True
         
         return False
+
+    def _normalize_note_ids(self, note_ids: list) -> List[str]:
+        """Return unique, non-empty note ids while preserving order."""
+        normalized: List[str] = []
+        seen = set()
+        for note_id in note_ids or []:
+            clean_id = str(note_id).strip()
+            if clean_id and clean_id not in seen:
+                seen.add(clean_id)
+                normalized.append(clean_id)
+        return normalized
+
+    def _get_hydrated_note_dict(self, note_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch a note and hydrate any inline image tokens for copying."""
+        if not note_id or not self._note_service:
+            return None
+
+        note = self._note_service.get_by_id(note_id)
+        if not note:
+            return None
+
+        note['content'] = self._hydrate_image_tokens(note.get('content', ''))
+        note['content_json'] = self._hydrate_image_tokens(note.get('content_json', '') or '')
+        return note
+
+    def _copy_note_to_folder(self, note_id: str, folder_id: str) -> bool:
+        """Copy a single note into the target folder."""
+        note = self._get_hydrated_note_dict(note_id)
+        if not note:
+            return False
+
+        new_note_id = str(uuid.uuid4())[:8]
+        original_title = note.get('title', '') or ''
+        if original_title:
+            copied_title = f"{original_title} (복사본)"
+        else:
+            copied_title = "복사본"
+
+        content = note.get('content', '') or ''
+        content_json = note.get('content_json', '') or ''
+        tok_content, tok_json = self._store_data_urls_and_tokenize(new_note_id, content, content_json)
+
+        tags = note.get('tags', []) or []
+        if self._note_service.create(
+            new_note_id,
+            folder_id,
+            copied_title,
+            tok_content,
+            tok_json,
+            content_format=note.get('content_format', 'markdown') or 'markdown',
+            summary=note.get('summary', '') or '',
+            is_pinned=note.get('is_pinned', 0) == 1,
+            tags=tags,
+        ):
+            self.noteAdded.emit(new_note_id)
+            return True
+
+        return False
+
+    @pyqtSlot('QVariantList', str, result=bool)
+    def moveNotesToFolder(self, note_ids: list, folder_id: str) -> bool:
+        """Move multiple notes to a folder."""
+        clean_ids = self._normalize_note_ids(note_ids)
+        if not clean_ids or not folder_id or not self._note_service:
+            return False
+
+        if self._folder_controller.isSmartFolder(folder_id):
+            return False
+
+        if not self._folder_controller._folder_service.exists(folder_id):
+            return False
+
+        if self._note_service.move_notes_to_folder(clean_ids, folder_id):
+            self.notesChanged.emit()
+            self.filteredNotesChanged.emit()
+            return True
+        return False
+
+    @pyqtSlot('QVariantList', str, result=bool)
+    def copyNotesToFolder(self, note_ids: list, folder_id: str) -> bool:
+        """Copy multiple notes to a folder."""
+        clean_ids = self._normalize_note_ids(note_ids)
+        if not clean_ids or not folder_id or not self._note_service:
+            return False
+
+        if self._folder_controller.isSmartFolder(folder_id):
+            return False
+
+        if not self._folder_controller._folder_service.exists(folder_id):
+            return False
+
+        copied_any = False
+        for note_id in clean_ids:
+            copied_any = self._copy_note_to_folder(note_id, folder_id) or copied_any
+
+        if copied_any:
+            self.notesChanged.emit()
+            self.filteredNotesChanged.emit()
+            self.tagsChanged.emit()
+            return True
+        return False
+
+    @pyqtSlot('QVariantList', result=bool)
+    def deleteNotes(self, note_ids: list) -> bool:
+        """Soft delete multiple notes."""
+        clean_ids = self._normalize_note_ids(note_ids)
+        if not clean_ids or not self._note_service:
+            return False
+
+        current_deleted = self._current_note_id in clean_ids if self._current_note_id else False
+        if self._note_service.soft_delete_notes(clean_ids):
+            if current_deleted:
+                self._current_note_id = None
+                self._current_note_data = {}
+                self._is_dirty = False
+                self._save_status = "saved"
+                self.saveStatusChanged.emit()
+
+            self.notesChanged.emit()
+            self.filteredNotesChanged.emit()
+            self.tagsChanged.emit()
+            for note_id in clean_ids:
+                self.noteRemoved.emit(note_id)
+            return True
+
+        return False
     
     @pyqtSlot(str, str, str, result=bool)
     def updateNote(self, note_id: str, title: str, content: str) -> bool:

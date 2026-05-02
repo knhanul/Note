@@ -96,14 +96,29 @@ class NoteService:
         return self._parse_tags(note) if note else None
     
     def create(self, note_id: str, folder_id: str, title: str = "",
-               content: str = "", content_json: str = "") -> bool:
+               content: str = "", content_json: str = "",
+               content_format: str = "markdown", summary: str = "",
+               is_pinned: bool = False, tags: Optional[List[str]] = None) -> bool:
         """Create a new note."""
         try:
             now = Database.now_iso()
             cursor = self.db.execute(
-                """INSERT INTO notes (id, folder_id, title, content, content_json, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (note_id, folder_id, title, content, content_json or None, now, now)
+                """INSERT INTO notes (id, folder_id, title, content, content_json, content_format,
+                                      summary, is_pinned, tags, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    note_id,
+                    folder_id,
+                    title,
+                    content,
+                    content_json or None,
+                    content_format or "markdown",
+                    summary or "",
+                    1 if is_pinned else 0,
+                    json.dumps(tags or [], ensure_ascii=False),
+                    now,
+                    now,
+                )
             )
             self.db.commit()
             return cursor.rowcount > 0
@@ -190,6 +205,38 @@ class NoteService:
     def move_to_folder(self, note_id: str, folder_id: str) -> bool:
         """Move note to different folder."""
         return self.update(note_id, folder_id=folder_id)
+
+    def move_notes_to_folder(self, note_ids: List[str], folder_id: str) -> bool:
+        """Move multiple notes to a different folder."""
+        clean_ids = [str(note_id) for note_id in note_ids if str(note_id)]
+        if not clean_ids:
+            return False
+
+        try:
+            placeholders = ",".join(["?"] * len(clean_ids))
+            params = [folder_id, Database.now_iso(), *clean_ids]
+            query = f"UPDATE notes SET folder_id = ?, updated_at = ? WHERE id IN ({placeholders}) AND deleted_at IS NULL"
+            cursor = self.db.execute(query, tuple(params))
+            self.db.commit()
+            return cursor.rowcount > 0
+        except Exception:
+            return False
+
+    def soft_delete_notes(self, note_ids: List[str]) -> bool:
+        """Soft delete multiple notes."""
+        clean_ids = [str(note_id) for note_id in note_ids if str(note_id)]
+        if not clean_ids:
+            return False
+
+        try:
+            placeholders = ",".join(["?"] * len(clean_ids))
+            params = [Database.now_iso(), *clean_ids]
+            query = f"UPDATE notes SET deleted_at = ? WHERE id IN ({placeholders}) AND deleted_at IS NULL"
+            cursor = self.db.execute(query, tuple(params))
+            self.db.commit()
+            return cursor.rowcount > 0
+        except Exception:
+            return False
     
     def set_pinned(self, note_id: str, is_pinned: bool) -> bool:
         """Set note pinned status."""
