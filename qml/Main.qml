@@ -28,6 +28,11 @@ Window {
     property string batchTargetFolderId: ""
     property string batchTargetFolderName: ""
     property string batchFolderHintMessage: ""
+    property string folderMoveSourceId: ""
+    property string folderMoveSourceName: ""
+    property string folderMoveTargetId: ""
+    property string folderMoveTargetName: ""
+    property var folderMoveTargetItems: []
     property real editorZoom: 1.0
     property bool isDraftNewNote: false
     property string draftFolderId: ""
@@ -316,6 +321,45 @@ Window {
         } else {
             batchFolderHintMessage = "이동/복사할 대상 폴더를 선택하세요. 스마트 폴더는 제외됩니다."
         }
+    }
+
+    function openFolderMoveDialog(folderId, folderName) {
+        if (!folderController || !folderId || folderController.isSmartFolder(folderId)) return
+
+        refreshSelectableFolderItems()
+        folderMoveSourceId = String(folderId)
+        folderMoveSourceName = folderName || ""
+        folderMoveTargetId = ""
+        folderMoveTargetName = "최상위"
+
+        var items = [{ id: "", name: "최상위", depth: 0, color: Colors.primary400 }]
+        for (var i = 0; i < selectableFolderItems.length; i++) {
+            var item = selectableFolderItems[i]
+            if (item && String(item.id || "") !== folderMoveSourceId) {
+                items.push(item)
+            }
+        }
+        folderMoveTargetItems = items
+        folderMoveDialog.visible = true
+    }
+
+    function applyFolderMove() {
+        if (!folderController || !folderMoveSourceId) return false
+        var ok = folderController.moveFolder(folderMoveSourceId, folderMoveTargetId)
+        if (ok) {
+            folderMoveDialog.visible = false
+            folderMoveSourceId = ""
+            folderMoveSourceName = ""
+            folderMoveTargetId = ""
+            folderMoveTargetName = ""
+            folderMoveTargetItems = []
+        }
+        return ok
+    }
+
+    function reorderFolderInSameParent(direction) {
+        if (!folderController || !folderMoveSourceId) return false
+        return folderController.reorderFolder(folderMoveSourceId, direction)
     }
 
     function clearNoteSelectionState() {
@@ -1842,6 +1886,12 @@ Window {
 
                                 onDeleteRequested: {
                                     if (folderController && modelData && !(modelData.is_smart || false)) folderController.deleteFolder(modelData.id)
+                                }
+
+                                onMoveRequested: {
+                                    if (folderController && modelData && !(modelData.is_smart || false)) {
+                                        window.openFolderMoveDialog(modelData.id, modelData.name)
+                                    }
                                 }
                             }
                         }
@@ -4608,6 +4658,165 @@ Window {
                             folderImportDialog.open()
                         }
                     }
+                }
+            }
+        }
+    }
+
+    // ── Folder Move Dialog ─────────────────────────────────────────────────────
+    Rectangle {
+        visible: folderMoveDialog.visible
+        anchors.fill: parent
+        color: Qt.rgba(0, 0, 0, 0.35)
+        z: 8898
+
+        MouseArea { anchors.fill: parent }
+    }
+
+    Rectangle {
+        id: folderMoveDialog
+        visible: false
+        anchors.centerIn: parent
+        width: 420
+        height: 460
+        radius: Metrics.radiusXxl
+        color: Colors.bgPrimary
+        border.color: Colors.borderLight
+        border.width: 1
+        z: 8899
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: Metrics.md
+            spacing: Metrics.sm
+
+            Text {
+                Layout.fillWidth: true
+                text: "폴더 위치 변경"
+                font.family: Typography.fontPrimary
+                font.pixelSize: Typography.h4
+                font.weight: Typography.weightSemibold
+                color: Colors.textPrimary
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: folderMoveSourceName ? ("'" + folderMoveSourceName + "' 폴더를 이동할 위치를 선택하세요.") : "이동할 위치를 선택하세요."
+                font.family: Typography.fontPrimary
+                font.pixelSize: Typography.bodySmall
+                color: Colors.textSecondary
+                wrapMode: Text.Wrap
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Metrics.sm
+
+                Text {
+                    Layout.fillWidth: true
+                    text: "같은 폴더 안 순서"
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.bodySmall
+                    color: Colors.textSecondary
+                }
+
+                Button {
+                    text: "위로"
+                    onClicked: window.reorderFolderInSameParent(-1)
+                }
+
+                Button {
+                    text: "아래로"
+                    onClicked: window.reorderFolderInSameParent(1)
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                radius: Metrics.radiusLg
+                color: Colors.bgSecondary
+                border.color: Colors.borderLight
+                border.width: 1
+
+                ListView {
+                    id: folderMoveListView
+                    anchors.fill: parent
+                    anchors.margins: Metrics.sm
+                    clip: true
+                    model: folderMoveTargetItems
+                    spacing: 4
+
+                    delegate: Rectangle {
+                        property var folderData: modelData
+                        property string targetId: folderData && folderData.id !== undefined ? String(folderData.id) : ""
+                        property bool isSelected: folderMoveTargetId === targetId
+
+                        width: folderMoveListView.width
+                        height: 38
+                        radius: Metrics.radiusMd
+                        color: isSelected ? Colors.primary50 : (folderMoveHover.containsMouse ? Colors.bgPrimary : "transparent")
+                        border.width: 1
+                        border.color: isSelected ? Colors.primary200 : Colors.borderLight
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: Metrics.md + ((folderData && folderData.depth ? folderData.depth : 0) * 14)
+                            anchors.rightMargin: Metrics.md
+                            spacing: Metrics.sm
+
+                            Rectangle {
+                                width: 14
+                                height: 14
+                                radius: 3
+                                color: folderData && folderData.color ? folderData.color : Colors.primary400
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: folderData && folderData.name ? folderData.name : "폴더"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodySmall
+                                font.weight: isSelected ? Typography.weightSemibold : Typography.weightRegular
+                                color: isSelected ? Colors.primary700 : Colors.textPrimary
+                                elide: Text.ElideRight
+                            }
+                        }
+
+                        MouseArea {
+                            id: folderMoveHover
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: {
+                                folderMoveTargetId = targetId
+                                folderMoveTargetName = folderData && folderData.name ? folderData.name : "최상위"
+                            }
+                        }
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+
+                Text {
+                    Layout.fillWidth: true
+                    text: "선택 위치: " + (folderMoveTargetName || "최상위")
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.caption
+                    color: Colors.textTertiary
+                    elide: Text.ElideRight
+                }
+
+                Button {
+                    text: "취소"
+                    onClicked: folderMoveDialog.visible = false
+                }
+
+                Button {
+                    text: "이동"
+                    highlighted: true
+                    onClicked: window.applyFolderMove()
                 }
             }
         }

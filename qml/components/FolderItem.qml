@@ -31,6 +31,7 @@ Rectangle {
     signal clicked()
     signal renameRequested(string newName)
     signal deleteRequested()
+    signal moveRequested()
     signal toggleExpanded()  // Request to toggle expand/collapse state
 
     // Layout
@@ -270,9 +271,9 @@ Rectangle {
 
         onClicked: (mouse) => {
             if (mouse.button === Qt.RightButton) {
-                // Right click starts edit mode for regular folders only
+                // Right click requests moving for regular folders only
                 if (!root.isSmart) {
-                    root.isEditing = true
+                    root.moveRequested()
                 }
             } else {
                 // Left click selects

@@ -42,6 +42,17 @@ class FolderService:
             "SELECT * FROM folders WHERE id = ?",
             (folder_id,)
         )
+
+    def get_siblings(self, parent_id: Optional[str]) -> List[Dict[str, Any]]:
+        """Get folders with the same parent ordered by display order."""
+        if parent_id is None:
+            return self.db.fetch_all(
+                "SELECT * FROM folders WHERE parent_id IS NULL ORDER BY sort_order, created_at"
+            )
+        return self.db.fetch_all(
+            "SELECT * FROM folders WHERE parent_id = ? ORDER BY sort_order, created_at",
+            (parent_id,)
+        )
     
     def create(self, folder_id: str, name: str, color: str = "#3B82F6", parent_id: Optional[str] = None) -> bool:
         """Create a new folder."""
@@ -86,6 +97,54 @@ class FolderService:
             cursor = self.db.execute(query, tuple(params))
             self.db.commit()
             return cursor.rowcount > 0
+        except Exception:
+            return False
+
+    def move(self, folder_id: str, parent_id: Optional[str]) -> bool:
+        """Move a folder to another parent folder or root."""
+        try:
+            cursor = self.db.execute(
+                """UPDATE folders
+                   SET parent_id = ?, updated_at = ?,
+                       sort_order = (
+                           SELECT COALESCE(MAX(sort_order), 0) + 1
+                           FROM folders
+                           WHERE parent_id IS ?
+                       )
+                   WHERE id = ?""",
+                (parent_id, Database.now_iso(), parent_id, folder_id)
+            )
+            self.db.commit()
+            return cursor.rowcount > 0
+        except Exception:
+            return False
+
+    def reorder_within_parent(self, folder_id: str, direction: int) -> bool:
+        """Move a folder up/down within the same parent."""
+        try:
+            folder = self.get_by_id(folder_id)
+            if not folder:
+                return False
+
+            siblings = self.get_siblings(folder.get("parent_id"))
+            ids = [item["id"] for item in siblings]
+            if folder_id not in ids:
+                return False
+
+            current_index = ids.index(folder_id)
+            target_index = current_index - 1 if direction < 0 else current_index + 1
+            if target_index < 0 or target_index >= len(siblings):
+                return False
+
+            siblings[current_index], siblings[target_index] = siblings[target_index], siblings[current_index]
+            now = Database.now_iso()
+            for index, item in enumerate(siblings, start=1):
+                self.db.execute(
+                    "UPDATE folders SET sort_order = ?, updated_at = ? WHERE id = ?",
+                    (index, now, item["id"])
+                )
+            self.db.commit()
+            return True
         except Exception:
             return False
     

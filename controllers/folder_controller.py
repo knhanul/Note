@@ -262,6 +262,62 @@ class FolderController(QObject):
             return True
         
         return False
+
+    @pyqtSlot(str, str, result=bool)
+    def moveFolder(self, folder_id: str, new_parent_id: str) -> bool:
+        """Move a folder under another folder, or to root when parent is empty."""
+        if not folder_id or self._is_smart_folder_id(folder_id):
+            return False
+
+        actual_parent_id = new_parent_id if new_parent_id else None
+        if actual_parent_id == folder_id:
+            return False
+        if actual_parent_id and self._is_smart_folder_id(actual_parent_id):
+            return False
+        if not self._folder_service.exists(folder_id):
+            return False
+        if actual_parent_id and not self._folder_service.exists(actual_parent_id):
+            return False
+
+        folders = self._folder_service.get_all()
+        folders_map = {f['id']: f for f in folders}
+        descendant_ids = set(self._folder_service.get_descendant_ids(folder_id))
+        if actual_parent_id and actual_parent_id in descendant_ids:
+            return False
+
+        if actual_parent_id:
+            parent_depth = self._get_folder_depth(actual_parent_id, folders_map)
+            moving_depth = self._get_folder_depth(folder_id, folders_map)
+            subtree_extra_depth = 0
+            for descendant_id in descendant_ids:
+                subtree_extra_depth = max(
+                    subtree_extra_depth,
+                    self._get_folder_depth(descendant_id, folders_map) - moving_depth
+                )
+            if parent_depth + 1 + subtree_extra_depth > 2:
+                return False
+
+        result = self._folder_service.move(folder_id, actual_parent_id)
+        if result:
+            self.foldersChanged.emit()
+            self.currentFolderChanged.emit()
+        return result
+
+    @pyqtSlot(str, int, result=bool)
+    def reorderFolder(self, folder_id: str, direction: int) -> bool:
+        """Move a folder up/down within the same parent."""
+        if not folder_id or self._is_smart_folder_id(folder_id):
+            return False
+        if direction == 0:
+            return False
+        if not self._folder_service.exists(folder_id):
+            return False
+
+        result = self._folder_service.reorder_within_parent(folder_id, direction)
+        if result:
+            self.foldersChanged.emit()
+            self.currentFolderChanged.emit()
+        return result
     
     @pyqtSlot(str, result=QVariant)
     def getFolder(self, folder_id: str) -> QVariant:
