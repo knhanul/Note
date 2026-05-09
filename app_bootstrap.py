@@ -10,8 +10,8 @@ from controllers.folder_controller import FolderController
 from controllers.folder_import_controller import FolderImportController
 from controllers.note_controller import NoteController
 from controllers.template_controller import TemplateController
-from services.library_service import LibraryService
-from services.settings_service import SettingsService
+from packages.storage.library_repository import LibraryService
+from packages.storage.settings_repository import SettingsService
 
 
 @dataclass
