@@ -10,6 +10,7 @@ class PackageImportsTest(unittest.TestCase):
             "packages.markdown_engine",
             "packages.editor_ui",
             "packages.editor_core",
+            "packages.plugin_api",
         ]
 
         for package_name in package_names:
