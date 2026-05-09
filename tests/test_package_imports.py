@@ -11,6 +11,7 @@ class PackageImportsTest(unittest.TestCase):
             "packages.editor_ui",
             "packages.editor_core",
             "packages.plugin_api",
+            "packages.ollama_plugin",
         ]
 
         for package_name in package_names:
