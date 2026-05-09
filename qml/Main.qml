@@ -2124,6 +2124,32 @@ Window {
                                 color: Colors.textTertiary
                             }
 
+                            // Include subfolders toggle
+                            Rectangle {
+                                width: 28
+                                height: 28
+                                radius: Metrics.radiusMd
+                                color: noteController && noteController.includeSubfolders ? Colors.primary500 : Colors.bgSecondary
+                                border.width: 1
+                                border.color: noteController && noteController.includeSubfolders ? Colors.primary500 : Colors.borderLight
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "📂"
+                                    font.pixelSize: 14
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    onClicked: {
+                                        if (noteController) {
+                                            noteController.setIncludeSubfolders(!noteController.includeSubfolders)
+                                        }
+                                    }
+                                }
+                            }
+
                             Rectangle {
                                 width: 60
                                 height: 28
@@ -2750,7 +2776,21 @@ Window {
                             Layout.fillHeight: true
                             spacing: Metrics.xs
                             clip: true
-                            reuseItems: false  // Prevent delegate recycling issues
+                            reuseItems: true  // Enable delegate recycling for performance with large datasets
+                            cacheBuffer: 500  // Pre-render 500px of content for smoother scrolling
+
+                            // Load more notes when scrolling to bottom (infinite scroll)
+                            onAtYEndChanged: {
+                                if (atYEnd && noteController && notesListView.count > 0) {
+                                    // Save current scroll position before loading more
+                                    var scrollY = contentY
+                                    noteController.loadMoreNotes()
+                                    // Restore scroll position after model update
+                                    Qt.callLater(function() {
+                                        contentY = scrollY
+                                    })
+                                }
+                            }
                             ScrollBar.vertical: ScrollBar {
                                 policy: ScrollBar.AlwaysOn
                                 implicitWidth: 6
@@ -2765,7 +2805,8 @@ Window {
                             // Use filtered notes from noteController
                             model: noteController ? noteController.filteredNotes : []
 
-                            // Transition animations for list changes
+                            // Transition animations for list changes (disabled for performance with large datasets)
+                            /*
                             add: Transition {
                                 NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Metrics.durationNormal }
                                 NumberAnimation { property: "y"; from: 20; to: 0; duration: Metrics.durationNormal }
@@ -2777,6 +2818,7 @@ Window {
                             displaced: Transition {
                                 NumberAnimation { property: "y"; duration: Metrics.durationNormal }
                             }
+                            */
 
                             delegate: NoteListItem {
                                 id: noteItem
@@ -3257,15 +3299,19 @@ Window {
                             // Existing tags
                             Repeater {
                                 model: window.currentNote ? (window.currentNote.tags || []) : []
-                                delegate: Rectangle {
+                                delegate: Item {
                                     property bool tagChipHovered: false
                                     height: 20
                                     width: chipRow.implicitWidth + 12
-                                    radius: Metrics.radiusFull
-                                    color: tagChipHovered ? Colors.primary100 : Colors.bgTertiary
-                                    border.color: tagChipHovered ? Colors.primary300 : Colors.borderLight
-                                    border.width: 1
-                                    Behavior on color { ColorAnimation { duration: Metrics.durationFast } }
+
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: Metrics.radiusFull
+                                        color: tagChipHovered ? Colors.primary100 : Colors.bgTertiary
+                                        border.color: tagChipHovered ? Colors.primary300 : Colors.borderLight
+                                        border.width: 1
+                                        Behavior on color { ColorAnimation { duration: Metrics.durationFast } }
+                                    }
 
                                     Row {
                                         id: chipRow
@@ -3278,28 +3324,46 @@ Window {
                                             color: Colors.primary600
                                             anchors.verticalCenter: parent.verticalCenter
                                         }
-                                        Text {
-                                            text: "×"
-                                            font.pixelSize: 9
-                                            color: tagChipHovered ? "#DC2626" : Colors.textTertiary
+                                        Rectangle {
+                                            width: 16
+                                            height: 16
+                                            color: "transparent"
                                             anchors.verticalCenter: parent.verticalCenter
+
+                                            Text {
+                                                id: deleteX
+                                                anchors.centerIn: parent
+                                                text: "×"
+                                                font.pixelSize: 9
+                                                color: tagChipHovered ? "#DC2626" : Colors.textTertiary
+                                            }
+
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onEntered: parent.parent.parent.tagChipHovered = true
+                                                onExited: parent.parent.parent.tagChipHovered = false
+                                                onClicked: {
+                                                    console.log("X button clicked for tag:", modelData)
+                                                    if (!window.selectedNoteId || !noteController) return
+                                                    var tags = (window.currentNote && window.currentNote.tags) ? window.currentNote.tags.slice() : []
+                                                    var idx = tags.indexOf(modelData)
+                                                    if (idx >= 0) tags.splice(idx, 1)
+                                                    noteController.updateNoteTags(window.selectedNoteId, tags)
+                                                    var updated = noteController.getNote(window.selectedNoteId)
+                                                    if (updated) window.currentNote = updated
+                                                }
+                                            }
                                         }
                                     }
 
                                     MouseArea {
                                         anchors.fill: parent
                                         hoverEnabled: true
+                                        acceptedButtons: Qt.NoButton
                                         onEntered: parent.tagChipHovered = true
                                         onExited: parent.tagChipHovered = false
-                                        onClicked: {
-                                            if (!window.selectedNoteId || !noteController) return
-                                            var tags = (window.currentNote && window.currentNote.tags) ? window.currentNote.tags.slice() : []
-                                            var idx = tags.indexOf(modelData)
-                                            if (idx >= 0) tags.splice(idx, 1)
-                                            noteController.updateNoteTags(window.selectedNoteId, tags)
-                                            var updated = noteController.getNote(window.selectedNoteId)
-                                            if (updated) window.currentNote = updated
-                                        }
                                     }
                                 }
                             }
@@ -3475,26 +3539,74 @@ Window {
                                 Layout.maximumWidth: 280
                             }
 
-                            // Current note metadata (created + updated)
-                            Text {
+                            // Editor mode toggle (WYSIWYG / Markdown)
+                            RowLayout {
                                 visible: window.selectedNoteId !== "" && !!noteController && !!window.currentNote
-                                text: {
-                                    if (!window.currentNote) return ""
-                                    var created = window.currentNote.created_at ? noteController.formatDate(window.currentNote.created_at) : ""
-                                    var updated = window.currentNote.updated_at ? noteController.formatDate(window.currentNote.updated_at) : ""
-                                    if (created && updated && created !== updated) {
-                                        return "생성: " + created + "  ·  수정: " + updated
-                                    } else if (created) {
-                                        return "생성: " + created
-                                    } else if (updated) {
-                                        return "수정: " + updated
+                                spacing: Metrics.xs
+
+                                Rectangle {
+                                    width: 60
+                                    height: 24
+                                    radius: Metrics.radiusSm
+                                    color: "transparent"
+                                    border.width: 1
+                                    border.color: Colors.borderLight
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        spacing: 0
+
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            Layout.fillHeight: true
+                                            color: noteEditor.editorMode === "wysiwyg" ? Colors.primary500 : "transparent"
+                                            radius: Metrics.radiusSm
+                                            clip: true
+
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: "WYSIWYG"
+                                                font.family: Typography.fontPrimary
+                                                font.pixelSize: 10
+                                                color: noteEditor.editorMode === "wysiwyg" ? Colors.textInverse : Colors.textTertiary
+                                            }
+
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                onClicked: {
+                                                    if (noteEditor.editorMode !== "wysiwyg") {
+                                                        noteEditor.setEditorMode("wysiwyg")
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            Layout.fillHeight: true
+                                            color: noteEditor.editorMode === "markdown" ? Colors.primary500 : "transparent"
+                                            radius: Metrics.radiusSm
+                                            clip: true
+
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: "MD"
+                                                font.family: Typography.fontPrimary
+                                                font.pixelSize: 10
+                                                color: noteEditor.editorMode === "markdown" ? Colors.textInverse : Colors.textTertiary
+                                            }
+
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                onClicked: {
+                                                    if (noteEditor.editorMode !== "markdown") {
+                                                        noteEditor.setEditorMode("markdown")
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
-                                    return ""
                                 }
-                                font.family: Typography.fontPrimary
-                                font.weight: Typography.weightRegular
-                                font.pixelSize: Typography.caption
-                                color: Colors.textTertiary
                             }
                         }
                     }

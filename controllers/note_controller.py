@@ -93,6 +93,14 @@ class NoteController(QObject):
         self._filter_to_date: str = ""        # YYYY-MM-DD
         self._selected_tag: str = ""          # active tag filter
 
+        # Pagination state
+        self._pagination_offset: int = 0
+        self._pagination_limit: int = 20
+        self._loaded_notes: List[Dict[str, Any]] = []  # Currently loaded notes for pagination
+
+        # Folder view option
+        self._include_subfolders: bool = True  # Include subfolder notes by default
+
         # Pending data for deferred save (for batching until explicit save)
         self._pending_title = None
         self._pending_content = None
@@ -137,8 +145,41 @@ class NoteController(QObject):
     
     # Default notes initialization removed - app starts with empty state
     def _on_folder_changed(self):
-        """Handle folder change - emit filtered notes changed."""
+        """Handle folder change - reset pagination and reload first page."""
+        self._pagination_offset = 0
+        self._loaded_notes = []
+        self._load_first_page()
         self.filteredNotesChanged.emit()
+
+    def _load_first_page(self):
+        """Load the first page of notes."""
+        self._pagination_offset = 0
+        current_folder_id = self._folder_controller.currentFolderId
+        tag_filter = self._selected_tag or None
+
+        if current_folder_id == self.SMART_ALL:
+            notes = self._note_service.get_all(tag=tag_filter, offset=0, limit=self._pagination_limit)
+        elif current_folder_id == self.SMART_FAVORITES:
+            notes = self._note_service.get_pinned(ensure_note_id=self._current_note_id, offset=0, limit=self._pagination_limit)
+            if tag_filter:
+                notes = [n for n in notes if any(
+                    t == tag_filter or t.startswith(tag_filter + '/') for t in n.get('tags', [])
+                )]
+        else:
+            if self._include_subfolders:
+                folder_ids = [current_folder_id] + self._folder_controller.getDescendantIds(current_folder_id)
+                notes = self._note_service.get_all_by_folder_ids(folder_ids)
+            else:
+                notes = self._note_service.get_all(folder_id=current_folder_id)
+            if tag_filter:
+                notes = [n for n in notes if any(
+                    t == tag_filter or t.startswith(tag_filter + '/') for t in n.get('tags', [])
+                )]
+            # Apply pagination client-side for folder queries
+            notes = notes[0:self._pagination_limit]
+
+        self._loaded_notes = self._apply_sort_and_filter(notes)
+        self._pagination_offset = len(self._loaded_notes)
     
     def _perform_save(self):
         """Perform save operation asynchronously (called by debounced autosave or focusout flush).
@@ -300,22 +341,9 @@ class NoteController(QObject):
     
     @pyqtProperty(list, notify=filteredNotesChanged)
     def filteredNotes(self):
-        """Get notes filtered by current folder with sorting and search."""
-        current_folder_id = self._folder_controller.currentFolderId
-        tag_filter = self._selected_tag or None
-        if current_folder_id == self.SMART_ALL:
-            notes = self._note_service.get_all(tag=tag_filter)
-        elif current_folder_id == self.SMART_FAVORITES:
-            notes = self._note_service.get_pinned(ensure_note_id=self._current_note_id)
-            if tag_filter:
-                notes = [n for n in notes if any(
-                    t == tag_filter or t.startswith(tag_filter + '/') for t in n.get('tags', [])
-                )]
-        else:
-            notes = self._note_service.get_all(folder_id=current_folder_id or None, tag=tag_filter)
-
-        return self._apply_sort_and_filter(notes)
-
+        """Get currently loaded notes (paginated)."""
+        return self._loaded_notes
+    
     @pyqtProperty(list, notify=tagsChanged)
     def allTags(self):
         """Get all tags with counts for the current library."""
@@ -353,6 +381,22 @@ class NoteController(QObject):
         """Check if currently saving."""
         return self._is_saving
 
+    # Folder view option
+    @pyqtProperty(bool, notify=filteredNotesChanged)
+    def includeSubfolders(self) -> bool:
+        """Get whether to include subfolder notes in the view."""
+        return self._include_subfolders
+
+    @pyqtSlot(bool)
+    def setIncludeSubfolders(self, include: bool):
+        """Set whether to include subfolder notes in the view."""
+        if self._include_subfolders != include:
+            self._include_subfolders = include
+            self._pagination_offset = 0
+            self._loaded_notes = []
+            self._load_first_page()
+            self.filteredNotesChanged.emit()
+
     # Sorting and filtering properties
     @pyqtProperty(str, notify=filteredNotesChanged)
     def sortField(self) -> str:
@@ -373,13 +417,52 @@ class NoteController(QObject):
     def toggleSortOrder(self):
         """Toggle between asc and desc order."""
         self._sort_order = "asc" if self._sort_order == "desc" else "desc"
+        self._pagination_offset = 0
+        self._loaded_notes = []
+        self._load_first_page()
         self.filteredNotesChanged.emit()
 
     @pyqtSlot(str)
     def setSearchKeyword(self, keyword: str):
         """Set search keyword and refresh notes."""
         self._search_keyword = keyword.strip()
+        self._pagination_offset = 0
+        self._loaded_notes = []
+        self._load_first_page()
         self.filteredNotesChanged.emit()
+
+    @pyqtSlot()
+    def loadMoreNotes(self):
+        """Load next page of notes (infinite scroll)."""
+        current_folder_id = self._folder_controller.currentFolderId
+        tag_filter = self._selected_tag or None
+
+        if current_folder_id == self.SMART_ALL:
+            new_notes = self._note_service.get_all(tag=tag_filter, offset=self._pagination_offset, limit=self._pagination_limit)
+        elif current_folder_id == self.SMART_FAVORITES:
+            new_notes = self._note_service.get_pinned(ensure_note_id=self._current_note_id, offset=self._pagination_offset, limit=self._pagination_limit)
+            if tag_filter:
+                new_notes = [n for n in new_notes if any(
+                    t == tag_filter or t.startswith(tag_filter + '/') for t in n.get('tags', [])
+                )]
+        else:
+            if self._include_subfolders:
+                folder_ids = [current_folder_id] + self._folder_controller.getDescendantIds(current_folder_id)
+                all_notes = self._note_service.get_all_by_folder_ids(folder_ids)
+            else:
+                all_notes = self._note_service.get_all(folder_id=current_folder_id)
+            if tag_filter:
+                all_notes = [n for n in all_notes if any(
+                    t == tag_filter or t.startswith(tag_filter + '/') for t in n.get('tags', [])
+                )]
+            # Apply pagination client-side for folder queries
+            new_notes = all_notes[self._pagination_offset:self._pagination_offset + self._pagination_limit]
+
+        if new_notes:
+            new_notes = self._apply_sort_and_filter(new_notes)
+            self._loaded_notes.extend(new_notes)
+            self._pagination_offset += len(new_notes)
+            self.filteredNotesChanged.emit()
 
     @pyqtProperty(str, notify=filteredNotesChanged)
     def filterFromDate(self) -> str:
@@ -402,12 +485,18 @@ class NoteController(QObject):
     def setFilterFromDate(self, date: str):
         """Set start date filter (YYYY-MM-DD)."""
         self._filter_from_date = date.strip()
+        self._pagination_offset = 0
+        self._loaded_notes = []
+        self._load_first_page()
         self.filteredNotesChanged.emit()
 
     @pyqtSlot(str)
     def setFilterToDate(self, date: str):
         """Set end date filter (YYYY-MM-DD)."""
         self._filter_to_date = date.strip()
+        self._pagination_offset = 0
+        self._loaded_notes = []
+        self._load_first_page()
         self.filteredNotesChanged.emit()
 
     @pyqtSlot(str, result=str)
@@ -461,6 +550,9 @@ class NoteController(QObject):
                 self._filter_from_date = ""
                 self._filter_to_date = ""
             self._sort_field = field
+            self._pagination_offset = 0
+            self._loaded_notes = []
+            self._load_first_page()
             self.filteredNotesChanged.emit()
 
     def _apply_sort_and_filter(self, notes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -557,6 +649,9 @@ class NoteController(QObject):
         else:
             self._selected_tag = tag
         self.tagsChanged.emit()
+        self._pagination_offset = 0
+        self._loaded_notes = []
+        self._load_first_page()
         self.filteredNotesChanged.emit()
 
     @pyqtSlot()
@@ -565,6 +660,9 @@ class NoteController(QObject):
         if self._selected_tag:
             self._selected_tag = ""
             self.tagsChanged.emit()
+            self._pagination_offset = 0
+            self._loaded_notes = []
+            self._load_first_page()
             self.filteredNotesChanged.emit()
 
     @pyqtSlot(str, 'QVariantList', result=bool)

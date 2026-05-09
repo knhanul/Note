@@ -16,6 +16,7 @@ ColumnLayout {
     property string saveStatus: "saved"
     property bool isDirty: false
     property real editorZoom: 1.0   // 0.5 ~ 3.0
+    property string editorMode: "wysiwyg" // wysiwyg | markdown
 
     // Signals
     signal titleEdited(string newTitle)
@@ -33,6 +34,20 @@ ColumnLayout {
     property bool _editorReady: false
     property string _loadedNoteId: ""
     property bool _pdfChromeHidden: false
+
+    // Debounce for setEditorMode to prevent duplicate calls
+    Timer {
+        id: modeChangeTimer
+        interval: 100
+        repeat: false
+        property string pendingMode: ""
+        onTriggered: {
+            if (pendingMode !== "") {
+                webView.runJavaScript("if (window.editorAPI && window.editorAPI.setMode) { window.editorAPI.setMode('" + pendingMode + "'); }")
+                pendingMode = ""
+            }
+        }
+    }
 
     // Debounced autosave timer (user-stop detection)
     Timer {
@@ -100,12 +115,15 @@ ColumnLayout {
             onLoadProgressChanged: {
                 if (loadProgress === 100) {
                     setContentTimer.start()
+                    syncEditorMode()
                 }
             }
 
             // Handle console messages for bridge communication
             onJavaScriptConsoleMessage: (level, message, lineNumber, sourceID) => {
                 var msg = message.toString()
+                // Forward all console.log for debugging
+                console.log("[WebEngine] " + message)
                 if (msg === "EDITOR_CONTENT_CHANGED:__PAYLOAD_READY__") {
                     // Retrieve the full payload via runJavaScript (avoids console.log size limits)
                     webView.runJavaScript(
@@ -434,6 +452,25 @@ ColumnLayout {
         if (webView.loadProgress === 100) {
             setEditorContent(markdown || "", json || "")
         }
+    }
+
+    function setEditorMode(mode) {
+        console.log("[WebNoteEditor] setEditorMode called with mode:", mode)
+        if (mode !== "wysiwyg" && mode !== "markdown") return
+        if (mode === root.editorMode) return
+        root.editorMode = mode
+        modeChangeTimer.pendingMode = mode
+        modeChangeTimer.restart()
+    }
+
+    function syncEditorMode() {
+        console.log("[WebNoteEditor] syncEditorMode called")
+        webView.runJavaScript("if (window.editorAPI && window.editorAPI.getMode) { window.editorAPI.getMode(); }", function(result) {
+            console.log("[WebNoteEditor] syncEditorMode result:", result)
+            if (result) {
+                root.editorMode = result
+            }
+        })
     }
 
     onContentChanged: {

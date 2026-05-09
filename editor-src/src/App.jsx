@@ -13,7 +13,7 @@ import TableCell from '@tiptap/extension-table-cell'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { Markdown } from 'tiptap-markdown'
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useState } from 'react'
 
 import Toolbar from './components/Toolbar'
 import BubbleMenuBar from './components/BubbleMenuBar'
@@ -63,12 +63,27 @@ function extractFirstLineTitle(text) {
 }
 
 export default function App() {
+  const [editorMode, setEditorMode] = useState('wysiwyg')
+  const [renderKey, setRenderKey] = useState(0)
+
   // ── Refs: 모두 리렌더 유발 없이 값만 추적 ─────────────────────────
   const editorRef = useRef(null)           // Tiptap 에디터 인스턴스
   const debounceTimerRef = useRef(null)    // 1.5s 자동저장 타이머
   const currentNoteIdRef = useRef('')      // 현재 편집 중인 noteId (R2 판단용)
   const isNewNoteRef = useRef(false)       // 새 노트 여부 (첫 Enter CREATE 트리거용)
   const hasTypedRef = useRef(false)        // 새 노트에 실제 입력이 발생했는지
+  const modeRef = useRef('wysiwyg')
+  const markdownDraftRef = useRef('')
+  const markdownTextareaRef = useRef(null)
+
+  useEffect(() => {
+    console.log('[editorMode state changed to]:', editorMode)
+    modeRef.current = editorMode
+    // Notify QML of mode change
+    if (window.qt && window.qt.webChannelTransport) {
+      console.log('[editorMode] Notifying QML of mode change:', editorMode)
+    }
+  }, [editorMode])
 
   // ── 타이머 유틸 ──────────────────────────────────────────────────
   const clearDebounce = useCallback(() => {
@@ -97,6 +112,17 @@ export default function App() {
     return { markdown, json, title, text }
   }, [])
 
+  const buildMarkdownPayload = useCallback((markdownText) => {
+    const markdown = markdownText || ''
+    const title = extractFirstLineTitle(markdown)
+    return {
+      markdown,
+      json: '',
+      title,
+      text: markdown,
+    }
+  }, [])
+
   /**
    * QML 브릿지로 payload를 내보낸다.
    * QML은 window.__editorLastPayload를 읽어 DB 저장에 사용한다.
@@ -107,29 +133,48 @@ export default function App() {
     return payload
   }, [buildPayload])
 
+  const publishMarkdownPayload = useCallback(() => {
+    const payload = buildMarkdownPayload(markdownDraftRef.current)
+    window.__editorLastPayload = payload
+    return payload
+  }, [buildMarkdownPayload])
+
+  const publishActivePayload = useCallback((ed) => {
+    if (modeRef.current === 'markdown') {
+      return publishMarkdownPayload()
+    }
+    const targetEditor = ed || editorRef.current
+    if (!targetEditor) {
+      return publishMarkdownPayload()
+    }
+    const payload = buildPayload(targetEditor)
+    markdownDraftRef.current = payload.markdown || ''
+    window.__editorLastPayload = payload
+    return payload
+  }, [buildPayload, publishMarkdownPayload])
+
   /**
    * 실제 저장 요청을 QML로 보낸다.
    * - 새 노트 + 최초 Enter → REQUEST_CREATE_NOTE (DB INSERT)
    * - 기존 노트 → REQUEST_SAVE (DB UPDATE)
    * 반드시 publish 후 호출해서 payload를 최신 상태로 맞춘다.
    */
-  const flushSave = useCallback((ed, { create = false } = {}) => {
-    if (!ed) return
+  const flushSave = useCallback(({ create = false } = {}) => {
     clearDebounce()
-    publishPayload(ed)
+    publishActivePayload()
 
     if (create) {
       console.log('REQUEST_CREATE_NOTE')
     } else {
       console.log('REQUEST_SAVE')
     }
-  }, [clearDebounce, publishPayload])
+  }, [clearDebounce, publishActivePayload])
 
   /**
    * 타이핑 중 호출되는 debounce 스케줄러.
    * 1.5초간 추가 입력이 없으면 조용히 백그라운드 저장.
    */
-  const scheduleDebouncedSave = useCallback((ed) => {
+  const scheduleDebouncedSave = useCallback(() => {
     clearDebounce()
     debounceTimerRef.current = setTimeout(() => {
       debounceTimerRef.current = null
@@ -137,12 +182,128 @@ export default function App() {
       // 사용자가 Enter 없이 blur했거나 자리를 떠난 상황.
       // → 1.5초 이상 타이핑 후 멈췄다면 CREATE로 승격.
       if (isNewNoteRef.current && hasTypedRef.current) {
-        flushSave(ed, { create: true })
+        flushSave({ create: true })
       } else {
-        flushSave(ed, { create: false })
+        flushSave({ create: false })
       }
     }, SAVE_DEBOUNCE_MS)
   }, [clearDebounce, flushSave])
+
+  const syncMarkdownTextarea = useCallback(() => {
+    const textarea = markdownTextareaRef.current
+    if (!textarea) return
+    textarea.value = markdownDraftRef.current || ''
+  }, [])
+
+  const setMarkdownDraft = useCallback((value) => {
+    markdownDraftRef.current = value || ''
+    const textarea = markdownTextareaRef.current
+    if (textarea && textarea.value !== markdownDraftRef.current) {
+      textarea.value = markdownDraftRef.current
+    }
+  }, [])
+
+  const switchEditorMode = useCallback((nextMode) => {
+    console.log('[switchEditorMode] called with:', nextMode, 'current:', modeRef.current)
+    if (nextMode === modeRef.current) return
+
+    if (nextMode === 'markdown') {
+      const payload = publishActivePayload(editorRef.current)
+      setMarkdownDraft(payload.markdown || '')
+      setEditorMode('markdown')
+      setRenderKey(prev => prev + 1)
+      requestAnimationFrame(() => {
+        syncMarkdownTextarea()
+        markdownTextareaRef.current?.focus()
+      })
+      return
+    }
+
+    const ed = editorRef.current
+    if (ed) {
+      const nextMarkdown = markdownDraftRef.current || ''
+      ed.commands.setContent(nextMarkdown, false)
+      const payload = buildPayload(ed)
+      setMarkdownDraft(payload.markdown || nextMarkdown)
+      window.__editorLastPayload = payload
+      setEditorMode('wysiwyg')
+      setRenderKey(prev => prev + 1)
+      requestAnimationFrame(() => {
+        ed.commands.focus('end')
+      })
+    } else {
+      publishMarkdownPayload()
+    }
+  }, [
+    publishActivePayload,
+    setMarkdownDraft,
+    syncMarkdownTextarea,
+    buildPayload,
+  ])
+
+  const handleMarkdownInput = useCallback((event) => {
+    const nextValue = event.target.value || ''
+    markdownDraftRef.current = nextValue
+    if (isNewNoteRef.current && nextValue.trim().length > 0) {
+      hasTypedRef.current = true
+    }
+    publishMarkdownPayload()
+    scheduleDebouncedSave()
+  }, [publishMarkdownPayload, scheduleDebouncedSave])
+
+  const handleMarkdownKeyDown = useCallback((event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === 's') {
+      event.preventDefault()
+      if (isNewNoteRef.current && hasTypedRef.current) {
+        flushSave({ create: true })
+      } else if (!isNewNoteRef.current) {
+        flushSave({ create: false })
+      }
+      return
+    }
+
+    if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229) return
+    if (!isNewNoteRef.current || !hasTypedRef.current) return
+
+    setTimeout(() => {
+      flushSave({ create: true })
+    }, 0)
+  }, [flushSave])
+
+  const handleMarkdownBlur = useCallback(() => {
+    if (isNewNoteRef.current && hasTypedRef.current) {
+      flushSave({ create: true })
+    } else if (!isNewNoteRef.current) {
+      flushSave({ create: false })
+    }
+  }, [flushSave])
+
+  const insertIntoMarkdownAtCursor = useCallback((insertText) => {
+    const textarea = markdownTextareaRef.current
+    const payloadText = insertText || ''
+    if (!textarea) {
+      markdownDraftRef.current = (markdownDraftRef.current || '') + payloadText
+      publishMarkdownPayload()
+      scheduleDebouncedSave()
+      return
+    }
+
+    const start = textarea.selectionStart ?? textarea.value.length
+    const end = textarea.selectionEnd ?? textarea.value.length
+    const value = textarea.value || ''
+    const nextValue = value.slice(0, start) + payloadText + value.slice(end)
+
+    textarea.value = nextValue
+    textarea.selectionStart = textarea.selectionEnd = start + payloadText.length
+    markdownDraftRef.current = nextValue
+
+    if (isNewNoteRef.current && nextValue.trim().length > 0) {
+      hasTypedRef.current = true
+    }
+
+    publishMarkdownPayload()
+    scheduleDebouncedSave()
+  }, [publishMarkdownPayload, scheduleDebouncedSave])
 
   // ── Tiptap 에디터 초기화 ─────────────────────────────────────────
   const editor = useEditor({
@@ -184,12 +345,10 @@ export default function App() {
         // Ctrl+S (or Cmd+S) — immediate save, bypass debounce
         if ((event.ctrlKey || event.metaKey) && event.key === 's') {
           event.preventDefault()
-          const ed = editorRef.current
-          if (!ed) return true
           if (isNewNoteRef.current && hasTypedRef.current) {
-            flushSave(ed, { create: true })
+            flushSave({ create: true })
           } else if (!isNewNoteRef.current) {
-            flushSave(ed, { create: false })
+            flushSave({ create: false })
           }
           return true
         }
@@ -198,12 +357,10 @@ export default function App() {
         if (event.isComposing || event.keyCode === 229) return false
 
         if (isNewNoteRef.current && hasTypedRef.current) {
-          const ed = editorRef.current
           setTimeout(() => {
-            if (!ed) return
             // CREATE 성공 후 QML이 setContent(noteId 변경)로 상태를 넘겨주면
             // isNewNoteRef는 setContent 경로에서 false로 전환된다.
-            flushSave(ed, { create: true })
+            flushSave({ create: true })
           }, 0)
         }
         // 중요: false 반환 → Tiptap 기본 Enter 동작(줄바꿈) 그대로 수행
@@ -215,12 +372,10 @@ export default function App() {
          * debounce가 남아있어도 무시하고 지금 바로 최신 payload로 저장한다.
          */
         blur() {
-          const ed = editorRef.current
-          if (!ed) return false
           if (isNewNoteRef.current && hasTypedRef.current) {
-            flushSave(ed, { create: true })
+            flushSave({ create: true })
           } else if (!isNewNoteRef.current) {
-            flushSave(ed, { create: false })
+            flushSave({ create: false })
           }
           return false
         },
@@ -232,8 +387,11 @@ export default function App() {
      */
     onUpdate: ({ editor: ed }) => {
       if (isNewNoteRef.current) hasTypedRef.current = true
-      publishPayload(ed)
-      scheduleDebouncedSave(ed)
+      if (modeRef.current !== 'markdown') {
+        const payload = publishPayload(ed)
+        markdownDraftRef.current = payload.markdown || ''
+      }
+      scheduleDebouncedSave()
     },
   })
 
@@ -277,9 +435,17 @@ export default function App() {
         // 새 노트: 항상 빈 문서로 시작
         if (isNew) {
           editor.commands.setContent('', false)
+          setMarkdownDraft('')
           publishPayload(editor)
           // 새 노트 열자마자 포커스를 줘서 사용자가 바로 입력 가능하게
-          requestAnimationFrame(() => editor.commands.focus('end'))
+          requestAnimationFrame(() => {
+            if (modeRef.current === 'markdown') {
+              syncMarkdownTextarea()
+              markdownTextareaRef.current?.focus()
+            } else {
+              editor.commands.focus('end')
+            }
+          })
           return
         }
 
@@ -288,13 +454,15 @@ export default function App() {
           if (jsonStr && jsonStr.trim() !== '') {
             const json = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr
             editor.commands.setContent(json, false)
-            publishPayload(editor)
+            const payload = publishPayload(editor)
+            setMarkdownDraft(payload.markdown || '')
             return
           }
         } catch (_) { /* fallthrough */ }
 
         editor.commands.setContent(markdown || '', false)
-        publishPayload(editor)
+        const payload = publishPayload(editor)
+        setMarkdownDraft(payload.markdown || markdown || '')
       },
 
       /**
@@ -310,71 +478,202 @@ export default function App() {
 
       /** 하위 호환 */
       setMarkdown(markdown) {
-        editor.commands.setContent(markdown || '', false)
+        const nextMarkdown = markdown || ''
+        setMarkdownDraft(nextMarkdown)
+        editor.commands.setContent(nextMarkdown, false)
         publishPayload(editor)
       },
 
-      getMarkdown() { return editor.storage.markdown.getMarkdown() },
-      getJSON()     { return JSON.stringify(editor.getJSON()) },
-      getHTML()     { return editor.getHTML() },
-      getTitle()    { return extractFirstLineTitle(editor.getText()) },
-      getPayload()  { return buildPayload(editor) },
+      getMarkdown() {
+        if (modeRef.current === 'markdown') return markdownDraftRef.current || ''
+        return editor.storage.markdown.getMarkdown()
+      },
+      getJSON() {
+        if (modeRef.current === 'markdown') return ''
+        return JSON.stringify(editor.getJSON())
+      },
+      getHTML() {
+        if (modeRef.current === 'markdown') return ''
+        return editor.getHTML()
+      },
+      getTitle() {
+        if (modeRef.current === 'markdown') return extractFirstLineTitle(markdownDraftRef.current || '')
+        return extractFirstLineTitle(editor.getText())
+      },
+      getPayload() {
+        if (modeRef.current === 'markdown') return buildMarkdownPayload(markdownDraftRef.current || '')
+        return buildPayload(editor)
+      },
 
-      insertImage(src)                 { editor.chain().focus().setImage({ src }).run() },
-      insertMarkdownAtCursor(markdown) { editor.chain().focus().insertContent(markdown).run() },
-      focus()                          { editor.commands.focus() },
+      insertImage(src) {
+        if (modeRef.current === 'markdown') {
+          insertIntoMarkdownAtCursor(`![image](${src || ''})`)
+          return
+        }
+        editor.chain().focus().setImage({ src }).run()
+      },
+      insertMarkdownAtCursor(markdown) {
+        if (modeRef.current === 'markdown') {
+          insertIntoMarkdownAtCursor(markdown || '')
+          return
+        }
+        editor.chain().focus().insertContent(markdown).run()
+      },
+      focus() {
+        if (modeRef.current === 'markdown') {
+          markdownTextareaRef.current?.focus()
+          return
+        }
+        editor.commands.focus()
+      },
 
       /** QML에서 강제 flush가 필요할 때 (예: 앱 종료, 노트 전환 직전) */
       flushNow() {
-        const ed = editorRef.current
-        if (!ed) return
         if (isNewNoteRef.current && hasTypedRef.current) {
-          flushSave(ed, { create: true })
+          flushSave({ create: true })
         } else if (!isNewNoteRef.current) {
-          flushSave(ed, { create: false })
+          flushSave({ create: false })
         }
       },
 
       requestExport() {
-        const ed = editorRef.current
-        if (!ed) return
-        publishPayload(ed)
+        publishActivePayload()
         console.log('REQUEST_EXPORT_CURRENT_NOTE')
       },
 
       // Toolbar 호환 헬퍼
-      formatBold:         () => editor.chain().focus().toggleBold().run(),
-      formatItalic:       () => editor.chain().focus().toggleItalic().run(),
-      formatHeading:      () => editor.chain().focus().toggleHeading({ level: 1 }).run(),
-      formatCode:         () => editor.chain().focus().toggleCode().run(),
+      formatBold: () => {
+        if (modeRef.current === 'markdown') {
+          insertIntoMarkdownAtCursor('**bold**')
+          return
+        }
+        editor.chain().focus().toggleBold().run()
+      },
+      formatItalic: () => {
+        if (modeRef.current === 'markdown') {
+          insertIntoMarkdownAtCursor('*italic*')
+          return
+        }
+        editor.chain().focus().toggleItalic().run()
+      },
+      formatHeading: () => {
+        if (modeRef.current === 'markdown') {
+          insertIntoMarkdownAtCursor('\n# heading\n')
+          return
+        }
+        editor.chain().focus().toggleHeading({ level: 1 }).run()
+      },
+      formatCode: () => {
+        if (modeRef.current === 'markdown') {
+          insertIntoMarkdownAtCursor('`code`')
+          return
+        }
+        editor.chain().focus().toggleCode().run()
+      },
       insertTable(rows = 3, cols = 3) {
+        if (modeRef.current === 'markdown') {
+          insertIntoMarkdownAtCursor(`| col1 | col2 |\n| --- | --- |\n|  |  |\n`)
+          return
+        }
         const r = Math.max(1, Math.min(20, parseInt(rows, 10) || 3))
         const c = Math.max(1, Math.min(20, parseInt(cols, 10) || 3))
         editor.chain().focus().insertTable({ rows: r, cols: c, withHeaderRow: true }).run()
       },
-      insertBulletList:   () => editor.chain().focus().toggleBulletList().run(),
-      insertNumberedList: () => editor.chain().focus().toggleOrderedList().run(),
-      insertHorizontalRule: () => editor.chain().focus().setHorizontalRule().run(),
-      insertQuote:        () => editor.chain().focus().toggleBlockquote().run(),
+      insertBulletList: () => {
+        if (modeRef.current === 'markdown') {
+          insertIntoMarkdownAtCursor('\n- item\n')
+          return
+        }
+        editor.chain().focus().toggleBulletList().run()
+      },
+      insertNumberedList: () => {
+        if (modeRef.current === 'markdown') {
+          insertIntoMarkdownAtCursor('\n1. item\n')
+          return
+        }
+        editor.chain().focus().toggleOrderedList().run()
+      },
+      insertHorizontalRule: () => {
+        if (modeRef.current === 'markdown') {
+          insertIntoMarkdownAtCursor('\n---\n')
+          return
+        }
+        editor.chain().focus().setHorizontalRule().run()
+      },
+      insertQuote: () => {
+        if (modeRef.current === 'markdown') {
+          insertIntoMarkdownAtCursor('\n> quote\n')
+          return
+        }
+        editor.chain().focus().toggleBlockquote().run()
+      },
       insertLink() { /* React modal에서 처리 */ },
+      setMode(mode) {
+        console.log('[editorAPI] setMode called:', mode)
+        if (mode !== 'wysiwyg' && mode !== 'markdown') return
+        switchEditorMode(mode)
+      },
+      getMode() {
+        console.log('[editorAPI] getMode called, returning:', modeRef.current)
+        return modeRef.current
+      },
     }
 
     // QML이 첫 진입 시 읽을 수 있도록 초기 payload 한 번 발행
-    publishPayload(editor)
-  }, [editor, clearDebounce, publishPayload, flushSave, buildPayload])
+    const payload = publishPayload(editor)
+    setMarkdownDraft(payload.markdown || '')
+  }, [
+    editor,
+    clearDebounce,
+    publishPayload,
+    publishActivePayload,
+    flushSave,
+    buildPayload,
+    buildMarkdownPayload,
+    insertIntoMarkdownAtCursor,
+    publishMarkdownPayload,
+    setMarkdownDraft,
+    switchEditorMode,
+    syncMarkdownTextarea,
+  ])
 
   return (
     <div className="flex flex-col bg-white text-slate-900 font-sans" style={{ height: '100vh' }}>
       {/* Toolbar area: both toolbars in one stable container */}
       <div id="editorToolbarWrap" className="flex-none border-b border-slate-200">
-        <Toolbar editor={editor} />
-        <TableToolbar editor={editor} />
+        {editorMode === 'wysiwyg' && (
+          <>
+            <Toolbar editor={editor} />
+            <TableToolbar editor={editor} />
+          </>
+        )}
       </div>
-      <div id="editorBubbleMenuWrap">
-        <BubbleMenuBar editor={editor} />
-      </div>
+      {editorMode === 'wysiwyg' && (
+        <div id="editorBubbleMenuWrap">
+          <BubbleMenuBar editor={editor} />
+        </div>
+      )}
       <div className="flex-1 overflow-auto min-h-0">
-        <EditorContent editor={editor} className="h-full" />
+        {editorMode === 'wysiwyg' ? (
+          <>
+            {console.log('[Render] Rendering WYSIWYG editor')}
+            <EditorContent editor={editor} className="h-full" />
+          </>
+        ) : (
+          <>
+            {console.log('[Render] Rendering Markdown textarea')}
+            <textarea
+              ref={markdownTextareaRef}
+              defaultValue={markdownDraftRef.current}
+              onInput={handleMarkdownInput}
+              onKeyDown={handleMarkdownKeyDown}
+              onBlur={handleMarkdownBlur}
+              spellCheck={false}
+              className="w-full h-full p-6 font-mono text-sm leading-7 text-slate-800 bg-white resize-none outline-none border-0"
+              placeholder="마크다운을 입력하세요..."
+            />
+          </>
+        )}
       </div>
     </div>
   )

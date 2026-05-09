@@ -4,10 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Nuni Note Editor</title>
-    <script type="module" crossorigin src="./assets/index-tLp9jVhI.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-B4WXDDsu.css">
+    <script type="module" crossorigin src="./assets/index-BwvmDzY-.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-BafjRYve.css">
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"></div>
+    <script>
+      // Forward console.log to QML
+      (function() {
+        const originalLog = console.log;
+        console.log = function(...args) {
+          originalLog.apply(console, args);
+          if (window.qt && window.qt.webChannelTransport) {
+            // Will be handled by WebEngine's JavaScriptConsoleMessage
+          }
+        };
+      })();
+    </script>
   </body>
 </html>

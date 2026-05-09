@@ -25,8 +25,9 @@ class NoteService:
 
     def get_all(self, folder_id: Optional[str] = None,
                 include_deleted: bool = False,
-                tag: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Get all notes, optionally filtered by folder and/or tag."""
+                tag: Optional[str] = None,
+                offset: int = 0, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Get all notes, optionally filtered by folder and/or tag with pagination."""
         query = "SELECT * FROM notes WHERE 1=1"
         params = []
         
@@ -38,6 +39,11 @@ class NoteService:
             query += " AND deleted_at IS NULL"
         
         query += " ORDER BY updated_at DESC"
+        
+        if limit is not None:
+            query += " LIMIT ? OFFSET ?"
+            params.append(limit)
+            params.append(offset)
         
         notes = [self._parse_tags(n) for n in self.db.fetch_all(query, tuple(params))]
 
@@ -61,13 +67,20 @@ class NoteService:
         query += " ORDER BY updated_at DESC"
         return [self._parse_tags(n) for n in self.db.fetch_all(query, tuple(folder_ids))]
 
-    def get_pinned(self, ensure_note_id: str = None) -> List[Dict[str, Any]]:
-        """Get all pinned, non-deleted notes."""
-        result = [self._parse_tags(n) for n in self.db.fetch_all(
-            """SELECT * FROM notes
-               WHERE is_pinned = 1 AND deleted_at IS NULL
-               ORDER BY updated_at DESC"""
-        )]
+    def get_pinned(self, ensure_note_id: str = None,
+                   offset: int = 0, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Get pinned, non-deleted notes with pagination."""
+        query = """SELECT * FROM notes
+                   WHERE is_pinned = 1 AND deleted_at IS NULL
+                   ORDER BY updated_at DESC"""
+        params = []
+        
+        if limit is not None:
+            query += " LIMIT ? OFFSET ?"
+            params.append(limit)
+            params.append(offset)
+        
+        result = [self._parse_tags(n) for n in self.db.fetch_all(query, tuple(params))]
 
         # If ensure_note_id is provided and not in results, fetch and prepend it
         if ensure_note_id and not any(n['id'] == ensure_note_id for n in result):

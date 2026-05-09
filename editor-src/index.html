@@ -7,6 +7,18 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Forward console.log to QML
+      (function() {
+        const originalLog = console.log;
+        console.log = function(...args) {
+          originalLog.apply(console, args);
+          if (window.qt && window.qt.webChannelTransport) {
+            // Will be handled by WebEngine's JavaScriptConsoleMessage
+          }
+        };
+      })();
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

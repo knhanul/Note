@@ -212,6 +212,7 @@ class FolderImportController(QObject):
         self._thread = _ImportThread(worker, self)
 
         worker.progress.connect(self.importProgress)
+        worker.finished.connect(self._onImportFinished)
         worker.finished.connect(self.importFinished)
         worker.finished.connect(self._thread.quit)
         worker.finished.connect(worker.deleteLater)
@@ -219,3 +220,25 @@ class FolderImportController(QObject):
 
         print(f"[FolderImportController] starting thread")
         self._thread.start()
+
+    def _onImportFinished(self, ok, message, rootFolderId, noteCount, folderCount, failedCount):
+        """Handle import completion - refresh UI."""
+        print(f"[FolderImportController] _onImportFinished called")
+        try:
+            self._folder_ctrl.foldersChanged.emit()
+            # Select the created folder to show imported notes
+            if rootFolderId:
+                self._folder_ctrl.selectFolder(rootFolderId)
+            else:
+                self._folder_ctrl.currentFolderChanged.emit()
+        except Exception:
+            pass
+        try:
+            if hasattr(self._note_ctrl, "filteredNotesChanged"):
+                self._note_ctrl.filteredNotesChanged.emit()
+            if hasattr(self._note_ctrl, "notesChanged"):
+                self._note_ctrl.notesChanged.emit()
+            if hasattr(self._note_ctrl, "tagsChanged"):
+                self._note_ctrl.tagsChanged.emit()
+        except Exception:
+            pass

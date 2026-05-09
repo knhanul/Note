@@ -245,7 +245,7 @@ class FolderImportService:
         if progress_callback:
             progress_callback(processed, total_files, f"읽는 중: {fpath.name}")
         try:
-            title, markdown = self._read_note(fpath, import_mode=mode)
+            title, markdown, tags = self._read_note(fpath, import_mode=mode)
         except Exception as exc:  # noqa: BLE001
             failures.append({"path": str(fpath), "error": str(exc)})
             print(f"[FolderImport] Failed to read file {fpath.name}: {exc}")
@@ -262,6 +262,7 @@ class FolderImportService:
             title=title or fpath.stem or "무제",
             content=markdown or "",
             content_json="",
+            tags=tags,
         ):
             imported_notes.append(note_id)
             print(f"[FolderImport] Imported note: '{title or fpath.stem}' -> {note_id}")
@@ -277,22 +278,32 @@ class FolderImportService:
         ok = self._folders.create(folder_id, clean, color, parent_id)
         return folder_id if ok else None
 
-    def _read_note(self, fpath: Path, import_mode: str = DEFAULT_IMPORT_MODE) -> Tuple[str, str]:
+    def _read_note(self, fpath: Path, import_mode: str = DEFAULT_IMPORT_MODE) -> Tuple[str, str, List[str]]:
         ext = fpath.suffix.lower()
         title = fpath.stem
         filename_line = f"# {fpath.stem}\n\n"
+        tags = []
         if ext in (".md", ".markdown"):
             text = self._read_text(fpath)
-            return title, filename_line + self._inline_md_images(text, fpath.parent)
+            # Parse metadata from markdown
+            metadata, markdown_body = self._parse_markdown_metadata(text)
+            # Use metadata title if available
+            if metadata and "title" in metadata:
+                title = metadata["title"]
+                filename_line = ""
+            # Extract tags from metadata
+            if metadata and "tags" in metadata:
+                tags = metadata["tags"] if isinstance(metadata["tags"], list) else [str(metadata["tags"])]
+            return title, filename_line + self._inline_md_images(markdown_body, fpath.parent), tags
         if ext == ".txt":
-            return title, filename_line + self._read_text(fpath)
+            return title, filename_line + self._read_text(fpath), tags
         if ext in (".html", ".htm"):
-            return title, filename_line + self._html_to_markdown(self._read_text(fpath))
+            return title, filename_line + self._html_to_markdown(self._read_text(fpath)), tags
         if ext == ".docx":
-            return title, filename_line + self._docx_to_markdown(fpath)
+            return title, filename_line + self._docx_to_markdown(fpath), tags
         if ext in (".hwp", ".hwpx"):
-            return title, filename_line + self._hwp_to_markdown(fpath, import_mode=import_mode)
-        return title, filename_line
+            return title, filename_line + self._hwp_to_markdown(fpath, import_mode=import_mode), tags
+        return title, filename_line, tags
 
     @staticmethod
     def _read_text(fpath: Path) -> str:
@@ -302,6 +313,57 @@ class FolderImportService:
             except UnicodeDecodeError:
                 continue
         return fpath.read_text(encoding="utf-8", errors="ignore")
+
+    @staticmethod
+    def _parse_markdown_metadata(text: str) -> Tuple[Optional[Dict[str, Any]], str]:
+        """Parse metadata from markdown frontmatter and return (metadata, body)."""
+        if not text:
+            return None, text
+
+        lines = text.split("\n")
+        if not lines:
+            return None, text
+
+        # Check for YAML frontmatter (---)
+        if lines[0].strip() == "---":
+            end_index = -1
+            for i in range(1, len(lines)):
+                if lines[i].strip() == "---":
+                    end_index = i
+                    break
+
+            if end_index > 0:
+                try:
+                    import yaml
+                    metadata_text = "\n".join(lines[1:end_index])
+                    metadata = yaml.safe_load(metadata_text) or {}
+                    body = "\n".join(lines[end_index + 1:])
+                    return metadata, body
+                except Exception:
+                    # YAML parsing failed, treat as regular markdown
+                    pass
+
+        # Check for TOML frontmatter (+++)
+        if lines[0].strip() == "+++":
+            end_index = -1
+            for i in range(1, len(lines)):
+                if lines[i].strip() == "+++":
+                    end_index = i
+                    break
+
+            if end_index > 0:
+                try:
+                    import toml
+                    metadata_text = "\n".join(lines[1:end_index])
+                    metadata = toml.loads(metadata_text)
+                    body = "\n".join(lines[end_index + 1:])
+                    return metadata, body
+                except Exception:
+                    # TOML parsing failed, treat as regular markdown
+                    pass
+
+        # No metadata found
+        return None, text
 
     @staticmethod
     def _inline_md_images(markdown: str, base_dir: Path) -> str:

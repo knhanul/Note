@@ -443,3 +443,9 @@ class FolderController(QObject):
     def get_db(self) -> Database:
         """Get database instance (for NoteController)."""
         return self._db
+
+    def getDescendantIds(self, folder_id: str) -> list:
+        """Get all descendant folder IDs for a given folder."""
+        if not folder_id or self._is_smart_folder_id(folder_id):
+            return []
+        return self._folder_service.get_descendant_ids(folder_id)
