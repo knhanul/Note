@@ -15,17 +15,11 @@ import os
 from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtQml import QQmlApplicationEngine, qmlRegisterSingletonType
-from PyQt6.QtCore import QUrl, QObject, pyqtSignal, pyqtProperty, QTimer
+from PyQt6.QtQml import QQmlApplicationEngine
 from PyQt6.QtGui import QFontDatabase, QFont, QIcon
 
-from services.library_service import LibraryService
-from services.settings_service import SettingsService
-from controllers.folder_controller import FolderController
-from controllers.note_controller import NoteController
-from controllers.template_controller import TemplateController
-from controllers.current_export_controller import CurrentExportController
-from controllers.folder_import_controller import FolderImportController
+from app_bootstrap import bootstrap_app
+from app_config import create_app_config
 
 
 def setup_fonts(app: QApplication):
@@ -47,24 +41,6 @@ def setup_fonts(app: QApplication):
     app.setFont(font)
 
 
-def resolve_brand(base_dir: Path) -> dict:
-    """Detect brand from CLI args and return branding config."""
-    args = sys.argv[1:]
-    if "posid" in args:
-        return {
-            "brand":     "posid",
-            "app_name":  "포시드노트",
-            "icon_path": base_dir / "assets" / "images" / "posid" / "posid_logo.ico",
-            "logo_path": str(base_dir / "assets" / "images" / "posid" / "posid_ename.png"),
-        }
-    return {
-        "brand":     "nuni",
-        "app_name":  "누니노트",
-        "icon_path": base_dir / "assets" / "images" / "nuni" / "nuni_ico.ico",
-        "logo_path": str(base_dir / "assets" / "images" / "nuni" / "nuni_logo.png"),
-    }
-
-
 def main():
     """Application entry point."""
     # Enable High DPI scaling
@@ -73,80 +49,22 @@ def main():
     # Use Basic style for customizable ScrollBar
     os.environ["QT_QUICK_CONTROLS_STYLE"] = "Basic"
 
-    # Determine base directory
     base_dir = Path(__file__).parent.resolve()
+    config = create_app_config(base_dir, sys.argv)
 
-    # Resolve branding
-    branding = resolve_brand(base_dir)
-
-    # Create application
     app = QApplication(sys.argv)
-    app.setApplicationName(branding["app_name"])
-    app.setOrganizationName("nuninote")
-    app.setApplicationVersion("1.0.0")
+    app.setApplicationName(config.app_name)
+    app.setOrganizationName(config.organization_name)
+    app.setApplicationVersion(config.app_version)
 
-    # Set window icon
-    icon_path = branding["icon_path"]
-    if icon_path.exists():
-        app.setWindowIcon(QIcon(str(icon_path)))
+    if config.icon_path.exists():
+        app.setWindowIcon(QIcon(str(config.icon_path)))
     
-    # Setup fonts
     setup_fonts(app)
     
-    # Create QML engine first
     engine = QQmlApplicationEngine()
-    
-    # Create settings service first (persists last selections)
-    settings_service = SettingsService()
+    bootstrap_app(engine, config)
 
-    # Create library service with settings
-    library_service = LibraryService(engine, settings_service)
-    
-    # Create controllers with library service, settings, and engine as parent
-    folder_controller = FolderController(library_service, settings_service, engine)
-    note_controller = NoteController(library_service, folder_controller, engine)
-    template_controller = TemplateController(library_service, folder_controller, engine)
-    current_export_controller = CurrentExportController(library_service, engine)
-    folder_import_controller = FolderImportController(
-        library_service, folder_controller, note_controller, engine
-    )
-
-    # Get the directory containing this script
-    current_dir = base_dir
-    qml_dir = current_dir / "qml"
-    
-    # Add import paths for QML modules
-    engine.addImportPath(str(qml_dir))
-    
-    # Set context properties for controllers BEFORE loading QML
-    engine.rootContext().setContextProperty("libraryService", library_service)
-    engine.rootContext().setContextProperty("folderController", folder_controller)
-    engine.rootContext().setContextProperty("noteController", note_controller)
-    engine.rootContext().setContextProperty("templateController", template_controller)
-    engine.rootContext().setContextProperty("currentExportController", current_export_controller)
-    engine.rootContext().setContextProperty("folderImportController", folder_import_controller)
-
-    # Branding context
-    engine.rootContext().setContextProperty("appBrand",    branding["brand"])
-    engine.rootContext().setContextProperty("appName",     branding["app_name"])
-    engine.rootContext().setContextProperty("appLogoPath", branding["logo_path"])
-    
-    # Force context property update
-    engine.rootContext().setContextProperty("folderControllerReady", True)
-    
-    # Load the main QML file
-    main_qml = qml_dir / "Main.qml"
-    
-    if not main_qml.exists():
-        sys.exit(1)
-
-    engine.load(QUrl.fromLocalFile(str(main_qml)))
-
-    # Check if loading succeeded
-    if not engine.rootObjects():
-        sys.exit(1)
-    
-    # Run the application
     sys.exit(app.exec())
 
 
