@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+  <title>Markdown editor mode</title>
+  <desc>Simple icon for markdown source editing mode, optimized for small tabs</desc>
+  <path d="M8 8.5L4.8 12L8 15.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M16 8.5L19.2 12L16 15.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M13.3 7.8L10.7 16.2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+</svg>

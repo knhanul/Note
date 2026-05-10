@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+  <title>Note Select Mode</title>
+  <desc>Windows-style icon for entering note selection mode</desc>
+  <rect x="3" y="4" width="11" height="16" rx="2" stroke="#20262E" stroke-width="1.8"/>
+  <path d="M6.5 8H10.5" stroke="#20262E" stroke-width="1.8" stroke-linecap="round"/>
+  <path d="M6.5 12H10.5" stroke="#20262E" stroke-width="1.8" stroke-linecap="round"/>
+  <path d="M6.5 16H8.8" stroke="#20262E" stroke-width="1.8" stroke-linecap="round"/>
+  <circle cx="17.5" cy="16.5" r="4.5" fill="white" stroke="#20262E" stroke-width="1.8"/>
+  <path d="M15.5 16.5L17 18L19.7 15.3" stroke="#20262E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -376,7 +376,12 @@ Window {
     function enterNoteSelectionMode() {
         noteSelectionMode = true
         if (!selectedNoteIds) selectedNoteIds = []
-        refreshSelectableFolderItems()
+        // Defer folder refresh to avoid blocking UI
+        Qt.callLater(function() {
+            if (!selectableFolderItems || selectableFolderItems.length === 0) {
+                refreshSelectableFolderItems()
+            }
+        })
     }
 
     function exitNoteSelectionMode() {
@@ -1537,13 +1542,11 @@ Window {
                                     onClicked: window.openTemplateManagerDialog()
                                 }
 
-                                Text {
+                                Image {
                                     anchors.centerIn: parent
-                                    text: "⚙"
-                                    font.family: Typography.fontPrimary
-                                    font.weight: Typography.weightSemibold
-                                    font.pixelSize: 11
-                                    color: manageTemplateArea.containsMouse ? Colors.primary600 : Colors.textTertiary
+                                    source: "assets/icons/folder_properties.svg"
+                                    sourceSize: Qt.size(16, 16)
+                                    opacity: manageTemplateArea.containsMouse ? 1.0 : 0.6
                                 }
                             }
 
@@ -2126,56 +2129,36 @@ Window {
 
                             // Include subfolders toggle
                             Rectangle {
-                                width: 28
-                                height: 28
-                                radius: Metrics.radiusMd
+                                width: 40
+                                height: 22
+                                radius: 11
                                 color: noteController && noteController.includeSubfolders ? Colors.primary500 : Colors.bgSecondary
                                 border.width: 1
                                 border.color: noteController && noteController.includeSubfolders ? Colors.primary500 : Colors.borderLight
 
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: "📂"
-                                    font.pixelSize: 14
+                                Rectangle {
+                                    width: 18
+                                    height: 18
+                                    radius: 9
+                                    color: Colors.white
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: noteController && noteController.includeSubfolders ? 20 : 2
+                                    anchors.verticalCenter: parent.verticalCenter
+
+                                    Behavior on anchors.leftMargin {
+                                        NumberAnimation { duration: 150; easing.type: Easing.InOutQuad }
+                                    }
                                 }
 
                                 MouseArea {
                                     anchors.fill: parent
                                     hoverEnabled: true
+                                    ToolTip.text: noteController && noteController.includeSubfolders ? "하위 폴더 노트 포함 (켜짐)" : "하위 폴더 노트 포함 (꺼짐)"
+                                    ToolTip.visible: containsMouse
+                                    ToolTip.delay: 500
                                     onClicked: {
                                         if (noteController) {
                                             noteController.setIncludeSubfolders(!noteController.includeSubfolders)
-                                        }
-                                    }
-                                }
-                            }
-
-                            Rectangle {
-                                width: 60
-                                height: 28
-                                radius: Metrics.radiusMd
-                                color: noteSelectionMode ? Colors.primary500 : (selectModeArea.containsMouse ? Colors.primary100 : Colors.bgSecondary)
-                                border.width: 1
-                                border.color: noteSelectionMode ? Colors.primary500 : Colors.borderLight
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: noteSelectionMode ? "선택 중" : "선택"
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: 11
-                                    font.weight: Typography.weightSemibold
-                                    color: noteSelectionMode ? Colors.textInverse : Colors.textSecondary
-                                }
-
-                                MouseArea {
-                                    id: selectModeArea
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    onClicked: {
-                                        if (noteSelectionMode) {
-                                            window.exitNoteSelectionMode()
-                                        } else {
-                                            window.enterNoteSelectionMode()
                                         }
                                     }
                                 }
@@ -2211,6 +2194,35 @@ Window {
                                     font.weight: Typography.weightSemibold
                                     font.pixelSize: 18
                                     color: addNoteArea.containsMouse ? Colors.primary600 : Colors.textSecondary
+                                }
+                            }
+
+                            Rectangle {
+                                width: 28
+                                height: 28
+                                radius: Metrics.radiusMd
+                                color: noteSelectionMode ? Colors.primary200 : (selectModeArea.containsMouse ? Colors.primary100 : Colors.bgSecondary)
+                                border.width: 1
+                                border.color: noteSelectionMode ? Colors.primary300 : Colors.borderLight
+
+                                Image {
+                                    anchors.centerIn: parent
+                                    source: "assets/icons/note_select.svg"
+                                    sourceSize: Qt.size(16, 16)
+                                    opacity: noteSelectionMode ? 1.0 : 0.6
+                                }
+
+                                MouseArea {
+                                    id: selectModeArea
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    onClicked: {
+                                        if (noteSelectionMode) {
+                                            window.exitNoteSelectionMode()
+                                        } else {
+                                            window.enterNoteSelectionMode()
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -2267,15 +2279,15 @@ Window {
                                     width: 28
                                     height: 28
                                     radius: Metrics.radiusMd
-                                    color: selectedNoteCount() > 0 && window.hasBatchFolderTargets() ? Colors.primary500 : Colors.bgTertiary
+                                    color: selectedNoteCount() > 0 && window.hasBatchFolderTargets() ? Colors.primary200 : Colors.bgTertiary
                                     opacity: selectedNoteCount() > 0 && window.hasBatchFolderTargets() ? 1.0 : 0.85
                                     border.width: selectedNoteCount() > 0 && window.hasBatchFolderTargets() ? 0 : 1
                                     border.color: Colors.borderLight
-                                    Text {
+                                    Image {
                                         anchors.centerIn: parent
-                                        text: "📤"
-                                        font.pixelSize: 13
-                                        color: selectedNoteCount() > 0 && window.hasBatchFolderTargets() ? Colors.textInverse : Colors.textTertiary
+                                        source: "assets/icons/note_move.svg"
+                                        sourceSize: Qt.size(16, 16)
+                                        opacity: selectedNoteCount() > 0 && window.hasBatchFolderTargets() ? 1.0 : 0.6
                                     }
                                     MouseArea {
                                         anchors.fill: parent
@@ -2289,15 +2301,15 @@ Window {
                                     width: 28
                                     height: 28
                                     radius: Metrics.radiusMd
-                                    color: selectedNoteCount() > 0 && window.hasBatchFolderTargets() ? Colors.primary400 : Colors.bgTertiary
+                                    color: selectedNoteCount() > 0 && window.hasBatchFolderTargets() ? Colors.primary200 : Colors.bgTertiary
                                     opacity: selectedNoteCount() > 0 && window.hasBatchFolderTargets() ? 1.0 : 0.85
                                     border.width: selectedNoteCount() > 0 && window.hasBatchFolderTargets() ? 0 : 1
                                     border.color: Colors.borderLight
-                                    Text {
+                                    Image {
                                         anchors.centerIn: parent
-                                        text: "📋"
-                                        font.pixelSize: 13
-                                        color: selectedNoteCount() > 0 && window.hasBatchFolderTargets() ? Colors.textInverse : Colors.textTertiary
+                                        source: "assets/icons/note_copy.svg"
+                                        sourceSize: Qt.size(16, 16)
+                                        opacity: selectedNoteCount() > 0 && window.hasBatchFolderTargets() ? 1.0 : 0.6
                                     }
                                     MouseArea {
                                         anchors.fill: parent
@@ -2311,15 +2323,15 @@ Window {
                                     width: 28
                                     height: 28
                                     radius: Metrics.radiusMd
-                                    color: selectedNoteCount() > 0 ? "#DC2626" : Colors.bgTertiary
+                                    color: selectedNoteCount() > 0 ? "#FEE2E2" : Colors.bgTertiary
                                     opacity: selectedNoteCount() > 0 ? 1.0 : 0.85
                                     border.width: selectedNoteCount() > 0 ? 0 : 1
                                     border.color: Colors.borderLight
-                                    Text {
+                                    Image {
                                         anchors.centerIn: parent
-                                        text: "🗑"
-                                        font.pixelSize: 13
-                                        color: selectedNoteCount() > 0 ? Colors.textInverse : Colors.textTertiary
+                                        source: "assets/icons/note_delete.svg"
+                                        sourceSize: Qt.size(16, 16)
+                                        opacity: selectedNoteCount() > 0 ? 1.0 : 0.6
                                     }
                                     MouseArea {
                                         anchors.fill: parent
@@ -2336,11 +2348,11 @@ Window {
                                     color: Colors.bgSecondary
                                     border.width: 1
                                     border.color: Colors.borderLight
-                                    Text {
+                                    Image {
                                         anchors.centerIn: parent
-                                        text: "✕"
-                                        font.pixelSize: 14
-                                        color: Colors.textSecondary
+                                        source: "assets/icons/action_cancel.svg"
+                                        sourceSize: Qt.size(16, 16)
+                                        opacity: 0.6
                                     }
                                     MouseArea {
                                         anchors.fill: parent
@@ -3559,20 +3571,23 @@ Window {
                                         Rectangle {
                                             Layout.fillWidth: true
                                             Layout.fillHeight: true
-                                            color: noteEditor.editorMode === "wysiwyg" ? Colors.primary500 : "transparent"
+                                            color: noteEditor.editorMode === "wysiwyg" ? Colors.primary200 : "transparent"
                                             radius: Metrics.radiusSm
                                             clip: true
 
-                                            Text {
+                                            Image {
                                                 anchors.centerIn: parent
-                                                text: "WYSIWYG"
-                                                font.family: Typography.fontPrimary
-                                                font.pixelSize: 10
-                                                color: noteEditor.editorMode === "wysiwyg" ? Colors.textInverse : Colors.textTertiary
+                                                source: "assets/icons/editor_mode_visual.svg"
+                                                sourceSize: Qt.size(16, 16)
+                                                opacity: noteEditor.editorMode === "wysiwyg" ? 1.0 : 0.5
                                             }
 
                                             MouseArea {
                                                 anchors.fill: parent
+                                                hoverEnabled: true
+                                                ToolTip.text: "시각 편집 모드 (워드처럼 편집)"
+                                                ToolTip.visible: containsMouse
+                                                ToolTip.delay: 500
                                                 onClicked: {
                                                     if (noteEditor.editorMode !== "wysiwyg") {
                                                         noteEditor.setEditorMode("wysiwyg")
@@ -3584,20 +3599,23 @@ Window {
                                         Rectangle {
                                             Layout.fillWidth: true
                                             Layout.fillHeight: true
-                                            color: noteEditor.editorMode === "markdown" ? Colors.primary500 : "transparent"
+                                            color: noteEditor.editorMode === "markdown" ? Colors.primary200 : "transparent"
                                             radius: Metrics.radiusSm
                                             clip: true
 
-                                            Text {
+                                            Image {
                                                 anchors.centerIn: parent
-                                                text: "MD"
-                                                font.family: Typography.fontPrimary
-                                                font.pixelSize: 10
-                                                color: noteEditor.editorMode === "markdown" ? Colors.textInverse : Colors.textTertiary
+                                                source: "assets/icons/editor_mode_markdown.svg"
+                                                sourceSize: Qt.size(16, 16)
+                                                opacity: noteEditor.editorMode === "markdown" ? 1.0 : 0.5
                                             }
 
                                             MouseArea {
                                                 anchors.fill: parent
+                                                hoverEnabled: true
+                                                ToolTip.text: "텍스트 편집 모드 (문자로 편집)"
+                                                ToolTip.visible: containsMouse
+                                                ToolTip.delay: 500
                                                 onClicked: {
                                                     if (noteEditor.editorMode !== "markdown") {
                                                         noteEditor.setEditorMode("markdown")

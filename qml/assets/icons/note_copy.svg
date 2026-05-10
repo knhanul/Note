@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+  <title>Copy Notes</title>
+  <desc>Simple Windows-style icon for copying selected notes</desc>
+  <rect x="8" y="4" width="10" height="13" rx="2" stroke="#20262E" stroke-width="1.8"/>
+  <rect x="4" y="8" width="10" height="12" rx="2" stroke="#20262E" stroke-width="1.8"/>
+</svg>
