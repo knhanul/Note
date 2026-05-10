@@ -66,3 +66,4 @@
 - **Separate branches**: Use separate branches for high-risk changes (DB, autosave)
 - **Document contracts**: Document interfaces before implementing
 - **Preserve compatibility**: Keep wrappers until migration is complete
+- **Package boundaries**: Respect dependency rules defined in docs/dependency_rules.md when moving logic between packages

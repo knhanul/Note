@@ -36,6 +36,25 @@ pip install -r requirements.txt
 python main.py
 ```
 
+## App Entrypoints
+
+```bash
+python main.py
+python apps\markdown_editor\main.py
+python apps\work_ai_editor\main.py
+python apps\special_editor\main.py
+```
+
+## Regression Tests
+
+```bash
+python scripts\run_regression_checks.py
+```
+
+## Architecture
+
+For detailed architecture, app structure, package boundaries, dependency rules, and development roadmap, see [docs/architecture.md](docs/architecture.md).
+
 ## Project Structure
 
 ```
