@@ -294,7 +294,7 @@ class FolderController(QObject):
                     subtree_extra_depth,
                     self._get_folder_depth(descendant_id, folders_map) - moving_depth
                 )
-            if parent_depth + 1 + subtree_extra_depth > 2:
+            if parent_depth + 1 + subtree_extra_depth > 10:
                 return False
 
         result = self._folder_service.move(folder_id, actual_parent_id)
@@ -314,6 +314,58 @@ class FolderController(QObject):
             return False
 
         result = self._folder_service.reorder_within_parent(folder_id, direction)
+        if result:
+            self.foldersChanged.emit()
+            self.currentFolderChanged.emit()
+        return result
+
+    @pyqtSlot(str, str, int, result=bool)
+    def updateFolderPlacement(self, folder_id: str, new_parent_id: str, new_index: int) -> bool:
+        """Update folder's parent and position in a single operation."""
+        print(f"[updateFolderPlacement] folder_id={folder_id}, new_parent_id={new_parent_id}, new_index={new_index}")
+        if not folder_id or self._is_smart_folder_id(folder_id):
+            print(f"[updateFolderPlacement] invalid folder_id or smart folder")
+            return False
+
+        actual_parent_id = new_parent_id if new_parent_id else None
+        print(f"[updateFolderPlacement] actual_parent_id={actual_parent_id}")
+
+        if actual_parent_id == folder_id:
+            print(f"[updateFolderPlacement] cannot move to self")
+            return False
+        if actual_parent_id and self._is_smart_folder_id(actual_parent_id):
+            print(f"[updateFolderPlacement] target is smart folder")
+            return False
+        if not self._folder_service.exists(folder_id):
+            print(f"[updateFolderPlacement] source folder does not exist")
+            return False
+        if actual_parent_id and not self._folder_service.exists(actual_parent_id):
+            print(f"[updateFolderPlacement] target folder does not exist")
+            return False
+
+        folders = self._folder_service.get_all()
+        folders_map = {f['id']: f for f in folders}
+        descendant_ids = set(self._folder_service.get_descendant_ids(folder_id))
+        if actual_parent_id and actual_parent_id in descendant_ids:
+            print(f"[updateFolderPlacement] cannot move to descendant")
+            return False
+
+        if actual_parent_id:
+            parent_depth = self._get_folder_depth(actual_parent_id, folders_map)
+            moving_depth = self._get_folder_depth(folder_id, folders_map)
+            subtree_extra_depth = 0
+            for descendant_id in descendant_ids:
+                subtree_extra_depth = max(
+                    subtree_extra_depth,
+                    self._get_folder_depth(descendant_id, folders_map) - moving_depth
+                )
+            if parent_depth + 1 + subtree_extra_depth > 10:
+                print(f"[updateFolderPlacement] depth limit exceeded: {parent_depth + 1 + subtree_extra_depth} > 10")
+                return False
+
+        print(f"[updateFolderPlacement] calling service.update_placement")
+        result = self._folder_service.update_placement(folder_id, actual_parent_id, new_index)
+        print(f"[updateFolderPlacement] service result={result}")
         if result:
             self.foldersChanged.emit()
             self.currentFolderChanged.emit()

@@ -147,6 +147,42 @@ class FolderService:
             return True
         except Exception:
             return False
+
+    def update_placement(self, folder_id: str, parent_id: Optional[str], target_index: int) -> bool:
+        """Update folder's parent and position in a single transaction."""
+        try:
+            folder = self.get_by_id(folder_id)
+            if not folder:
+                return False
+
+            old_parent_id = folder.get("parent_id")
+
+            self.db.execute(
+                "UPDATE folders SET parent_id = ?, updated_at = ? WHERE id = ?",
+                (parent_id, Database.now_iso(), folder_id)
+            )
+
+            if old_parent_id != parent_id:
+                old_siblings = self.get_siblings(old_parent_id)
+                for idx, sibling in enumerate(old_siblings, start=1):
+                    if sibling["id"] != folder_id:
+                        self.db.execute(
+                            "UPDATE folders SET sort_order = ?, updated_at = ? WHERE id = ?",
+                            (idx, Database.now_iso(), sibling["id"])
+                        )
+
+            new_siblings = self.get_siblings(parent_id)
+            for idx, sibling in enumerate(new_siblings, start=1):
+                self.db.execute(
+                    "UPDATE folders SET sort_order = ?, updated_at = ? WHERE id = ?",
+                    (idx, Database.now_iso(), sibling["id"])
+                )
+
+            self.db.commit()
+            return True
+        except Exception:
+            self.db.rollback()
+            return False
     
     def delete(self, folder_id: str) -> bool:
         """Delete a folder and all descendants (notes cascade via FK)."""
