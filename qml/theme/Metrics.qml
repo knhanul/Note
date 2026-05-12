@@ -14,7 +14,7 @@ QtObject {
     property int xxl:  32
     property int xxxl: 48
 
-    // Corner radius (enforced minimum 16px)
+    // Corner radius (enforced minimum values)
     property int radiusSm:   8
     property int radiusMd:   12
     property int radiusLg:   16

@@ -7,12 +7,11 @@ Rectangle {
     id: root
 
     signal logoClicked()
-    signal syncClicked()
     signal importClicked()
     signal currentNoteExportClicked()
     signal exportClicked()
+    signal settingsClicked()
 
-    property string syncIconSource: ""
     property string currentNoteExportIconSource: ""
     property string importIconSource: ""
     property string exportIconSource: ""
@@ -211,45 +210,6 @@ Rectangle {
             ToolTip.text: "보내기"
         }
 
-        // Sync button (between export and status)
-        Rectangle {
-            id: syncBtn
-            width: 32
-            height: 32
-            radius: 8
-            color: syncMA.containsMouse ? "#F0F5FF" : "transparent"
-            border.width: 0
-
-            Image {
-                anchors.centerIn: parent
-                width: 19
-                height: 19
-                source: root.syncIconSource
-                fillMode: Image.PreserveAspectFit
-                visible: !!root.syncIconSource
-            }
-
-            Text {
-                anchors.centerIn: parent
-                visible: !root.syncIconSource
-                text: "⟳"
-                font.pixelSize: 18
-                color: Colors.textSecondary
-            }
-
-            MouseArea {
-                id: syncMA
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.syncClicked()
-            }
-
-            ToolTip.visible: syncMA.containsMouse
-            ToolTip.delay: 400
-            ToolTip.text: "동기화"
-        }
-
         // Separator
         Rectangle {
             Layout.alignment: Qt.AlignVCenter
@@ -259,32 +219,31 @@ Rectangle {
             opacity: 0.9
         }
 
-        // Status indicator
+        // Settings button
         Rectangle {
-            width: 8
-            height: 8
-            radius: Metrics.radiusFull
-            color: Colors.success
+            width: 32
+            height: 32
+            radius: Metrics.radiusSm
+            color: settingsMA.containsMouse ? Colors.bgTertiary : "transparent"
 
-            SequentialAnimation on scale {
-                loops: Animation.Infinite
-                NumberAnimation { to: 1.3; duration: 1000 }
-                NumberAnimation { to: 1.0; duration: 1000 }
+            Text {
+                anchors.centerIn: parent
+                text: "⚙"
+                font.pixelSize: 18
+                color: Colors.textSecondary
             }
 
-            SequentialAnimation on opacity {
-                loops: Animation.Infinite
-                NumberAnimation { to: 0.5; duration: 1000 }
-                NumberAnimation { to: 1.0; duration: 1000 }
+            MouseArea {
+                id: settingsMA
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.settingsClicked()
             }
-        }
 
-        Text {
-            text: "Ready"
-            font.family: Typography.fontPrimary
-            font.weight: Typography.weightMedium
-            font.pixelSize: Typography.caption
-            color: Colors.textSecondary
+            ToolTip.visible: settingsMA.containsMouse
+            ToolTip.delay: 400
+            ToolTip.text: "설정"
         }
     }
 

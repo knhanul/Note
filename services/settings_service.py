@@ -4,11 +4,14 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from PyQt6.QtCore import QObject, pyqtSlot
 
-class SettingsService:
+
+class SettingsService(QObject):
     """Stores/retrieves app settings in a JSON file in the app directory."""
 
-    def __init__(self, settings_path: Optional[str] = None):
+    def __init__(self, settings_path: Optional[str] = None, parent=None):
+        super().__init__(parent)
         if settings_path is None:
             prog_dir = Path(__file__).parent.parent
             settings_path = prog_dir / "nuni_note_settings.json"
@@ -44,3 +47,27 @@ class SettingsService:
 
     def set_last_folder_id(self, folder_id: str):
         self.set("last_folder_id", folder_id)
+
+    def get_ui_scale(self) -> float:
+        return self._data.get("ui_scale", 1.0)
+
+    @pyqtSlot(float)
+    def set_ui_scale(self, scale: float):
+        self.set("ui_scale", scale)
+
+    def get_expanded_folders(self) -> list:
+        """Get list of expanded folder IDs."""
+        return self._data.get("expanded_folders", [])
+
+    def set_expanded_folders(self, folder_ids: list):
+        """Set list of expanded folder IDs."""
+        self.set("expanded_folders", folder_ids)
+
+    def get_include_subfolders(self) -> bool:
+        """Get include subfolders setting for note list view."""
+        return self._data.get("include_subfolders", False)
+
+    @pyqtSlot(bool)
+    def set_include_subfolders(self, include: bool):
+        """Set include subfolders setting for note list view."""
+        self.set("include_subfolders", include)

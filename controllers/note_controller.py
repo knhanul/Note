@@ -70,10 +70,11 @@ class NoteController(QObject):
     _DATA_URL_PATTERN = re.compile(r"data:(image/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=\r\n]+)")
     _TOKEN_PATTERN = re.compile(r"note-image://([a-zA-Z0-9_-]+)")
     
-    def __init__(self, library_service: LibraryService, folder_controller, parent=None):
+    def __init__(self, library_service: LibraryService, folder_controller, settings_service, parent=None):
         super().__init__(parent)
         self._folder_controller = folder_controller
         self._library_service = library_service
+        self._settings = settings_service
         
         # Services will be initialized when library is set
         self._note_service: Optional[NoteService] = None
@@ -99,7 +100,7 @@ class NoteController(QObject):
         self._loaded_notes: List[Dict[str, Any]] = []  # Currently loaded notes for pagination
 
         # Folder view option
-        self._include_subfolders: bool = True  # Include subfolder notes by default
+        self._include_subfolders: bool = self._settings.get_include_subfolders() if self._settings else True
 
         # Pending data for deferred save (for batching until explicit save)
         self._pending_title = None
@@ -157,24 +158,19 @@ class NoteController(QObject):
         current_folder_id = self._folder_controller.currentFolderId
         tag_filter = self._selected_tag or None
 
-        if current_folder_id == self.SMART_ALL:
+        if tag_filter:
+            # When tag filter is active, search across all folders
             notes = self._note_service.get_all(tag=tag_filter, offset=0, limit=self._pagination_limit)
+        elif current_folder_id == self.SMART_ALL:
+            notes = self._note_service.get_all(offset=0, limit=self._pagination_limit)
         elif current_folder_id == self.SMART_FAVORITES:
             notes = self._note_service.get_pinned(ensure_note_id=self._current_note_id, offset=0, limit=self._pagination_limit)
-            if tag_filter:
-                notes = [n for n in notes if any(
-                    t == tag_filter or t.startswith(tag_filter + '/') for t in n.get('tags', [])
-                )]
         else:
             if self._include_subfolders:
                 folder_ids = [current_folder_id] + self._folder_controller.getDescendantIds(current_folder_id)
                 notes = self._note_service.get_all_by_folder_ids(folder_ids)
             else:
                 notes = self._note_service.get_all(folder_id=current_folder_id)
-            if tag_filter:
-                notes = [n for n in notes if any(
-                    t == tag_filter or t.startswith(tag_filter + '/') for t in n.get('tags', [])
-                )]
             # Apply pagination client-side for folder queries
             notes = notes[0:self._pagination_limit]
 
@@ -392,6 +388,8 @@ class NoteController(QObject):
         """Set whether to include subfolder notes in the view."""
         if self._include_subfolders != include:
             self._include_subfolders = include
+            if self._settings:
+                self._settings.set_include_subfolders(include)
             self._pagination_offset = 0
             self._loaded_notes = []
             self._load_first_page()
@@ -437,24 +435,19 @@ class NoteController(QObject):
         current_folder_id = self._folder_controller.currentFolderId
         tag_filter = self._selected_tag or None
 
-        if current_folder_id == self.SMART_ALL:
+        if tag_filter:
+            # When tag filter is active, search across all folders
             new_notes = self._note_service.get_all(tag=tag_filter, offset=self._pagination_offset, limit=self._pagination_limit)
+        elif current_folder_id == self.SMART_ALL:
+            new_notes = self._note_service.get_all(offset=self._pagination_offset, limit=self._pagination_limit)
         elif current_folder_id == self.SMART_FAVORITES:
             new_notes = self._note_service.get_pinned(ensure_note_id=self._current_note_id, offset=self._pagination_offset, limit=self._pagination_limit)
-            if tag_filter:
-                new_notes = [n for n in new_notes if any(
-                    t == tag_filter or t.startswith(tag_filter + '/') for t in n.get('tags', [])
-                )]
         else:
             if self._include_subfolders:
                 folder_ids = [current_folder_id] + self._folder_controller.getDescendantIds(current_folder_id)
                 all_notes = self._note_service.get_all_by_folder_ids(folder_ids)
             else:
                 all_notes = self._note_service.get_all(folder_id=current_folder_id)
-            if tag_filter:
-                all_notes = [n for n in all_notes if any(
-                    t == tag_filter or t.startswith(tag_filter + '/') for t in n.get('tags', [])
-                )]
             # Apply pagination client-side for folder queries
             new_notes = all_notes[self._pagination_offset:self._pagination_offset + self._pagination_limit]
 

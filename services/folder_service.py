@@ -122,18 +122,26 @@ class FolderService:
     def reorder_within_parent(self, folder_id: str, direction: int) -> bool:
         """Move a folder up/down within the same parent."""
         try:
+            print(f"[reorder_within_parent] folder_id={folder_id}, direction={direction}")
             folder = self.get_by_id(folder_id)
             if not folder:
+                print(f"[reorder_within_parent] folder not found")
                 return False
 
-            siblings = self.get_siblings(folder.get("parent_id"))
+            parent_id = folder.get("parent_id")
+            print(f"[reorder_within_parent] parent_id={parent_id}")
+            siblings = self.get_siblings(parent_id)
+            print(f"[reorder_within_parent] siblings count={len(siblings)}")
             ids = [item["id"] for item in siblings]
             if folder_id not in ids:
+                print(f"[reorder_within_parent] folder_id not in siblings")
                 return False
 
             current_index = ids.index(folder_id)
             target_index = current_index - 1 if direction < 0 else current_index + 1
+            print(f"[reorder_within_parent] current_index={current_index}, target_index={target_index}")
             if target_index < 0 or target_index >= len(siblings):
+                print(f"[reorder_within_parent] target_index out of bounds")
                 return False
 
             siblings[current_index], siblings[target_index] = siblings[target_index], siblings[current_index]
@@ -144,34 +152,60 @@ class FolderService:
                     (index, now, item["id"])
                 )
             self.db.commit()
+            print(f"[reorder_within_parent] success")
             return True
-        except Exception:
+        except Exception as e:
+            print(f"[reorder_within_parent] exception: {e}")
             return False
 
     def update_placement(self, folder_id: str, parent_id: Optional[str], target_index: int) -> bool:
         """Update folder's parent and position in a single transaction."""
         try:
+            print(f"[update_placement] folder_id={folder_id}, parent_id={parent_id}, target_index={target_index}")
             folder = self.get_by_id(folder_id)
             if not folder:
+                print(f"[update_placement] folder not found")
                 return False
 
             old_parent_id = folder.get("parent_id")
+            print(f"[update_placement] old_parent_id={old_parent_id}")
 
+            # First, remove the folder from its current position
+            old_siblings = self.get_siblings(old_parent_id)
+            print(f"[update_placement] old_siblings count={len(old_siblings)}")
+            for idx, sibling in enumerate(old_siblings, start=1):
+                if sibling["id"] != folder_id:
+                    self.db.execute(
+                        "UPDATE folders SET sort_order = ?, updated_at = ? WHERE id = ?",
+                        (idx, Database.now_iso(), sibling["id"])
+                    )
+
+            # Then, update the folder's parent
             self.db.execute(
                 "UPDATE folders SET parent_id = ?, updated_at = ? WHERE id = ?",
                 (parent_id, Database.now_iso(), folder_id)
             )
 
-            if old_parent_id != parent_id:
-                old_siblings = self.get_siblings(old_parent_id)
-                for idx, sibling in enumerate(old_siblings, start=1):
-                    if sibling["id"] != folder_id:
-                        self.db.execute(
-                            "UPDATE folders SET sort_order = ?, updated_at = ? WHERE id = ?",
-                            (idx, Database.now_iso(), sibling["id"])
-                        )
-
+            # Finally, re-sort the new siblings including the moved folder
             new_siblings = self.get_siblings(parent_id)
+            print(f"[update_placement] new_siblings count={len(new_siblings)}")
+
+            # If target_index is specified, move the folder to that position
+            if target_index >= 0 and target_index < len(new_siblings):
+                # Remove the folder from its current position in the list
+                moved_folder = None
+                filtered_siblings = []
+                for sibling in new_siblings:
+                    if sibling["id"] == folder_id:
+                        moved_folder = sibling
+                    else:
+                        filtered_siblings.append(sibling)
+
+                # Insert at target_index
+                if moved_folder:
+                    filtered_siblings.insert(target_index, moved_folder)
+                    new_siblings = filtered_siblings
+
             for idx, sibling in enumerate(new_siblings, start=1):
                 self.db.execute(
                     "UPDATE folders SET sort_order = ?, updated_at = ? WHERE id = ?",
@@ -179,8 +213,10 @@ class FolderService:
                 )
 
             self.db.commit()
+            print(f"[update_placement] success")
             return True
-        except Exception:
+        except Exception as e:
+            print(f"[update_placement] exception: {e}")
             self.db.rollback()
             return False
     

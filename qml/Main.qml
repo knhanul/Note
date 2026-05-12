@@ -337,42 +337,7 @@ Window {
         }
     }
 
-    function openFolderMoveDialog(folderId, folderName) {
-        if (!folderController || !folderId || folderController.isSmartFolder(folderId)) return
-
-        refreshSelectableFolderItems()
-        folderMoveSourceId = String(folderId)
-        folderMoveSourceName = folderName || ""
-        folderMoveTargetId = ""
-        folderMoveTargetName = "최상위"
-
-        var items = [{ id: "", name: "최상위", depth: 0, color: Colors.primary400 }]
-        for (var i = 0; i < selectableFolderItems.length; i++) {
-            var item = selectableFolderItems[i]
-            if (item && String(item.id || "") !== folderMoveSourceId) {
-                items.push(item)
-            }
-        }
-        folderMoveTargetItems = items
-        folderMoveDialog.visible = true
-    }
-
-    function applyFolderMove() {
-        if (!folderController || !folderMoveSourceId) return false
-        var ok = folderController.moveFolder(folderMoveSourceId, folderMoveTargetId)
-        if (ok) {
-            folderMoveDialog.visible = false
-            templateManagerDialog.visible = false
-            folderMoveSourceId = ""
-            folderMoveSourceName = ""
-            folderMoveTargetId = ""
-            folderMoveTargetName = ""
-            folderMoveTargetItems = []
-        }
-        return ok
-    }
-
-    function reorderFolderInSameParent(direction) {
+    function reorderFolderInSidebar(direction) {
         if (!folderController || !folderMoveSourceId) return false
         return folderController.reorderFolder(folderMoveSourceId, direction)
     }
@@ -773,14 +738,10 @@ Window {
             success = folderController.moveFolder(folderMoveSourceId, newParentId)
             console.log("[applyFolderPlacementChanges] moveFolder result:", success)
         } else if (orderChanged) {
-            console.log("[applyFolderPlacementChanges] order changed only, calling reorderFolder")
-            var direction = (newSortOrder > originalSortOrder) ? 1 : -1
-            var steps = Math.abs(newSortOrder - originalSortOrder)
-            console.log("[applyFolderPlacementChanges] direction:", direction, "steps:", steps)
-            for (var i = 0; i < steps; i++) {
-                success = folderController.reorderFolder(folderMoveSourceId, direction)
-                console.log("[applyFolderPlacementChanges] reorderFolder step", i, "result:", success)
-            }
+            console.log("[applyFolderPlacementChanges] order changed only, calling updatePlacement")
+            // Use updatePlacement to move to specific index in one operation
+            success = folderController.updateFolderPlacement(folderMoveSourceId, newParentId, newSortOrder - 1)
+            console.log("[applyFolderPlacementChanges] updateFolderPlacement result:", success)
         }
 
         if (success) {
@@ -1559,7 +1520,6 @@ Window {
         AppHeader {
             id: appHeader
             Layout.fillWidth: true
-            syncIconSource: "../assets/icons/sync.svg"
             currentNoteExportIconSource: "../assets/icons/export.svg"
             importIconSource: "../assets/icons/import.svg"
             exportIconSource: "../assets/icons/export.svg"
@@ -1579,9 +1539,6 @@ Window {
                     noteList.Layout.preferredWidth = Metrics.noteListWidth
                 }
             }
-            onSyncClicked: {
-                console.log("동기화 실행 중...")
-            }
             onImportClicked: {
                 importOptionsDialog.visible = true
             }
@@ -1599,6 +1556,9 @@ Window {
             }
             onExportClicked: {
                 window.openFolderExportDialog()
+            }
+            onSettingsClicked: {
+                uiScaleDialog.visible = true
             }
         }
 
@@ -1974,7 +1934,16 @@ Window {
                                     id: tagTabMA
                                     anchors.fill: parent
                                     hoverEnabled: true
-                                    onClicked: sidebar.sidebarTabIdx = 1
+                                    onClicked: {
+                                        sidebar.sidebarTabIdx = 1
+                                        // Auto-select first tag when switching to tag tab
+                                        if (noteController && noteController.allTags && noteController.allTags.length > 0) {
+                                            var firstTag = noteController.allTags[0]
+                                            if (firstTag && firstTag.name) {
+                                                noteController.selectTag(firstTag.name)
+                                            }
+                                        }
+                                    }
                                 }
                             }
 
@@ -2325,7 +2294,7 @@ Window {
                                     var listModel = foldersListView.model
                                     return (idx === listModel.length - 1) || !(listModel[idx + 1] && listModel[idx + 1].is_smart)
                                 }
-                                isExpanded: folderController && modelData ? !folderController.isFolderCollapsed(modelData.id) : true
+                                isExpanded: folderController && modelData ? !folderController.isFolderCollapsed(modelData.id) : false
                                 isSelected: folderController && modelData && folderController.currentFolderId === modelData.id
 
                                 Component.onCompleted: {
@@ -2346,12 +2315,6 @@ Window {
 
                                 onDeleteRequested: {
                                     if (folderController && modelData && !(modelData.is_smart || false)) folderController.deleteFolder(modelData.id)
-                                }
-
-                                onMoveRequested: {
-                                    if (folderController && modelData && !(modelData.is_smart || false)) {
-                                        window.openFolderMoveDialog(modelData.id, modelData.name)
-                                    }
                                 }
                             }
                         }
@@ -2569,7 +2532,11 @@ Window {
                             Layout.fillWidth: true
 
                             Text {
-                                text: noteController ? noteController.currentFolderName : "노트"
+                                text: {
+                                    if (!noteController) return "노트"
+                                    if (noteController.selectedTag !== "") return "#" + noteController.selectedTag
+                                    return noteController.currentFolderName || "노트"
+                                }
                                 font.family: Typography.fontPrimary
                                 font.weight: Typography.weightSemibold
                                 font.pixelSize: Typography.h5
@@ -2592,6 +2559,7 @@ Window {
                                 color: noteController && noteController.includeSubfolders ? Colors.primary500 : Colors.bgSecondary
                                 border.width: 1
                                 border.color: noteController && noteController.includeSubfolders ? Colors.primary500 : Colors.borderLight
+                                visible: noteController && noteController.selectedTag === ""
 
                                 Rectangle {
                                     width: 18
@@ -2630,6 +2598,7 @@ Window {
                                 color: addNoteArea.containsMouse ? Colors.primary100 : Colors.bgSecondary
                                 border.width: 1
                                 border.color: addNoteArea.containsMouse ? Colors.primary200 : Colors.borderLight
+                                visible: noteController && noteController.selectedTag === ""
 
                                 Behavior on color {
                                     ColorAnimation { duration: Metrics.durationFast }
@@ -2661,6 +2630,7 @@ Window {
                                 color: noteSelectionMode ? Colors.primary200 : (selectModeArea.containsMouse ? Colors.primary100 : Colors.bgSecondary)
                                 border.width: 1
                                 border.color: noteSelectionMode ? Colors.primary300 : Colors.borderLight
+                                visible: noteController && noteController.selectedTag === ""
 
                                 Image {
                                     anchors.centerIn: parent
@@ -5707,162 +5677,38 @@ Window {
         }
     }
 
-    // ── Folder Move Dialog ─────────────────────────────────────────────────────
+    // ── UI Scale Dialog ───────────────────────────────────────────────────────
     Rectangle {
-        visible: folderMoveDialog.visible
+        visible: uiScaleDialog.visible
         anchors.fill: parent
         color: Qt.rgba(0, 0, 0, 0.35)
-        z: 8898
+        z: 9001
 
-        MouseArea { anchors.fill: parent }
+        MouseArea {
+            anchors.fill: parent
+            onClicked: uiScaleDialog.visible = false
+        }
     }
 
-    Rectangle {
-        id: folderMoveDialog
+    UiScaleDialog {
+        id: uiScaleDialog
         visible: false
-        anchors.centerIn: parent
-        width: 420
-        height: 460
-        radius: Metrics.radiusXxl
-        color: Colors.bgPrimary
-        border.color: Colors.borderLight
-        border.width: 1
-        z: 8899
+        z: 9002
 
-        ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: Metrics.md
-            spacing: Metrics.sm
+        Component.onCompleted: {
+            initialScale = typeof uiScale !== "undefined" ? uiScale : 1.0
+            currentScale = initialScale
+        }
 
-            Text {
-                Layout.fillWidth: true
-                text: "폴더 위치 변경"
-                font.family: Typography.fontPrimary
-                font.pixelSize: Typography.h4
-                font.weight: Typography.weightSemibold
-                color: Colors.textPrimary
+        onApplyRequested: function(scale) {
+            if (typeof settingsService !== "undefined") {
+                settingsService.set_ui_scale(scale)
             }
+            visible = false
+        }
 
-            Text {
-                Layout.fillWidth: true
-                text: folderMoveSourceName ? ("'" + folderMoveSourceName + "' 폴더를 이동할 위치를 선택하세요.") : "이동할 위치를 선택하세요."
-                font.family: Typography.fontPrimary
-                font.pixelSize: Typography.bodySmall
-                color: Colors.textSecondary
-                wrapMode: Text.Wrap
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: Metrics.sm
-
-                Text {
-                    Layout.fillWidth: true
-                    text: "같은 폴더 안 순서"
-                    font.family: Typography.fontPrimary
-                    font.pixelSize: Typography.bodySmall
-                    color: Colors.textSecondary
-                }
-
-                Button {
-                    text: "위로"
-                    onClicked: window.reorderFolderInSameParent(-1)
-                }
-
-                Button {
-                    text: "아래로"
-                    onClicked: window.reorderFolderInSameParent(1)
-                }
-            }
-
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                radius: Metrics.radiusLg
-                color: Colors.bgSecondary
-                border.color: Colors.borderLight
-                border.width: 1
-
-                ListView {
-                    id: folderMoveListView
-                    anchors.fill: parent
-                    anchors.margins: Metrics.sm
-                    clip: true
-                    model: folderMoveTargetItems
-                    spacing: 4
-
-                    delegate: Rectangle {
-                        property var folderData: modelData
-                        property string targetId: folderData && folderData.id !== undefined ? String(folderData.id) : ""
-                        property bool isSelected: folderMoveTargetId === targetId
-
-                        width: folderMoveListView.width
-                        height: 38
-                        radius: Metrics.radiusMd
-                        color: isSelected ? Colors.primary50 : (folderMoveHover.containsMouse ? Colors.bgPrimary : "transparent")
-                        border.width: 1
-                        border.color: isSelected ? Colors.primary200 : Colors.borderLight
-
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: Metrics.md + ((folderData && folderData.depth ? folderData.depth : 0) * 14)
-                            anchors.rightMargin: Metrics.md
-                            spacing: Metrics.sm
-
-                            Rectangle {
-                                width: 14
-                                height: 14
-                                radius: 3
-                                color: folderData && folderData.color ? folderData.color : Colors.primary400
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: folderData && folderData.name ? folderData.name : "폴더"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                font.weight: isSelected ? Typography.weightSemibold : Typography.weightRegular
-                                color: isSelected ? Colors.primary700 : Colors.textPrimary
-                                elide: Text.ElideRight
-                            }
-                        }
-
-                        MouseArea {
-                            id: folderMoveHover
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            onClicked: {
-                                folderMoveTargetId = targetId
-                                folderMoveTargetName = folderData && folderData.name ? folderData.name : "최상위"
-                            }
-                        }
-                    }
-                }
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-
-                Text {
-                    Layout.fillWidth: true
-                    text: "선택 위치: " + (folderMoveTargetName || "최상위")
-                    font.family: Typography.fontPrimary
-                    font.pixelSize: Typography.caption
-                    color: Colors.textTertiary
-                    elide: Text.ElideRight
-                }
-
-                Button {
-                    text: "취소"
-                    onClicked: folderMoveDialog.visible = false
-                }
-
-                Button {
-                    text: "이동"
-                    highlighted: true
-                    onClicked: window.applyFolderMove()
-                }
-            }
+        onCancelled: {
+            visible = false
         }
     }
 

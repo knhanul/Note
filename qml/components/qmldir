@@ -10,3 +10,4 @@ FolderItem 1.0 FolderItem.qml
 NoteEditor 1.0 NoteEditor.qml
 SaveStatusChip 1.0 SaveStatusChip.qml
 WebNoteEditor 1.0 WebNoteEditor.qml
+UiScaleDialog 1.0 UiScaleDialog.qml

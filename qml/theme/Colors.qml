@@ -36,6 +36,7 @@ QtObject {
     property color textSecondary: "#475569"
     property color textTertiary:  "#94A3B8"
     property color textInverse:   "#FFFFFF"
+    property color white:         "#FFFFFF"
 
     // Border
     property color borderLight:   Qt.rgba(226/255, 232/255, 240/255, 0.8)

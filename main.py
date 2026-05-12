@@ -20,22 +20,26 @@ from PyQt6.QtGui import QFontDatabase, QFont, QIcon
 
 from app_bootstrap import bootstrap_app
 from app_config import create_app_config
+from services.settings_service import SettingsService
 
 
-def setup_fonts(app: QApplication):
+def setup_fonts(app: QApplication, ui_scale: float = 1.0):
     """Load and configure application fonts."""
     # Get available font families
     families = QFontDatabase.families()
     
+    # Scale base font size by ui_scale
+    base_size = int(round(10 * ui_scale))
+    
     # System font fallback
-    font = QFont("Inter", 10)
+    font = QFont("Inter", base_size)
     if "Inter" not in families:
         # Fallback to system sans-serif fonts
-        font = QFont("Segoe UI", 10)
+        font = QFont("Segoe UI", base_size)
         if "Segoe UI" not in families:
-            font = QFont("Helvetica Neue", 10)
+            font = QFont("Helvetica Neue", base_size)
             if "Helvetica Neue" not in families:
-                font = QFont("Arial", 10)
+                font = QFont("Arial", base_size)
     
     font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
     app.setFont(font)
@@ -43,9 +47,14 @@ def setup_fonts(app: QApplication):
 
 def main():
     """Application entry point."""
+    # Load UI scale from settings
+    settings_service = SettingsService()
+    ui_scale = settings_service.get_ui_scale()
+    
     # Enable High DPI scaling
     os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
     os.environ["QT_SCALE_FACTOR_ROUNDING_POLICY"] = "RoundPreferFloor"
+    os.environ["QT_SCALE_FACTOR"] = str(ui_scale)
     # Use Basic style for customizable ScrollBar
     os.environ["QT_QUICK_CONTROLS_STYLE"] = "Basic"
 
@@ -60,7 +69,7 @@ def main():
     if config.icon_path.exists():
         app.setWindowIcon(QIcon(str(config.icon_path)))
     
-    setup_fonts(app)
+    setup_fonts(app, ui_scale)
     
     engine = QQmlApplicationEngine()
     bootstrap_app(engine, config)

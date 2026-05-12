@@ -23,6 +23,7 @@ QtObject {
     // Body sizes
     property int bodyLarge:   16
     property int bodyRegular: 14
+    property int body:        14
     property int bodySmall:   13
     property int caption:     12
 

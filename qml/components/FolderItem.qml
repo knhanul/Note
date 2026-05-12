@@ -14,7 +14,7 @@ Rectangle {
     property bool isEditing: false
     property int depth: 0  // Hierarchy depth (0 = root, 1 = child, etc.)
     property bool hasChildren: false  // Whether this folder has child folders
-    property bool isExpanded: true  // Whether children are visible (only valid if hasChildren)
+    property bool isExpanded: false  // Whether children are visible (only valid if hasChildren)
     property bool isSmart: false
     property bool isLastSmart: false  // True if this is the last smart folder before regular folders
 
@@ -31,7 +31,6 @@ Rectangle {
     signal clicked()
     signal renameRequested(string newName)
     signal deleteRequested()
-    signal moveRequested()
     signal toggleExpanded()  // Request to toggle expand/collapse state
 
     // Layout
@@ -271,20 +270,10 @@ Rectangle {
 
         onClicked: (mouse) => {
             if (mouse.button === Qt.RightButton) {
-                // Right click requests moving for regular folders only
-                if (!root.isSmart) {
-                    root.moveRequested()
-                }
+                // Right click does nothing for folders now
             } else {
                 // Left click selects
                 root.clicked()
-            }
-        }
-
-        onDoubleClicked: {
-            // Double click also starts edit mode for regular folders only
-            if (!root.isSmart) {
-                root.isEditing = true
             }
         }
 

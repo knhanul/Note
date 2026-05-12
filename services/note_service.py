@@ -40,11 +40,6 @@ class NoteService:
         
         query += " ORDER BY updated_at DESC"
         
-        if limit is not None:
-            query += " LIMIT ? OFFSET ?"
-            params.append(limit)
-            params.append(offset)
-        
         notes = [self._parse_tags(n) for n in self.db.fetch_all(query, tuple(params))]
 
         if tag:
@@ -52,6 +47,10 @@ class NoteService:
             notes = [n for n in notes if any(
                 t == tag or t.startswith(tag + '/') for t in n['tags']
             )]
+        
+        # Apply pagination after tag filtering
+        if limit is not None:
+            notes = notes[offset:offset + limit]
 
         return notes
 

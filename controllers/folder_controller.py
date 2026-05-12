@@ -34,7 +34,9 @@ class FolderController(QObject):
         self._library_service = library_service
         self._settings = settings_service
         self._collapsed_folder_ids: set = set()  # Track collapsed (hidden) folders
-        
+        self._db = None
+        self._folder_service = None
+
         # Connect to library changes
         self._library_service.currentLibraryChanged.connect(self._on_library_changed)
 
@@ -72,10 +74,53 @@ class FolderController(QObject):
     def _load_folders(self):
         """Load folders from database."""
         folders = self._folder_service.get_all()
-        
+
+        # Start with all folders collapsed
+        self._collapsed_folder_ids = set()
+        for folder in folders:
+            self._collapsed_folder_ids.add(folder['id'])
+
         # Select first folder by default if any exist
         if folders and not self._current_folder_id:
             self._current_folder_id = folders[0]['id']
+
+        # Auto-expand path to last folder
+        if self._current_folder_id and self._settings:
+            last_folder_id = self._settings.get_last_folder_id()
+            if last_folder_id and self._folder_service.exists(last_folder_id):
+                self._auto_expand_to_folder(last_folder_id)
+
+        # Emit signal to update UI with collapsed state
+        self.foldersChanged.emit()
+
+    def _auto_expand_to_folder(self, folder_id: str):
+        """Auto-expand all parent folders to show the given folder."""
+        if not folder_id or self._is_smart_folder_id(folder_id):
+            return
+
+        # Get the folder and all its ancestors
+        folder = self._folder_service.get_by_id(folder_id)
+        if not folder:
+            return
+
+        # Build path from folder to root (including the folder itself)
+        path = [folder_id]
+        current = folder
+        while current:
+            parent_id = current.get('parent_id')
+            if not parent_id:
+                break
+            parent = self._folder_service.get_by_id(parent_id)
+            if not parent:
+                break
+            path.append(parent_id)
+            current = parent
+
+        # Remove these folder IDs from collapsed set (expand them)
+        for folder_id_to_expand in path:
+            self._collapsed_folder_ids.discard(folder_id_to_expand)
+
+        self.foldersChanged.emit()
 
     def _is_smart_folder_id(self, folder_id: Optional[str]) -> bool:
         return bool(folder_id) and folder_id.startswith(self.SMART_FOLDER_PREFIX)
@@ -103,7 +148,7 @@ class FolderController(QObject):
     # Properties
     @pyqtProperty(list, notify=foldersChanged)
     def folders(self):
-        """Get all folders as list of dicts for QML with hierarchy info."""
+        """Get all folders as list of dicts for QML with hierarchy info, filtered by collapsed state."""
         folders = self._folder_service.get_all()
 
         # Build id -> folder map for depth calculation
@@ -119,7 +164,7 @@ class FolderController(QObject):
         # Build tree and traverse in pre-order (parent -> children -> grandchildren)
         def sort_key(f):
             return (f.get('sort_order', 0), f.get('created_at', ''))
-        
+
         # Group children by parent_id
         children_map = {}
         roots = []
@@ -131,7 +176,7 @@ class FolderController(QObject):
                 children_map[parent_id].append(f)
             else:
                 roots.append(f)
-        
+
         # Pre-order traversal: parent first, then children recursively
         # Skip children of collapsed folders
         sorted_folders = []
@@ -142,7 +187,7 @@ class FolderController(QObject):
                 if f['id'] not in self._collapsed_folder_ids:
                     children = children_map.get(f['id'], [])
                     traverse(children)
-        
+
         traverse(roots)
 
         smart_folders = []
@@ -481,6 +526,28 @@ class FolderController(QObject):
     def isFolderCollapsed(self, folder_id: str) -> bool:
         """Check if a folder is collapsed (children hidden)."""
         return folder_id in self._collapsed_folder_ids
+
+    @pyqtSlot(str, result=bool)
+    def isFolderVisible(self, folder_id: str) -> bool:
+        """Check if a folder should be visible (not hidden by collapsed ancestors)."""
+        if not folder_id:
+            return False
+
+        folder = self._folder_service.get_by_id(folder_id)
+        if not folder:
+            return False
+
+        # Check if any ancestor is collapsed (folder itself can be collapsed and still visible)
+        parent_id = folder.get('parent_id')
+        while parent_id:
+            if parent_id in self._collapsed_folder_ids:
+                return False
+            parent = self._folder_service.get_by_id(parent_id)
+            if not parent:
+                break
+            parent_id = parent.get('parent_id')
+
+        return True
     
     @pyqtSlot(str)
     def toggleFolderExpanded(self, folder_id: str):
@@ -489,6 +556,7 @@ class FolderController(QObject):
             self._collapsed_folder_ids.discard(folder_id)
         else:
             self._collapsed_folder_ids.add(folder_id)
+        # Emit foldersChanged to trigger model refresh with new filtering
         self.foldersChanged.emit()
     
     # Helper methods
