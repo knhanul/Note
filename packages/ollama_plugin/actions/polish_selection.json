@@ -1,0 +1,10 @@
+{
+  "id": "polish_selection",
+  "name": "문장 다듬기",
+  "version": "1.0.0",
+  "input": "current_note",
+  "output": "text",
+  "rag": false,
+  "model_hint": "gemma2:2b",
+  "prompt_template": "polish_selection"
+}

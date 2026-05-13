@@ -1,10 +1,14 @@
 """Ollama assistant plugin stub."""
 
-from packages.plugin_api import Command
+import logging
 
-from .actions import mock_answer_selection, mock_summarize_document, mock_work_assist
+from packages.plugin_api import Command, SidebarPanel
+
+from .mock_actions import mock_answer_selection, mock_summarize_document, mock_work_assist
 from .client import OllamaClient
 from .settings import OllamaSettings
+
+logger = logging.getLogger(__name__)
 
 
 class OllamaAssistantPlugin:
@@ -14,11 +18,13 @@ class OllamaAssistantPlugin:
 
     def __init__(self, settings: OllamaSettings | None = None) -> None:
         self.settings = settings or OllamaSettings()
-        self.client = OllamaClient(self.settings)
+        self.client = OllamaClient(base_url=self.settings.base_url, timeout_sec=self.settings.timeout_sec)
         self.activated = False
 
     def activate(self, context) -> None:
         self.activated = True
+        logger.info(f"[OllamaAssistantPlugin] Activating plugin: {self.id} v{self.version}")
+
         context.register_command(
             Command(
                 id="ollama.assistant.mock_summarize",
@@ -44,5 +50,17 @@ class OllamaAssistantPlugin:
             )
         )
 
+        context.register_sidebar_panel(
+            SidebarPanel(
+                id="ollama.assistant.panel",
+                title="AI 업무비서",
+                component=None,
+                factory=None,
+            )
+        )
+
+        logger.info("[OllamaAssistantPlugin] Plugin activated successfully")
+
     def deactivate(self) -> None:
+        logger.info(f"[OllamaAssistantPlugin] Deactivating plugin: {self.id}")
         self.activated = False

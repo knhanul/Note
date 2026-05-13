@@ -32,9 +32,9 @@ class AppBootstrapContractTest(unittest.TestCase):
                 self.assertIn(f'setContextProperty("{name}"', self.source)
                 self.assertIn(name, self.context_docs)
 
-    def test_settings_service_is_constructed_but_not_qml_context_property(self):
+    def test_settings_service_is_constructed_and_qml_context_property(self):
         self.assertIn("settings_service = SettingsService()", self.source)
-        self.assertNotIn('setContextProperty("settingsService"', self.source)
+        self.assertIn('setContextProperty("settingsService"', self.source)
         self.assertIn("settingsService", self.context_docs)
 
     def test_qml_import_path_setup_is_present(self):

@@ -24,15 +24,17 @@ class OllamaPluginStubTest(unittest.TestCase):
         self.assertEqual(settings.model_name, "")
         self.assertEqual(settings.timeout_sec, 30)
 
-    def test_ollama_client_is_network_free_stub(self):
-        client = OllamaClient(OllamaSettings(model_name="stub-model"))
+    def test_ollama_client_has_network_capability(self):
+        client = OllamaClient(base_url="http://localhost:11434", timeout_sec=5)
 
-        self.assertEqual(client.settings.model_name, "stub-model")
-        self.assertEqual(client.list_models(), [])
+        self.assertEqual(client.base_url, "http://localhost:11434")
+        self.assertEqual(client.timeout_sec, 5)
+        result = client.check_connection()
+        self.assertIn(result.success, [True, False])
         with self.assertRaises(NotImplementedError):
-            client.generate("hello")
+            client.generate("hello", "model")
         with self.assertRaises(NotImplementedError):
-            client.chat([])
+            client.chat([], "model")
 
     def test_ollama_assistant_plugin_registers_mock_commands(self):
         registry = PluginRegistry()

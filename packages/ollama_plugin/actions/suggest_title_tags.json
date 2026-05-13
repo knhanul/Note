@@ -1,0 +1,10 @@
+{
+  "id": "suggest_title_tags",
+  "name": "제목/태그 추천",
+  "version": "1.0.0",
+  "input": "current_note",
+  "output": "structured",
+  "rag": false,
+  "model_hint": "gemma2:2b",
+  "prompt_template": "suggest_title_tags"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "extract_todo",
+  "name": "할 일 추출",
+  "version": "1.0.0",
+  "input": "current_note",
+  "output": "markdown_checklist",
+  "rag": false,
+  "model_hint": "gemma2:2b",
+  "prompt_template": "extract_todo"
+}

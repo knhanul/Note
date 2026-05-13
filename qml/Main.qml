@@ -85,6 +85,7 @@ Window {
     property bool templateStatusError: false
     property int folderSettingsMenuIndex: 0
     property string folderRenameEditName: ""
+    property bool aiPanelOpen: true
 
     // Manual save shortcut (Ctrl+S)
     Shortcut {
@@ -3873,6 +3874,58 @@ Window {
                             }
 
                             Item { Layout.fillWidth: true }
+                        }
+
+                        // AI Assistant Panel - only visible in work_ai_editor
+                        Rectangle {
+                            visible: (typeof appVariant !== "undefined" && appVariant === "work_ai_editor")
+                            Layout.fillHeight: true
+                            Layout.preferredWidth: 32
+                            radius: Metrics.radiusLg
+                            color: Colors.surface
+                            border.color: Colors.borderLight
+                            border.width: 1
+
+                            Column {
+                                anchors.centerIn: parent
+                                spacing: -4
+                                rotation: window.aiPanelOpen ? 0 : -90
+
+                                Text {
+                                    text: window.aiPanelOpen ? "⟨" : "AI"
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: Typography.caption
+                                    font.weight: Typography.weightBold
+                                    color: Colors.textSecondary
+                                }
+
+                                Text {
+                                    text: window.aiPanelOpen ? "접기" : "열기"
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: Typography.caption
+                                    color: Colors.textTertiary
+                                    visible: window.aiPanelOpen
+                                }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: window.aiPanelOpen = !window.aiPanelOpen
+                            }
+                        }
+
+                        AIAssistantPanel {
+                            visible: (typeof appVariant !== "undefined" && appVariant === "work_ai_editor") && window.aiPanelOpen
+                            Layout.fillHeight: true
+                            Layout.minimumWidth: 320
+                            Layout.preferredWidth: 360
+                            Layout.maximumWidth: 440
+
+                            Behavior on Layout.preferredWidth {
+                                NumberAnimation { duration: Metrics.durationNormal; easing.type: Easing.InOutQuart }
+                            }
                         }
 
                         // Bottom status bar

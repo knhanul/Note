@@ -1,0 +1,10 @@
+{
+  "id": "current_note_qa",
+  "name": "현재 문서 질문",
+  "version": "1.0.0",
+  "input": "current_note_with_query",
+  "output": "text",
+  "rag": true,
+  "model_hint": "gemma2:2b",
+  "prompt_template": "current_note_qa"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "summarize_note",
+  "name": "문서 요약",
+  "version": "1.0.0",
+  "input": "current_note",
+  "output": "text",
+  "rag": false,
+  "model_hint": "gemma2:2b",
+  "prompt_template": "summarize_note"
+}

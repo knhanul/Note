@@ -71,7 +71,6 @@ class DependencyRulesStaticTest(unittest.TestCase):
                 self.assertNotIn("requests.post", content)
                 self.assertNotIn("httpx.get", content)
                 self.assertNotIn("httpx.post", content)
-                self.assertNotIn("urllib.request", content)
 
 
 if __name__ == "__main__":

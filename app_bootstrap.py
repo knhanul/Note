@@ -47,7 +47,7 @@ def create_services(engine: QQmlApplicationEngine) -> AppServices:
     )
 
 
-def configure_qml_engine(engine: QQmlApplicationEngine, config: AppConfig, services: AppServices) -> None:
+def configure_qml_engine(engine: QQmlApplicationEngine, config: AppConfig, services: AppServices, app_variant: str = "") -> None:
     engine.addImportPath(str(config.qml_import_path))
 
     engine.rootContext().setContextProperty("libraryService", services.library_service)
@@ -61,6 +61,7 @@ def configure_qml_engine(engine: QQmlApplicationEngine, config: AppConfig, servi
     engine.rootContext().setContextProperty("appBrand", config.brand)
     engine.rootContext().setContextProperty("appName", config.app_name)
     engine.rootContext().setContextProperty("appLogoPath", config.logo_path)
+    engine.rootContext().setContextProperty("appVariant", app_variant)
 
     engine.rootContext().setContextProperty("folderControllerReady", True)
     engine.rootContext().setContextProperty("uiScale", services.settings_service.get_ui_scale())
@@ -76,8 +77,12 @@ def load_main_qml(engine: QQmlApplicationEngine, config: AppConfig) -> None:
         sys.exit(1)
 
 
-def bootstrap_app(engine: QQmlApplicationEngine, config: AppConfig) -> AppServices:
+def bootstrap_app(engine: QQmlApplicationEngine, config: AppConfig, plugin_setup: callable = None, app_variant: str = "") -> AppServices:
     services = create_services(engine)
-    configure_qml_engine(engine, config, services)
+    configure_qml_engine(engine, config, services, app_variant)
+
+    if plugin_setup is not None:
+        plugin_setup(engine, services, config)
+
     load_main_qml(engine, config)
     return services

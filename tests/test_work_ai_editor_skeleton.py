@@ -28,7 +28,7 @@ class WorkAiEditorSkeletonTest(unittest.TestCase):
         source = (WORK_AI_EDITOR_DIR / "main.py").read_text(encoding="utf-8")
         self.assertIn("PROJECT_ROOT", source)
         self.assertIn("create_app_config(PROJECT_ROOT, sys.argv)", source)
-        self.assertIn("bootstrap_app(engine, config)", source)
+        self.assertIn("bootstrap_app(engine, config, plugin_setup=plugin_setup, app_variant=", source)
 
     def test_plugin_helpers_register_ollama_stub_without_activation(self):
         plugins_module = importlib.import_module("apps.work_ai_editor.plugins")
