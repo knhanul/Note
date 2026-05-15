@@ -32,11 +32,13 @@ def plugin_setup(engine, services, config):
     ai_controller = AIAssistantController(config.app_data_dir)
     ai_controller.initialize()
     engine.rootContext().setContextProperty("aiAssistantController", ai_controller)
+    engine._ai_controller = ai_controller  # Prevent GC
 
     # Setup Assistant Controller for AI operations
     assistant_controller = AssistantController(config.app_data_dir)
     assistant_controller.set_note_controller(services.note_controller)
     engine.rootContext().setContextProperty("assistantController", assistant_controller)
+    engine._assistant_controller = assistant_controller  # Prevent GC
 
     logger.info("[work_ai_editor] AI Assistant Controller initialized")
 

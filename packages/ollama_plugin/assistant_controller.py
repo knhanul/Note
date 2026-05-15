@@ -48,7 +48,7 @@ class AssistantController(QObject):
         """Set note controller for creating notes."""
         self._note_controller = controller
 
-    @pyqtProperty(bool)
+    @pyqtProperty(bool, notify=runningChanged)
     def isRunning(self) -> bool:
         return self._worker_manager.is_running()
 

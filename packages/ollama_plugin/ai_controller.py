@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import QObject, pyqtSignal, pyqtProperty
+from PyQt6.QtCore import QObject, pyqtSignal, pyqtProperty, pyqtSlot
 
 from .ai_settings import AISettingsManager
 from .client import OllamaClient, OllamaModel
@@ -18,7 +18,7 @@ class AIAssistantController(QObject):
 
     connectionStatusChanged = pyqtSignal(str)
     isConnectedChanged = pyqtSignal(bool)
-    modelsChanged = pyqtSignal(list)
+    modelsChanged = pyqtSignal('QVariantList')
     chatModelChanged = pyqtSignal(str)
     embeddingModelChanged = pyqtSignal(str)
     performanceModeChanged = pyqtSignal(str)
@@ -44,8 +44,8 @@ class AIAssistantController(QObject):
     def isConnected(self) -> bool:
         return self._is_connected
 
-    @pyqtProperty(list, notify=modelsChanged)
-    def modelList(self) -> list[str]:
+    @pyqtProperty('QVariantList', notify=modelsChanged)
+    def modelList(self) -> list:
         return self._models
 
     @pyqtProperty(str, notify=chatModelChanged)
@@ -60,6 +60,7 @@ class AIAssistantController(QObject):
     def performanceMode(self) -> str:
         return self._performance_mode
 
+    @pyqtSlot()
     def check_connection(self) -> None:
         """Check Ollama connection and update status."""
         logger.info("[AIAssistant] Checking connection...")
@@ -78,6 +79,7 @@ class AIAssistantController(QObject):
 
         logger.info(f"[AIAssistant] Connection status: {self._connection_status}")
 
+    @pyqtSlot()
     def refresh_models(self) -> None:
         """Refresh model list from Ollama."""
         logger.info("[AIAssistant] Refreshing models...")
@@ -86,7 +88,8 @@ class AIAssistantController(QObject):
         self.modelsChanged.emit(self._models)
         logger.info(f"[AIAssistant] Found {len(self._models)} models")
 
-    def set_chat_model(self, model: str) -> bool:
+    @pyqtSlot(str, result=bool)
+    def setChatModel(self, model: str) -> bool:
         """Set chat model and save to settings."""
         logger.info(f"[AIAssistant] Setting chat model: {model}")
         self._chat_model = model
@@ -95,7 +98,8 @@ class AIAssistantController(QObject):
         self.chatModelChanged.emit(self._chat_model)
         return True
 
-    def set_embedding_model(self, model: str) -> bool:
+    @pyqtSlot(str, result=bool)
+    def setEmbeddingModel(self, model: str) -> bool:
         """Set embedding model and save to settings."""
         logger.info(f"[AIAssistant] Setting embedding model: {model}")
         self._embedding_model = model
@@ -104,7 +108,8 @@ class AIAssistantController(QObject):
         self.embeddingModelChanged.emit(self._embedding_model)
         return True
 
-    def set_performance_mode(self, mode: str) -> bool:
+    @pyqtSlot(str, result=bool)
+    def setPerformanceMode(self, mode: str) -> bool:
         """Set performance mode and save to settings."""
         logger.info(f"[AIAssistant] Setting performance mode: {mode}")
         self._performance_mode = mode
@@ -112,6 +117,7 @@ class AIAssistantController(QObject):
         self.performanceModeChanged.emit(self._performance_mode)
         return True
 
+    @pyqtSlot()
     def initialize(self) -> None:
         """Initialize settings from file."""
         settings = self._settings_manager.settings
