@@ -7,6 +7,7 @@ import components
 
 ColumnLayout {
     id: root
+    enabled: !readOnly
     
     // Public properties
     property string noteId: ""
@@ -17,6 +18,7 @@ ColumnLayout {
     property bool isDirty: false
     property real editorZoom: 1.0   // 0.5 ~ 3.0
     property string editorMode: "wysiwyg" // wysiwyg | markdown
+    property bool readOnly: false
 
     // Signals
     signal titleEdited(string newTitle)

@@ -7,7 +7,7 @@ Rectangle {
     id: root
     visible: false
     anchors.centerIn: parent
-    width: 700
+    width: 800
     height: 500
     radius: Metrics.radiusXxl
     color: Colors.bgPrimary
@@ -25,13 +25,37 @@ Rectangle {
 
     signal closed()
 
+    Component.onCompleted: {
+        if (!root.hasPromptController() && root.settingsMenuIndex === 1)
+            root.settingsMenuIndex = 0
+    }
+
     function getController() {
         return typeof aiAssistantController !== "undefined" && aiAssistantController !== null ? aiAssistantController : null
+    }
+
+    function getAssistantController() {
+        return typeof assistantController !== "undefined" && assistantController !== null ? assistantController : null
+    }
+
+    function getPromptController() {
+        return typeof promptController !== "undefined" && promptController !== null ? promptController : null
+    }
+
+    function hasPromptController() {
+        return getPromptController() !== null
     }
 
     function safeGet(prop, defaultVal) {
         var c = getController()
         return c && c[prop] !== undefined ? c[prop] : defaultVal
+    }
+
+    function syncAssistantSettings() {
+        var ac = getAssistantController()
+        if (ac && ac.reloadSettings) {
+            ac.reloadSettings()
+        }
     }
 
     MouseArea {
@@ -45,8 +69,8 @@ Rectangle {
 
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: Metrics.lg
-            spacing: Metrics.md
+            anchors.margins: Metrics.md
+            spacing: Metrics.sm
 
             RowLayout {
                 Layout.fillWidth: true
@@ -62,17 +86,18 @@ Rectangle {
                 }
 
                 Rectangle {
-                    width: 32
-                    height: 32
+                    width: 86
+                    height: 34
                     radius: Metrics.radiusMd
-                    color: closeMA.containsMouse ? Colors.bgTertiary : "transparent"
-                    border.color: Colors.borderLight
+                    color: closeMA.containsMouse ? Colors.bgTertiary : Colors.bgSecondary
                     border.width: 1
+                    border.color: Colors.borderLight
 
                     Text {
                         anchors.centerIn: parent
-                        text: "×"
-                        font.pixelSize: Typography.h3
+                        text: "닫기"
+                        font.family: Typography.fontPrimary
+                        font.pixelSize: 12
                         color: Colors.textSecondary
                     }
 
@@ -91,7 +116,7 @@ Rectangle {
                 spacing: Metrics.md
 
                 Rectangle {
-                    Layout.preferredWidth: 200
+                    Layout.preferredWidth: 160
                     Layout.fillHeight: true
                     radius: Metrics.radiusLg
                     color: Colors.bgSecondary
@@ -137,12 +162,13 @@ Rectangle {
                             color: root.settingsMenuIndex === 1 ? Colors.primary50 : (promptSettingsMenuMA.containsMouse ? Colors.bgPrimary : "transparent")
                             border.width: 1
                             border.color: root.settingsMenuIndex === 1 ? Colors.primary200 : Colors.borderLight
+                            visible: root.hasPromptController()
 
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
                                 anchors.left: parent.left
                                 anchors.leftMargin: Metrics.md
-                                text: "프롬프트 관리"
+                                text: "AI 프롬프트 관리"
                                 font.family: Typography.fontPrimary
                                 font.pixelSize: Typography.bodySmall
                                 font.weight: root.settingsMenuIndex === 1 ? Typography.weightSemibold : Typography.weightRegular
@@ -153,6 +179,7 @@ Rectangle {
                                 id: promptSettingsMenuMA
                                 anchors.fill: parent
                                 hoverEnabled: true
+                                enabled: root.hasPromptController()
                                 onClicked: root.settingsMenuIndex = 1
                             }
                         }
@@ -176,8 +203,8 @@ Rectangle {
 
                         ColumnLayout {
                             anchors.fill: parent
-                            anchors.margins: Metrics.md
-                            spacing: Metrics.md
+                            anchors.margins: Metrics.sm
+                            spacing: Metrics.sm
 
                             Text {
                                 text: "모델 설정"
@@ -210,7 +237,7 @@ Rectangle {
 
                                 ColumnLayout {
                                     width: parent.width
-                                    spacing: Metrics.md
+                                    spacing: Metrics.sm
 
                                     ColumnLayout {
                                         Layout.fillWidth: true
@@ -229,6 +256,7 @@ Rectangle {
                                             spacing: Metrics.sm
 
                                             Rectangle {
+                                                Layout.preferredWidth: 120
                                                 height: 32
                                                 radius: Metrics.radiusFull
                                                 color: Colors.bgSecondary
@@ -281,73 +309,106 @@ Rectangle {
 
                                     ColumnLayout {
                                         Layout.fillWidth: true
-                                        spacing: Metrics.xs
+                                        Layout.maximumWidth: 560
+                                        Layout.alignment: Qt.AlignLeft
+                                        spacing: Metrics.sm
 
-                                        Text {
-                                            text: "LLM 모델 (생성)"
-                                            font.family: Typography.fontPrimary
-                                            font.pixelSize: Typography.caption
-                                            font.weight: Typography.weightMedium
-                                            color: Colors.textSecondary
-                                        }
-
-                                        Text {
+                                        RowLayout {
                                             Layout.fillWidth: true
-                                            text: "답변을 작성하는 모델입니다. 요약, 문장 다듬기, 보고서 초안 작성에 사용됩니다."
-                                            font.family: Typography.fontPrimary
-                                            font.pixelSize: Typography.caption
-                                            color: Colors.textTertiary
-                                            wrapMode: Text.Wrap
-                                        }
+                                            spacing: Metrics.sm
 
-                                        ComboBox {
-                                            Layout.fillWidth: true
-                                            model: root.aiModelList
-                                            currentIndex: root.aiModelList.indexOf(root.aiChatModel)
-                                            onCurrentIndexChanged: {
-                                                var list = root.aiModelList
-                                                if (currentIndex >= 0 && currentIndex < list.length) {
-                                                    var c = getController()
-                                                    if (c) {
-                                                        c.setChatModel(list[currentIndex])
-                                                        c.check_connection()
-                                                    }
+                                            ColumnLayout {
+                                                Layout.fillWidth: true
+                                                Layout.preferredWidth: 260
+                                                Layout.maximumWidth: 260
+                                                spacing: Metrics.xs
+
+                                                Text {
+                                                    text: "LLM 모델 (생성)"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.caption
+                                                    font.weight: Typography.weightMedium
+                                                    color: Colors.textSecondary
+                                                }
+
+                                                Text {
+                                                    Layout.fillWidth: true
+                                                    Layout.maximumWidth: 260
+                                                    text: "답변을 작성하는 모델입니다. 요약, 문장 다듬기, 보고서 초안 작성에 사용됩니다."
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.caption
+                                                    color: Colors.textTertiary
+                                                    wrapMode: Text.Wrap
+                                                    maximumLineCount: 3
+                                                }
+                                            }
+
+                                            ColumnLayout {
+                                                Layout.fillWidth: true
+                                                Layout.preferredWidth: 260
+                                                Layout.maximumWidth: 260
+                                                spacing: Metrics.xs
+
+                                                Text {
+                                                    text: "검색 모델 (임베딩)"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.caption
+                                                    font.weight: Typography.weightMedium
+                                                    color: Colors.textSecondary
+                                                }
+
+                                                Text {
+                                                    Layout.fillWidth: true
+                                                    Layout.maximumWidth: 260
+                                                    text: "문서에서 관련 내용을 찾아주는 모델입니다. 현재 폴더 질문, 외부 문서 검색, 관련 노트 추천에 사용됩니다."
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.caption
+                                                    color: Colors.textTertiary
+                                                    wrapMode: Text.Wrap
+                                                    maximumLineCount: 3
                                                 }
                                             }
                                         }
-                                    }
 
-                                    ColumnLayout {
-                                        Layout.fillWidth: true
-                                        spacing: Metrics.xs
-
-                                        Text {
-                                            text: "검색 모델 (임베딩)"
-                                            font.family: Typography.fontPrimary
-                                            font.pixelSize: Typography.caption
-                                            font.weight: Typography.weightMedium
-                                            color: Colors.textSecondary
-                                        }
-
-                                        Text {
+                                        RowLayout {
                                             Layout.fillWidth: true
-                                            text: "문서에서 관련 내용을 찾아주는 모델입니다. 현재 폴더 질문, 외부 문서 검색, 관련 노트 추천에 사용됩니다."
-                                            font.family: Typography.fontPrimary
-                                            font.pixelSize: Typography.caption
-                                            color: Colors.textTertiary
-                                            wrapMode: Text.Wrap
-                                        }
+                                            spacing: Metrics.sm
 
-                                        ComboBox {
-                                            Layout.fillWidth: true
-                                            model: root.aiModelList
-                                            currentIndex: root.aiModelList.indexOf(root.aiEmbeddingModel)
-                                            onCurrentIndexChanged: {
-                                                var list = root.aiModelList
-                                                if (currentIndex >= 0 && currentIndex < list.length) {
-                                                    var c = getController()
-                                                    if (c) {
-                                                        c.setEmbeddingModel(list[currentIndex])
+                                            ComboBox {
+                                                Layout.fillWidth: true
+                                                Layout.preferredHeight: 32
+                                                Layout.preferredWidth: 260
+                                                Layout.maximumWidth: 260
+                                                model: root.aiModelList
+                                                currentIndex: root.aiModelList.indexOf(root.aiChatModel)
+                                                onCurrentIndexChanged: {
+                                                    var list = root.aiModelList
+                                                    if (currentIndex >= 0 && currentIndex < list.length) {
+                                                        var c = getController()
+                                                        if (c) {
+                                                            c.setChatModel(list[currentIndex])
+                                                            c.check_connection()
+                                                            syncAssistantSettings()
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            ComboBox {
+                                                Layout.fillWidth: true
+                                                Layout.preferredHeight: 32
+                                                Layout.preferredWidth: 260
+                                                Layout.maximumWidth: 260
+                                                model: root.aiModelList
+                                                currentIndex: root.aiModelList.indexOf(root.aiEmbeddingModel)
+                                                onCurrentIndexChanged: {
+                                                    var list = root.aiModelList
+                                                    if (currentIndex >= 0 && currentIndex < list.length) {
+                                                        var c = getController()
+                                                        if (c) {
+                                                            c.setEmbeddingModel(list[currentIndex])
+                                                            syncAssistantSettings()
+                                                        }
                                                     }
                                                 }
                                             }
@@ -367,24 +428,87 @@ Rectangle {
                                         }
 
                                         RowLayout {
-                                            Layout.fillWidth: true
-                                            spacing: Metrics.sm
+                                            Layout.fillWidth: false
+                                            Layout.preferredWidth: 260
+                                            Layout.maximumWidth: 260
+                                            Layout.alignment: Qt.AlignLeft
+                                            spacing: Metrics.xs
+                                            height: 24
 
-                                            Repeater {
-                                                model: [
-                                                    { label: "저사양", value: "low" },
-                                                    { label: "일반", value: "normal" },
-                                                    { label: "고성능", value: "high" }
-                                                ]
-
-                                                delegate: Button {
-                                                    Layout.fillWidth: true
-                                                    text: modelData.label
-                                                    checkable: true
-                                                    checked: root.aiPerformanceMode === modelData.value
+                                            Rectangle {
+                                                Layout.fillHeight: true
+                                                Layout.fillWidth: true
+                                                radius: Metrics.radiusSm
+                                                color: root.aiPerformanceMode === "low" ? Colors.success : Colors.bgTertiary
+                                                border.color: Colors.borderLight
+                                                border.width: root.aiPerformanceMode === "low" ? 0 : 1
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    text: "저사양"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.caption
+                                                    color: root.aiPerformanceMode === "low" ? Colors.bgPrimary : Colors.textSecondary
+                                                }
+                                                MouseArea {
+                                                    anchors.fill: parent
                                                     onClicked: {
                                                         var c = getController()
-                                                        if (c) c.setPerformanceMode(modelData.value)
+                                                        if (c) {
+                                                            c.setPerformanceMode("low")
+                                                            syncAssistantSettings()
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            Rectangle {
+                                                Layout.fillHeight: true
+                                                Layout.fillWidth: true
+                                                radius: 0
+                                                color: root.aiPerformanceMode === "normal" ? Colors.success : Colors.bgTertiary
+                                                border.color: Colors.borderLight
+                                                border.width: root.aiPerformanceMode === "normal" ? 0 : 1
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    text: "일반"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.caption
+                                                    color: root.aiPerformanceMode === "normal" ? Colors.bgPrimary : Colors.textSecondary
+                                                }
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    onClicked: {
+                                                        var c = getController()
+                                                        if (c) {
+                                                            c.setPerformanceMode("normal")
+                                                            syncAssistantSettings()
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            Rectangle {
+                                                Layout.fillHeight: true
+                                                Layout.fillWidth: true
+                                                radius: Metrics.radiusSm
+                                                color: root.aiPerformanceMode === "high" ? Colors.success : Colors.bgTertiary
+                                                border.color: Colors.borderLight
+                                                border.width: root.aiPerformanceMode === "high" ? 0 : 1
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    text: "고성능"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.caption
+                                                    color: root.aiPerformanceMode === "high" ? Colors.bgPrimary : Colors.textSecondary
+                                                }
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    onClicked: {
+                                                        var c = getController()
+                                                        if (c) {
+                                                            c.setPerformanceMode("high")
+                                                            syncAssistantSettings()
+                                                        }
                                                     }
                                                 }
                                             }
@@ -431,20 +555,38 @@ Rectangle {
                                 color: Colors.borderLight
                             }
 
-                            ColumnLayout {
+                            Item {
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
-                                spacing: Metrics.md
 
-                                Text {
-                                    Layout.fillWidth: true
-                                    Layout.fillHeight: true
-                                    text: "프롬프트 관리 기능은 준비 중입니다."
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.bodySmall
-                                    color: Colors.textSecondary
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
+                                PromptManagementPanel {
+                                    anchors.fill: parent
+                                    visible: root.hasPromptController()
+                                }
+
+                                ColumnLayout {
+                                    anchors.centerIn: parent
+                                    width: parent.width
+                                    spacing: Metrics.sm
+                                    visible: !root.hasPromptController()
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "프롬프트 관리 기능을 사용할 수 없습니다."
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.bodySmall
+                                        color: Colors.textSecondary
+                                        horizontalAlignment: Text.AlignHCenter
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "이 탭은 work_ai_editor에서만 활성화됩니다."
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
+                                        color: Colors.textTertiary
+                                        horizontalAlignment: Text.AlignHCenter
+                                    }
                                 }
                             }
                         }

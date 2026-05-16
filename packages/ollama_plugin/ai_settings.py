@@ -90,6 +90,11 @@ class AISettingsManager:
             logger.error(f"Failed to save AI settings: {e}")
             return False
 
+    def refresh(self) -> AISettings:
+        """Force reload settings from disk."""
+        self._settings = None
+        return self.settings
+
     def update_chat_model(self, model: str) -> bool:
         """Update chat model and save."""
         self.settings.chat_model = model

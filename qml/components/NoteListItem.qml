@@ -16,6 +16,8 @@ Item {
     property bool selectionMode: false
     property bool isHovered: false
     property bool isPinned: false
+    property bool showPinButton: true
+    property bool showDeleteButton: true
 
     signal clicked()
     signal selectionClicked()
@@ -65,7 +67,7 @@ Item {
             }
 
             Item {
-                visible: !root.selectionMode
+                visible: root.showPinButton && !root.selectionMode
                 width: 20
                 height: 20
             }
@@ -131,7 +133,7 @@ Item {
         width: 20
         height: 20
         radius: Metrics.radiusFull
-        visible: root.isHovered && !root.selectionMode
+        visible: root.showDeleteButton && root.isHovered && !root.selectionMode
         opacity: root.isHovered ? 1 : 0
         color: deleteBtnMA.containsMouse
             ? ((root.isSelected || root.isBatchHighlighted) ? Qt.rgba(1, 0.3, 0.3, 0.4) : "#FEE2E2")

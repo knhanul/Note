@@ -4,11 +4,11 @@
 
 ## 참고 문단
 
-{{retrieved_context}}
+{{CONTEXT}}
 
 ## 질문
 
-{{question}}
+{{QUESTION}}
 
 ## 답변 가이드
 

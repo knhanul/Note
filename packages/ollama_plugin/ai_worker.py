@@ -66,7 +66,13 @@ class AIWorker(QRunnable):
 
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 if response.status != 200:
-                    self.signals.errorOccurred.emit(f"오류: {response.status}")
+                    error_msg = f"오류: {response.status}"
+                    try:
+                        error_data = response.read().decode("utf-8")
+                        error_msg += f" - {error_data}"
+                    except:
+                        pass
+                    self.signals.errorOccurred.emit(error_msg)
                     self.signals.finished.emit()
                     return
 
@@ -94,7 +100,15 @@ class AIWorker(QRunnable):
 
         except urllib.error.URLError as e:
             logger.error(f"[AIWorker] Connection error: {e}")
-            self.signals.errorOccurred.emit("연결 실패: Ollama가 실행 중인지 확인하세요")
+            error_msg = "연결 실패: Ollama가 실행 중인지 확인하세요"
+            if hasattr(e, 'read'):
+                try:
+                    error_data = e.read().decode("utf-8")
+                    if error_data:
+                        error_msg = f"오류: {error_data}"
+                except:
+                    pass
+            self.signals.errorOccurred.emit(error_msg)
         except Exception as e:
             logger.error(f"[AIWorker] Error: {e}")
             self.signals.errorOccurred.emit(f"오류: {str(e)}")

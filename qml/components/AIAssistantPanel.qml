@@ -21,7 +21,7 @@ Rectangle {
     property string aiEmbeddingModel: typeof aiAssistantController !== "undefined" && aiAssistantController !== null ? aiAssistantController.embeddingModel : ""
     property string aiPerformanceMode: typeof aiAssistantController !== "undefined" && aiAssistantController !== null ? aiAssistantController.performanceMode : "low"
     property var aiModelList: typeof aiAssistantController !== "undefined" && aiAssistantController !== null ? aiAssistantController.modelList : []
-    property bool aiRunning: typeof assistantController !== "undefined" && assistantController !== null ? assistantController.isRunning : false
+    property bool aiRunning: false
 
     function getController() {
         return typeof aiAssistantController !== "undefined" && aiAssistantController !== null ? aiAssistantController : null
@@ -47,19 +47,25 @@ Rectangle {
 
     Component.onCompleted: {
         var ac = getAssistantController()
-        if (ac) {
-            ac.tokenReceived.connect(function(token) {
-                root.responseText += token
-            })
-            ac.runningChanged.connect(function(running) {
-                if (!running) {
-                    console.log("[AIAssistantPanel] Task finished")
-                }
-            })
-            ac.errorOccurred.connect(function(error) {
-                root.responseText += "\n[오류] " + error
-            })
-        }
+        if (!ac)
+            return
+
+        root.aiRunning = ac.isRunning
+
+        ac.tokenReceived.connect(function(token) {
+            root.responseText += token
+        })
+
+        ac.runningChanged.connect(function(running) {
+            root.aiRunning = running
+            if (!running) {
+                console.log("[AIAssistantPanel] Task finished")
+            }
+        })
+
+        ac.errorOccurred.connect(function(error) {
+            root.responseText += "\n[오류] " + error
+        })
     }
 
     ColumnLayout {
@@ -80,10 +86,12 @@ Rectangle {
                 spacing: Metrics.lg
 
                 Column {
+                    width: parent.width
                     spacing: Metrics.xs
 
                     RowLayout {
-                        spacing: Metrics.sm
+                        width: parent.width
+                        spacing: Metrics.md
 
                         Text {
                             text: "AI 업무비서"
@@ -93,56 +101,61 @@ Rectangle {
                             color: Colors.textPrimary
                         }
 
-                        Rectangle {
-                            height: 24
-                            radius: Metrics.radiusFull
-                            color: Colors.bgSecondary
-                            border.color: safeGet("isConnected", false) ? Colors.success : Colors.borderLight
-                            border.width: 1
-                            Row {
-                                anchors.centerIn: parent
-                                spacing: Metrics.xs
-
-                                Rectangle {
-                                    width: 6
-                                    height: 6
-                                    radius: Metrics.radiusFull
-                                    color: safeGet("isConnected", false) ? Colors.success : Colors.textTertiary
-                                }
-
-                                Text {
-                                    text: safeGet("isConnected", false) ? "연결됨" : "연결 안 됨"
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.caption
-                                    color: safeGet("isConnected", false) ? Colors.textPrimary : Colors.textSecondary
-                                }
-                            }
-                        }
-
                         Item {
                             Layout.fillWidth: true
                         }
 
-                        Rectangle {
-                            Layout.preferredWidth: 32
-                            Layout.preferredHeight: 32
-                            radius: Metrics.radiusSm
-                            color: settingsMA.containsMouse ? Colors.bgTertiary : Colors.bgSecondary
-                            border.color: Colors.borderLight
-                            border.width: 1
+                        RowLayout {
+                            spacing: Metrics.md
 
-                            Text {
-                                anchors.centerIn: parent
-                                text: "⚙"
-                                font.pixelSize: Typography.bodyLarge
-                                color: Colors.textSecondary
+                            Rectangle {
+                                Layout.preferredWidth: 80
+                                height: 24
+                                radius: Metrics.radiusFull
+                                color: Colors.bgSecondary
+                                border.color: safeGet("isConnected", false) ? Colors.success : Colors.borderLight
+                                border.width: 1
+                                Row {
+                                    anchors.centerIn: parent
+                                    spacing: Metrics.xs
+
+                                    Rectangle {
+                                        width: 6
+                                        height: 6
+                                        radius: Metrics.radiusFull
+                                        color: safeGet("isConnected", false) ? Colors.success : Colors.textTertiary
+                                    }
+
+                                    Text {
+                                        text: safeGet("isConnected", false) ? "연결됨" : "연결 안 됨"
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
+                                        color: safeGet("isConnected", false) ? Colors.textPrimary : Colors.textSecondary
+                                    }
+                                }
                             }
 
-                            MouseArea {
-                                id: settingsMA
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                onClicked: root.openSettingsDialog()
+                            Rectangle {
+                                Layout.preferredWidth: 32
+                                Layout.preferredHeight: 32
+                                radius: Metrics.radiusSm
+                                color: settingsMA.containsMouse ? Colors.bgTertiary : Colors.bgSecondary
+                                border.color: Colors.borderLight
+                                border.width: 1
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "⚙"
+                                    font.pixelSize: Typography.bodyLarge
+                                    color: Colors.textSecondary
+                                }
+
+                                MouseArea {
+                                    id: settingsMA
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    onClicked: root.openSettingsDialog()
+                                }
                             }
                         }
                     }
@@ -581,6 +594,79 @@ Rectangle {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    Item {
+        anchors.fill: parent
+        visible: root.aiRunning
+        z: 999
+
+        Rectangle {
+            anchors.fill: parent
+            color: Colors.bgPrimary
+            opacity: 0.92
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            onClicked: {}
+        }
+
+        Column {
+            anchors.centerIn: parent
+            width: Math.min(root.width * 0.8, 360)
+            spacing: Metrics.sm
+
+            BusyIndicator {
+                running: true
+                width: 48
+                height: 48
+            }
+
+            Text {
+                text: "AI 작업 실행 중"
+                font.family: Typography.fontPrimary
+                font.pixelSize: Typography.bodyLarge
+                font.weight: Typography.weightSemibold
+                color: Colors.textPrimary
+                horizontalAlignment: Text.AlignHCenter
+                width: parent.width
+            }
+
+            Text {
+                text: "작업이 완료될 때까지 다른 조작은 잠시 중단됩니다."
+                font.family: Typography.fontPrimary
+                font.pixelSize: Typography.caption
+                color: Colors.textSecondary
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                width: parent.width
+            }
+
+            Button {
+                text: "작업 중지"
+                width: 160
+                Layout.alignment: Qt.AlignHCenter
+                contentItem: Text {
+                    text: parent.text
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.bodySmall
+                    font.weight: Typography.weightMedium
+                    color: Colors.white
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    color: Colors.primary500
+                    radius: Metrics.radiusSm
+                    border.color: Colors.primary600
+                }
+                onClicked: {
+                    var ac = getAssistantController()
+                    if (ac) ac.cancel()
                 }
             }
         }

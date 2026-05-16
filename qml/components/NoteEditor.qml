@@ -12,6 +12,7 @@ ColumnLayout {
     property string content: ""
     property string saveStatus: "saved"  // saved, saving, dirty
     property bool isDirty: false
+    property bool readOnly: false
     property var getImageData: null  // Function callback for getting image data URL
     
     // Signals
@@ -41,6 +42,7 @@ ColumnLayout {
             id: titleInput
             anchors.fill: parent
             anchors.verticalCenter: parent.verticalCenter
+            enabled: !root.readOnly
             
             text: root.title
             
@@ -106,6 +108,7 @@ ColumnLayout {
             id: contentEditor
             width: editorFlickable.width
             height: implicitHeight
+            readOnly: root.readOnly
             
             text: root.content
             wrapMode: TextEdit.WordWrap

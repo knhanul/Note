@@ -130,3 +130,17 @@ class AIAssistantController(QObject):
         self.performanceModeChanged.emit(self._performance_mode)
 
         logger.info(f"[AIAssistant] Initialized with chat_model={self._chat_model}, embedding_model={self._embedding_model}, mode={self._performance_mode}")
+
+        # Auto-check connection with saved model
+        if self._chat_model:
+            logger.info(f"[AIAssistant] Auto-checking connection with model: {self._chat_model}")
+            self.check_connection()
+
+            # Verify saved model exists in available models
+            if self._chat_model not in self._models:
+                logger.warning(f"[AIAssistant] Saved model '{self._chat_model}' not found in available models, resetting")
+                self._chat_model = ""
+                self._settings_manager.update_chat_model("")
+                self.chatModelChanged.emit(self._chat_model)
+        else:
+            logger.info("[AIAssistant] No chat model saved, skipping connection check")

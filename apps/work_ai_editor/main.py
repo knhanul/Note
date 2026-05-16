@@ -17,7 +17,7 @@ import logging
 
 from app_bootstrap import bootstrap_app
 from app_config import create_app_config
-from packages.ollama_plugin import AIAssistantController, AssistantController, OllamaAssistantPlugin
+from packages.ollama_plugin import AIAssistantController, AssistantController, OllamaAssistantPlugin, PromptController
 from packages.plugin_api import PluginRegistry, PluginContext
 
 logging.basicConfig(level=logging.INFO)
@@ -39,6 +39,10 @@ def plugin_setup(engine, services, config):
     assistant_controller.set_note_controller(services.note_controller)
     engine.rootContext().setContextProperty("assistantController", assistant_controller)
     engine._assistant_controller = assistant_controller  # Prevent GC
+
+    prompt_controller = PromptController(config.app_data_dir)
+    engine.rootContext().setContextProperty("promptController", prompt_controller)
+    engine._prompt_controller = prompt_controller  # Prevent GC
 
     logger.info("[work_ai_editor] AI Assistant Controller initialized")
 

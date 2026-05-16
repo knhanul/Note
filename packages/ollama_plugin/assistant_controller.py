@@ -7,7 +7,7 @@ from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot, pyqtProperty
 from .action_registry import ActionRegistry
 from .ai_settings import AISettingsManager
 from .ai_worker import AIWorkerManager, AIWorker
-from .prompt_manager import PromptManager
+from .ai_prompt_service import PromptService
 from .prompt_renderer import PromptRenderer
 from .simple_chunker import SimpleChunker
 from .simple_retriever import SimpleRetriever
@@ -33,10 +33,11 @@ class AssistantController(QObject):
         self._worker_manager = AIWorkerManager()
         self._settings_manager = AISettingsManager(app_data_dir)
         self._action_registry = ActionRegistry()
-        self._prompt_manager = PromptManager(app_data_dir=app_data_dir)
+        self._prompt_service = PromptService(app_data_dir)
         self._prompt_renderer = PromptRenderer()
         self._chunker = SimpleChunker()
-        self._retriever = SimpleRetriever(top_k=3)
+        initial_settings = self._settings_manager.settings
+        self._retriever = SimpleRetriever(top_k=initial_settings.top_k or SimpleRetriever.DEFAULT_TOP_K)
         self._current_worker: AIWorker | None = None
         self._response_text = ""
         self._retrieved_context = ""
@@ -55,6 +56,12 @@ class AssistantController(QObject):
     @pyqtProperty(str)
     def status(self) -> str:
         return self._settings_manager.settings.chat_model or "모델 미선택"
+
+    def _load_settings(self, refresh: bool = False):
+        settings = self._settings_manager.refresh() if refresh else self._settings_manager.settings
+        top_k = settings.top_k or SimpleRetriever.DEFAULT_TOP_K
+        self._retriever.top_k = top_k
+        return settings
 
     def _on_worker_finished(self):
         """Handle worker finished."""
@@ -88,7 +95,7 @@ class AssistantController(QObject):
             self.errorOccurred.emit("이미 실행 중인 작업이 있습니다")
             return
 
-        settings = self._settings_manager.settings
+        settings = self._load_settings(refresh=True)
         if not settings.chat_model:
             self.errorOccurred.emit("모델이 선택되지 않았습니다")
             return
@@ -125,15 +132,21 @@ class AssistantController(QObject):
 
         truncated_content = content[:MAX_CONTENT_LENGTH]
 
-        prompt_template = self._prompt_manager.get_prompt(action.prompt_template)
+        prompt_template = self._prompt_service.get_effective_prompt(action.id)
         if not prompt_template:
-            logger.warning(f"[AssistantController] Prompt template not found: {action.prompt_template}")
-            self.errorOccurred.emit(f"프롬프트를 찾을 수 없습니다: {action.prompt_template}")
+            logger.warning(f"[AssistantController] Prompt template not found: {action.id}")
+            self.errorOccurred.emit(f"프롬프트를 찾을 수 없습니다: {action.id}")
             return
 
         context = {
             "current_note": truncated_content,
             "content": truncated_content,
+            "CONTENT": truncated_content,
+            "SELECTION": truncated_content,
+            "TITLE": "",
+            "TAGS": "",
+            "CONTEXT": "",
+            "QUESTION": "",
         }
 
         if action.rag and action_id == "current_note_qa":
@@ -142,8 +155,10 @@ class AssistantController(QObject):
             self._retrieved_context = self._retriever.format_context(retrieved_chunks)
             context["retrieved_context"] = self._retrieved_context
             context["question"] = self._last_query or ""
+            context["CONTEXT"] = self._retrieved_context
+            context["QUESTION"] = self._last_query or ""
 
-        prompt = self._prompt_renderer.render(prompt_template, context)
+        prompt = self._prompt_service.render_prompt(action.id, context)
         self._run_ai_task(prompt)
 
     @pyqtSlot(str, str)
@@ -184,9 +199,20 @@ class AssistantController(QObject):
         """Cancel the current operation."""
         if self._worker_manager.is_running():
             self._worker_manager.cancel_current()
-            self.statusChanged.emit("중지됨")
-            self.runningChanged.emit(False)
-            logger.info("[AssistantController] Task cancelled")
+        self.statusChanged.emit("중지됨")
+        self.runningChanged.emit(False)
+        logger.info("[AssistantController] Task cancelled")
+
+    @pyqtSlot()
+    def reloadSettings(self):
+        """Reload AI settings from disk and apply to helper components."""
+        settings = self._load_settings(refresh=True)
+        logger.info(
+            "[AssistantController] Reloaded AI settings (chat_model=%s, performance_mode=%s)",
+            settings.chat_model,
+            settings.performance_mode,
+        )
+        self.statusChanged.emit(self.status)
 
     @pyqtSlot()
     def clearResponse(self):
