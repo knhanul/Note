@@ -21,6 +21,7 @@ class PromptController(QObject):
     currentPromptDocumentChanged = pyqtSignal()
     validationChanged = pyqtSignal()
     currentPromptDocumentIdChanged = pyqtSignal()
+    openPromptDocumentRequested = pyqtSignal(str)  # Emit when user wants to open prompt in main editor
 
     def __init__(self, app_data_dir: Path, prompt_package_dir: Path | None = None, parent=None):
         super().__init__(parent)
@@ -192,3 +193,9 @@ class PromptController(QObject):
     @pyqtSlot(result=str)
     def getDbPath(self) -> str:
         return str(self._service.repository.db_path)
+
+    @pyqtSlot(str)
+    def requestOpenPromptDocument(self, prompt_doc_id: str) -> None:
+        """Request to open a prompt document in the main editor workspace."""
+        logger.info(f"[PromptController] Requesting to open prompt document: {prompt_doc_id}")
+        self.openPromptDocumentRequested.emit(prompt_doc_id)

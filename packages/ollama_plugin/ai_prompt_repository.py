@@ -298,16 +298,42 @@ class PromptRepository:
         binding = self.get_binding(action_id)
         prompt_doc_id = binding["prompt_doc_id"] if binding else action_id
         prompt = self.get_prompt_document(prompt_doc_id)
+        fallback_used = False
+        fallback_reason = ""
 
-        if prompt is None and prompt_doc_id != action_id:
+        # Fallback logic: if prompt is None, archived, or empty content
+        if prompt is None:
+            fallback_used = True
+            fallback_reason = "prompt_not_found"
+            if prompt_doc_id != action_id:
+                prompt = self.get_prompt_document(action_id)
+                prompt_doc_id = action_id if prompt else prompt_doc_id
+        elif int(prompt.get("archived", 0)):
+            fallback_used = True
+            fallback_reason = "prompt_archived"
             prompt = self.get_prompt_document(action_id)
             prompt_doc_id = action_id if prompt else prompt_doc_id
+        elif not prompt.get("content_md", "").strip():
+            fallback_used = True
+            fallback_reason = "empty_content"
+            prompt = self.get_prompt_document(action_id)
+            prompt_doc_id = action_id if prompt else prompt_doc_id
+
+        # If fallback also failed, try package seed
+        if prompt is None:
+            fallback_used = True
+            fallback_reason = fallback_reason or "all_fallbacks_failed"
+            # Try to load from package prompts as last resort
+            # This is handled by PromptSeedService on next startup, but we can log here
+            prompt = None
 
         return {
             "action": action,
             "binding": binding,
             "prompt_doc_id": prompt_doc_id,
             "prompt": prompt,
+            "fallback_used": fallback_used,
+            "fallback_reason": fallback_reason,
         }
 
     def list_action_bindings(self) -> list[dict[str, Any]]:

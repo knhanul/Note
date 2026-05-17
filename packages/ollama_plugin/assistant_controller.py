@@ -132,6 +132,37 @@ class AssistantController(QObject):
 
         truncated_content = content[:MAX_CONTENT_LENGTH]
 
+        # Get prompt summary with fallback info for logging
+        summary = self._prompt_service._repo.get_prompt_summary_for_action(action.id)
+        if summary:
+            prompt_doc_id = summary.get("prompt_doc_id", action.id)
+            prompt = summary.get("prompt")
+            fallback_used = summary.get("fallback_used", False)
+            fallback_reason = summary.get("fallback_reason", "")
+        else:
+            prompt_doc_id = action.id
+            prompt = None
+            fallback_used = True
+            fallback_reason = "summary_not_found"
+
+        # Log runtime prompt resolution
+        if prompt:
+            logger.info(
+                f"[AssistantController] AI task: action_id={action.id}, "
+                f"prompt_doc_id={prompt_doc_id}, "
+                f"title={prompt.get('title', '')[:50]}, "
+                f"source_type={prompt.get('source_type', '')}, "
+                f"fallback_used={fallback_used}, "
+                f"fallback_reason={fallback_reason if fallback_reason else 'none'}"
+            )
+        else:
+            logger.warning(
+                f"[AssistantController] AI task fallback: action_id={action.id}, "
+                f"prompt_doc_id={prompt_doc_id}, "
+                f"fallback_used={fallback_used}, "
+                f"fallback_reason={fallback_reason}"
+            )
+
         prompt_template = self._prompt_service.get_effective_prompt(action.id)
         if not prompt_template:
             logger.warning(f"[AssistantController] Prompt template not found: {action.id}")

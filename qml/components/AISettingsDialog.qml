@@ -559,7 +559,7 @@ Rectangle {
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
 
-                                PromptManagementPanel {
+                                PromptBindingPanel {
                                     anchors.fill: parent
                                     visible: root.hasPromptController()
                                 }
@@ -572,7 +572,7 @@ Rectangle {
 
                                     Text {
                                         Layout.fillWidth: true
-                                        text: "프롬프트 관리 기능을 사용할 수 없습니다."
+                                        text: "프롬프트 연결 기능을 사용할 수 없습니다."
                                         font.family: Typography.fontPrimary
                                         font.pixelSize: Typography.bodySmall
                                         color: Colors.textSecondary

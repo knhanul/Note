@@ -87,6 +87,40 @@ Window {
     property string folderRenameEditName: ""
     property bool aiPanelOpen: true
 
+    // AI Prompt Workspace Mode
+    property string activeContentMode: "notes"  // "notes" | "ai_prompts"
+    property string selectedAIPromptDocId: ""
+    property var currentAIPromptDocument: null
+    property string lastRealLibraryIdBeforeAIPromptMode: ""
+    property int promptListRefreshCounter: 0  // Force ListView refresh
+
+    // Reload prompt documents when switching to AI prompt mode
+    onActiveContentModeChanged: {
+        console.log("[Main] activeContentMode changed to:", window.activeContentMode)
+        if (window.activeContentMode === "ai_prompts") {
+            console.log("[Main] Switching to AI prompt mode, reloading documents")
+            if (typeof promptDocumentController !== "undefined" && promptDocumentController) {
+                promptDocumentController.loadPromptDocuments()
+                window.promptListRefreshCounter++
+                console.log("[Main] Incremented promptListRefreshCounter to:", window.promptListRefreshCounter)
+                // Force ListView to refresh by resetting model
+                window.forcePromptListRefresh()
+            } else {
+                console.log("[Main] promptDocumentController not available")
+            }
+        }
+    }
+
+    function forcePromptListRefresh() {
+        console.log("[Main] forcePromptListRefresh called")
+        var listView = notesListView
+        if (listView) {
+            listView.model = []
+            listView.model = promptDocumentController ? promptDocumentController.promptDocumentList : []
+            console.log("[Main] ListView model refreshed, count:", listView.count)
+        }
+    }
+
     // Manual save shortcut (Ctrl+S)
     Shortcut {
         sequence: "Ctrl+S"
@@ -97,6 +131,34 @@ Window {
     // Persists draft (if applicable) and triggers async save. Title is auto-derived only when
     // the user has not manually touched the title field and it is currently blank.
     function flushSaveIfDirty() {
+        // Phase 2: AI prompt mode - save to promptDocumentController
+        if (window.activeContentMode === "ai_prompts") {
+            if (!window.selectedAIPromptDocId) {
+                console.log("[flushSaveIfDirty] AI prompt mode - no prompt selected")
+                return
+            }
+
+            // Check if readonly
+            if (window.currentAIPromptDocument && window.currentAIPromptDocument.readonly) {
+                console.log("[flushSaveIfDirty] AI prompt mode - readonly prompt, save skipped")
+                return
+            }
+
+            // Get content from editor
+            var liveTitle = (currentAIPromptDocument && currentAIPromptDocument.title !== undefined)
+                ? currentAIPromptDocument.title : (noteEditor ? noteEditor.title : "")
+            var liveMarkdown = (currentAIPromptDocument && currentAIPromptDocument.content_md !== undefined)
+                ? currentAIPromptDocument.content_md : (noteEditor ? noteEditor.content : "")
+
+            console.log("[flushSaveIfDirty] AI prompt mode - saving prompt:", window.selectedAIPromptDocId)
+
+            // Save via promptDocumentController
+            if (typeof promptDocumentController !== "undefined" && promptDocumentController) {
+                promptDocumentController.savePromptDocument(window.selectedAIPromptDocId, liveTitle, liveMarkdown)
+            }
+            return
+        }
+
         if (!noteController) {
             console.log("[flushSaveIfDirty] no noteController")
             return
@@ -1447,6 +1509,25 @@ Window {
         }
     }
 
+    // Handle prompt document open requests from AISettingsDialog
+    Connections {
+        target: typeof promptController !== "undefined" ? promptController : null
+        enabled: typeof promptController !== "undefined"
+        function onOpenPromptDocumentRequested(prompt_doc_id) {
+            console.log("[Main.qml] Open prompt document requested:", prompt_doc_id)
+            // Switch to AI prompt mode
+            window.activeContentMode = "ai_prompts"
+            // Clear note selection
+            window.selectedNoteId = ""
+            window.currentNote = null
+            // Load prompt documents
+            if (typeof promptDocumentController !== "undefined" && promptDocumentController) {
+                promptDocumentController.loadPromptDocuments()
+                promptDocumentController.selectPromptDocument(prompt_doc_id)
+            }
+        }
+    }
+
     Connections {
         target: libraryService
         function onLibrariesChanged() {
@@ -1756,6 +1837,70 @@ Window {
                                             width: parent.width
                                             spacing: Metrics.xs
 
+                                            // Virtual AI Prompt Library (work_ai_editor only)
+                                            Rectangle {
+                                                Layout.fillWidth: true
+                                                height: 32
+                                                radius: Metrics.radiusMd
+                                                color: aiPromptLibMouse.containsMouse ? Colors.bgTertiary : "transparent"
+                                                visible: typeof appVariant !== "undefined" && appVariant === "work_ai_editor"
+
+                                                RowLayout {
+                                                    anchors.fill: parent
+                                                    anchors.leftMargin: Metrics.sm
+                                                    anchors.rightMargin: Metrics.sm
+                                                    spacing: Metrics.sm
+
+                                                    Text {
+                                                        Layout.fillWidth: true
+                                                        text: "AI 프롬프트"
+                                                        font.family: Typography.fontPrimary
+                                                        font.weight: window.activeContentMode === "ai_prompts" ? Typography.weightSemibold : Typography.weightRegular
+                                                        font.pixelSize: 14
+                                                        color: window.activeContentMode === "ai_prompts" ? Colors.primary500 : Colors.textPrimary
+                                                    }
+
+                                                    Text {
+                                                        text: "●"
+                                                        font.pixelSize: 8
+                                                        color: "#3B82F6"
+                                                        visible: window.activeContentMode === "ai_prompts"
+                                                    }
+                                                }
+
+                                                MouseArea {
+                                                    id: aiPromptLibMouse
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    onClicked: {
+                                                        // Save current real library ID before switching
+                                                        if (libraryService && libraryService.currentLibraryId) {
+                                                            window.lastRealLibraryIdBeforeAIPromptMode = libraryService.currentLibraryId
+                                                        }
+                                                        // Switch to AI prompt mode without calling libraryService.setCurrentLibrary
+                                                        window.activeContentMode = "ai_prompts"
+                                                        window.selectedAIPromptDocId = ""
+                                                        window.currentAIPromptDocument = null
+                                                        // Clear note selection
+                                                        window.selectedNoteId = ""
+                                                        window.currentNote = null
+                                                        // Load prompt documents
+                                                        if (typeof promptDocumentController !== "undefined" && promptDocumentController) {
+                                                            promptDocumentController.loadPromptDocuments()
+                                                        }
+                                                        libraryDropdown.opened = false
+                                                    }
+                                                }
+                                            }
+
+                                            // Divider for virtual library
+                                            Rectangle {
+                                                Layout.fillWidth: true
+                                                height: 1
+                                                color: Colors.borderLight
+                                                visible: typeof appVariant !== "undefined" && appVariant === "work_ai_editor"
+                                            }
+
                                             Repeater {
                                                 id: libraryRepeater
                                                 model: libraryService ? libraryService.getAllLibraries() : []
@@ -1862,6 +2007,10 @@ Window {
                                                     hoverEnabled: true
                                                     onClicked: {
                                                         libraryService.setCurrentLibrary(modelData.id)
+                                                        // Switch back to notes mode if coming from AI prompt mode
+                                                        window.activeContentMode = "notes"
+                                                        window.selectedAIPromptDocId = ""
+                                                        window.currentAIPromptDocument = null
                                                         libraryDropdown.opened = false
                                                     }
                                                 }
@@ -2255,7 +2404,7 @@ Window {
                             id: foldersListView
                             Layout.fillWidth: true
                             Layout.fillHeight: sidebar.sidebarTabIdx === 0
-                            visible: sidebar.sidebarTabIdx === 0
+                            visible: sidebar.sidebarTabIdx === 0 && window.activeContentMode === "notes"
                             z: 0
                             model: folderController ? folderController.folders : []
                             spacing: Metrics.xs
@@ -2316,6 +2465,41 @@ Window {
 
                                 onDeleteRequested: {
                                     if (folderController && modelData && !(modelData.is_smart || false)) folderController.deleteFolder(modelData.id)
+                                }
+                            }
+                        }
+
+                        // AI Prompt Mode Helper (shown in folder pane when in ai_prompts mode)
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: sidebar.sidebarTabIdx === 0
+                            visible: sidebar.sidebarTabIdx === 0 && window.activeContentMode === "ai_prompts"
+                            color: "transparent"
+
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: Metrics.md
+                                spacing: Metrics.md
+
+                                Text {
+                                    text: "AI 프롬프트 문서"
+                                    font.family: Typography.fontPrimary
+                                    font.weight: Typography.weightSemibold
+                                    font.pixelSize: 14
+                                    color: Colors.textPrimary
+                                }
+
+                                Text {
+                                    text: "AI 프롬프트 문서는 별도 라이브러리에 저장되며,\n폴더 구조와 독립적으로 관리됩니다."
+                                    font.family: Typography.fontPrimary
+                                    font.weight: Typography.weightRegular
+                                    font.pixelSize: 11
+                                    color: Colors.textSecondary
+                                    lineHeight: 1.4
+                                }
+
+                                Item {
+                                    Layout.fillHeight: true
                                 }
                             }
                         }
@@ -3242,8 +3426,16 @@ Window {
                                 background: Item {}
                             }
 
-                            // Use filtered notes from noteController
-                            model: noteController ? noteController.filteredNotes : []
+                            // Branch model based on activeContentMode - use refreshCounter to force re-evaluation
+                            model: {
+                                if (window.activeContentMode === "notes") {
+                                    return noteController ? noteController.filteredNotes : []
+                                } else {
+                                    // Access refreshCounter to create dependency
+                                    var _ = window.promptListRefreshCounter
+                                    return promptDocumentController ? promptDocumentController.promptDocumentList : []
+                                }
+                            }
 
                             // Transition animations for list changes (disabled for performance with large datasets)
                             /*
@@ -3260,7 +3452,11 @@ Window {
                             }
                             */
 
-                            delegate: NoteListItem {
+                            delegate: window.activeContentMode === "notes" ? noteListDelegate : aiPromptListDelegate
+
+                            Component {
+                                id: noteListDelegate
+                                NoteListItem {
                                 id: noteItem
                                 width: ListView.view.width
 
@@ -3338,6 +3534,149 @@ Window {
                                         deleteConfirmDialog.targetNoteTitle = noteItem.title || "제목 없음"
                                         deleteConfirmDialog.visible = true
                                     }
+                                }
+                                }
+                            }
+
+                            Component {
+                                id: aiPromptListDelegate
+                                Rectangle {
+                                    width: ListView.view.width
+                                    height: 60
+                                    color: aiPromptMouse.containsMouse ? Colors.bgTertiary : "transparent"
+                                    radius: Metrics.radiusMd
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: Metrics.md
+                                        anchors.rightMargin: Metrics.md
+                                        spacing: Metrics.md
+
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 2
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: modelData.title || ""
+                                                font.family: Typography.fontPrimary
+                                                font.weight: Typography.weightMedium
+                                                font.pixelSize: 14
+                                                color: Colors.textPrimary
+                                                elide: Text.ElideRight
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: modelData.description || ""
+                                                font.family: Typography.fontPrimary
+                                                font.weight: Typography.weightRegular
+                                                font.pixelSize: 11
+                                                color: Colors.textSecondary
+                                                elide: Text.ElideRight
+                                            }
+
+                                            Row {
+                                                spacing: Metrics.xs
+
+                                                Rectangle {
+                                                    height: 16
+                                                    radius: Metrics.radiusSm
+                                                    color: {
+                                                        if (!modelData || !modelData.source_type) return "#10B981"
+                                                        return modelData.source_type === "default" ? "#DBEAFE" : "#10B981"
+                                                    }
+                                                    visible: true
+
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        anchors.leftMargin: 4
+                                                        anchors.rightMargin: 4
+                                                        text: (modelData && modelData.source_type === "default") ? "기본" : "사용자"
+                                                        font.family: Typography.fontPrimary
+                                                        font.pixelSize: 9
+                                                        color: {
+                                                            if (!modelData || !modelData.source_type) return "#059669"
+                                                            return modelData.source_type === "default" ? "#1E40AF" : "#059669"
+                                                        }
+                                                    }
+                                                }
+
+                                                Rectangle {
+                                                    height: 16
+                                                    radius: Metrics.radiusSm
+                                                    color: {
+                                                        if (!modelData || !modelData.readonly) return "transparent"
+                                                        return "#FCD34D"
+                                                    }
+                                                    visible: !!(modelData && modelData.readonly)
+
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        anchors.leftMargin: 4
+                                                        anchors.rightMargin: 4
+                                                        text: "읽기 전용"
+                                                        font.family: Typography.fontPrimary
+                                                        font.pixelSize: 9
+                                                        color: "#D97706"
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        ColumnLayout {
+                                            spacing: 2
+
+                                            Text {
+                                                text: {
+                                                    if (!modelData || !modelData.updated_at) return ""
+                                                    try {
+                                                        var dt = new Date(modelData.updated_at)
+                                                        var year = dt.getFullYear()
+                                                        var month = String(dt.getMonth() + 1).padStart(2, '0')
+                                                        var day = String(dt.getDate()).padStart(2, '0')
+                                                        var hours = String(dt.getHours()).padStart(2, '0')
+                                                        var minutes = String(dt.getMinutes()).padStart(2, '0')
+                                                        return year + "." + month + "." + day + " " + hours + ":" + minutes
+                                                    } catch (e) {
+                                                        return modelData.updated_at
+                                                    }
+                                                }
+                                                font.family: Typography.fontPrimary
+                                                font.pixelSize: 10
+                                                color: Colors.textTertiary
+                                            }
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        id: aiPromptMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        onClicked: {
+                                            if (modelData.prompt_doc_id && promptDocumentController) {
+                                                promptDocumentController.selectPromptDocument(modelData.prompt_doc_id)
+                                                window.selectedAIPromptDocId = modelData.prompt_doc_id
+                                                window.currentAIPromptDocument = modelData
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Helper function to format AI prompt date
+                            function formatAIPromptDate(isoDate) {
+                                if (!isoDate) return ""
+                                try {
+                                    var dt = new Date(isoDate)
+                                    var year = dt.getFullYear()
+                                    var month = String(dt.getMonth() + 1).padStart(2, '0')
+                                    var day = String(dt.getDate()).padStart(2, '0')
+                                    var hours = String(dt.getHours()).padStart(2, '0')
+                                    var minutes = String(dt.getMinutes()).padStart(2, '0')
+                                    return year + "." + month + "." + day + " " + hours + ":" + minutes
+                                } catch (e) {
+                                    return isoDate
                                 }
                             }
 
@@ -3591,7 +3930,7 @@ Window {
 
                         // Empty state - only visible when no note selected
                         Rectangle {
-                            visible: !window.selectedNoteId && !window.isDraftNewNote
+                            visible: window.activeContentMode === "notes" ? (!window.selectedNoteId && !window.isDraftNewNote) : (!window.selectedAIPromptDocId)
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             color: "transparent"
@@ -3643,23 +3982,118 @@ Window {
                             }
                         }
 
-                        // Web-based WYSIWYG Editor - only visible when note selected
+                        // AI Prompt Mode Status Bar (shown above editor in ai_prompts mode)
+                        Rectangle {
+                            Layout.fillWidth: true
+                            visible: window.activeContentMode === "ai_prompts" && window.selectedAIPromptDocId !== ""
+                            height: 40
+                            color: Colors.bgSecondary
+                            border.color: Colors.borderLight
+                            border.width: 1
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: Metrics.md
+                                anchors.rightMargin: Metrics.md
+                                spacing: Metrics.md
+
+                                // Status badge
+                                Rectangle {
+                                    height: 24
+                                    radius: Metrics.radiusSm
+                                    color: {
+                                        if (!window.currentAIPromptDocument) return "#10B981"
+                                        if (window.currentAIPromptDocument.readonly) return "#FCD34D"
+                                        return "#10B981"
+                                    }
+                                    visible: window.currentAIPromptDocument !== null
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        anchors.leftMargin: 8
+                                        anchors.rightMargin: 8
+                                        text: (window.currentAIPromptDocument && window.currentAIPromptDocument.readonly) ? "기본 프롬프트 / 읽기 전용" : "사용자 프롬프트 / 편집 가능"
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: 11
+                                        color: {
+                                            if (!window.currentAIPromptDocument) return "#059669"
+                                            if (window.currentAIPromptDocument.readonly) return "#D97706"
+                                            return "#059669"
+                                        }
+                                    }
+                                }
+
+                                // Spacer
+                                Item {
+                                    Layout.fillWidth: true
+                                }
+
+                                // Duplicate button (only for readonly prompts)
+                                Rectangle {
+                                    width: 120
+                                    height: 28
+                                    radius: Metrics.radiusMd
+                                    color: duplicateBtnArea.containsMouse ? Colors.primary500 : Colors.primary400
+                                    visible: window.currentAIPromptDocument && window.currentAIPromptDocument.readonly
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "복사해서 수정"
+                                        font.family: Typography.fontPrimary
+                                        font.weight: Typography.weightMedium
+                                        font.pixelSize: 11
+                                        color: Colors.textInverse
+                                    }
+
+                                    MouseArea {
+                                        id: duplicateBtnArea
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        onClicked: {
+                                            if (typeof promptDocumentController !== "undefined" && promptDocumentController && window.selectedAIPromptDocId) {
+                                                promptDocumentController.duplicatePromptDocument(window.selectedAIPromptDocId)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Info text for readonly
+                                Text {
+                                    text: "기본 프롬프트입니다. 앱 업데이트 시 변경될 수 있으므로 직접 수정할 수 없습니다."
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: 11
+                                    color: Colors.textSecondary
+                                    visible: window.currentAIPromptDocument && window.currentAIPromptDocument.readonly
+                                }
+                            }
+                        }
+
+                        // Web-based WYSIWYG Editor - only visible when note selected or AI prompt selected
                         WebNoteEditor {
                             id: noteEditor
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            visible: window.selectedNoteId !== "" || window.isDraftNewNote
+                            visible: window.activeContentMode === "notes" ? (window.selectedNoteId !== "" || window.isDraftNewNote) : (window.selectedAIPromptDocId !== "")
 
-                            noteId: window.selectedNoteId
-                            title: window.currentNote ? (window.currentNote.title || "") : ""
-                            content: window.currentNote ? (window.currentNote.content || "") : ""
-                            contentJson: window.currentNote ? (window.currentNote.content_json || "") : ""
+                            noteId: window.activeContentMode === "notes" ? window.selectedNoteId : window.selectedAIPromptDocId
+                            title: window.activeContentMode === "notes" ? (window.currentNote ? (window.currentNote.title || "") : "") : (window.currentAIPromptDocument ? (window.currentAIPromptDocument.title || "") : "")
+                            content: window.activeContentMode === "notes" ? (window.currentNote ? (window.currentNote.content || "") : "") : (window.currentAIPromptDocument ? (window.currentAIPromptDocument.content_md || "") : "")
+                            contentJson: window.activeContentMode === "notes" ? (window.currentNote ? (window.currentNote.content_json || "") : "") : ""
                             saveStatus: noteController ? noteController.saveStatus : "saved"
                             editorZoom: window.editorZoom
+                            readOnly: window.activeContentMode === "ai_prompts" && (window.currentAIPromptDocument && window.currentAIPromptDocument.readonly)
 
                             // Primary handler: receives title + markdown + JSON in one shot
                             // Updates in-memory state only; persistence is driven by the debounced autosave.
                             onContentUpdated: (newTitle, newMarkdown, newJson) => {
+                                if (window.activeContentMode === "ai_prompts") {
+                                    // Update AI prompt document cache
+                                    if (!window.currentAIPromptDocument) window.currentAIPromptDocument = {}
+                                    window.currentAIPromptDocument.title = newTitle || ""
+                                    window.currentAIPromptDocument.content_md = newMarkdown || ""
+                                    return
+                                }
+
                                 if (!noteController) return
 
                                 // Detect title-touched: any non-empty title coming from editor counts

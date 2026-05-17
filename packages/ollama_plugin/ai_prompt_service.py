@@ -222,11 +222,23 @@ class PromptService:
         }
 
     def get_effective_prompt(self, action_id: str) -> str:
-        summary = self._repo.get_prompt_summary_for_action(action_id)
-        if not summary:
+        try:
+            summary = self._repo.get_prompt_summary_for_action(action_id)
+            if not summary:
+                logger.warning(f"[PromptService] get_effective_prompt: no summary for {action_id}")
+                return ""
+            prompt = summary.get("prompt")
+            if not prompt:
+                logger.warning(f"[PromptService] get_effective_prompt: no prompt in summary for {action_id}")
+                return ""
+            content_md = prompt.get("content_md", "")
+            if not content_md or not content_md.strip():
+                logger.warning(f"[PromptService] get_effective_prompt: empty content_md for {action_id}")
+                return ""
+            return content_md
+        except Exception as e:
+            logger.error(f"[PromptService] get_effective_prompt error for {action_id}: {e}")
             return ""
-        prompt = summary.get("prompt")
-        return prompt.get("content_md", "") if prompt else ""
 
     def render_prompt(self, action_id: str, context: dict[str, Any]) -> str:
         template = self.get_effective_prompt(action_id)
