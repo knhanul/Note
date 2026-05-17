@@ -68,14 +68,18 @@ class AssistantController(QObject):
         self.runningChanged.emit(False)
         self._current_worker = None
         self._worker_manager.clear_worker()
+        logger.info(f"[AssistantController] Worker finished, emitting resultReady: response_text_len={len(self._response_text)}")
         self.resultReady.emit(self._response_text)
         logger.info("[AssistantController] Task finished")
 
     def _on_token_received(self, token: str):
         """Handle token received."""
+        logger.info(f"[AssistantController] Token received from worker: len={len(token)}, response_text_len={len(self._response_text)}")
         if len(self._response_text) < MAX_OUTPUT_LENGTH:
             self._response_text += token
             self.tokenReceived.emit(token)
+        else:
+            logger.warning(f"[AssistantController] Token dropped due to MAX_OUTPUT_LENGTH limit: {MAX_OUTPUT_LENGTH}")
 
     def _on_error(self, error: str):
         """Handle error."""
@@ -88,7 +92,7 @@ class AssistantController(QObject):
         """Handle status changed."""
         self.statusChanged.emit(status)
 
-    def _run_ai_task(self, prompt: str):
+    def _run_ai_task(self, prompt: str, action_id: str = ""):
         """Run an AI task with the given prompt."""
         if self._worker_manager.is_running():
             logger.warning("[AssistantController] Task already running")
@@ -100,7 +104,18 @@ class AssistantController(QObject):
             self.errorOccurred.emit("모델이 선택되지 않았습니다")
             return
 
-        logger.info(f"[AssistantController] Running AI task with model: {settings.chat_model}")
+        options = {
+            "num_predict": settings.num_predict,
+            "num_ctx": settings.num_ctx,
+            "temperature": settings.temperature,
+        }
+
+        logger.info(
+            f"[AssistantController] Running AI task: action_id={action_id}, "
+            f"model={settings.chat_model}, prompt_len={len(prompt)}, "
+            f"timeout={settings.timeout}, stream={settings.streaming}, "
+            f"options={options}, keep_alive={settings.keep_alive}"
+        )
         self._response_text = ""
         self.runningChanged.emit(True)
         self.statusChanged.emit("실행 중...")
@@ -109,7 +124,13 @@ class AssistantController(QObject):
             prompt=prompt,
             model=settings.chat_model,
             base_url=settings.base_url,
-            timeout=120
+            timeout=settings.timeout,
+            stream=settings.streaming,
+            options=options,
+            keep_alive=settings.keep_alive,
+            first_token_timeout=settings.first_token_timeout,
+            idle_timeout=settings.idle_timeout,
+            action_id=action_id,
         )
 
         self._current_worker.signals.finished.connect(self._on_worker_finished)
@@ -121,7 +142,7 @@ class AssistantController(QObject):
     def runTask(self, action_id: str, content: str):
         """Run an AI task based on action ID."""
         if not content or not content.strip():
-            self.errorOccurred.emit("문서 내용이 없습니다")
+            self.errorOccurred.emit("현재 노트를 선택한 뒤 실행해주세요.")
             return
 
         action = self._action_registry.get_action(action_id)
@@ -190,7 +211,129 @@ class AssistantController(QObject):
             context["QUESTION"] = self._last_query or ""
 
         prompt = self._prompt_service.render_prompt(action.id, context)
-        self._run_ai_task(prompt)
+        logger.info(
+            f"[AssistantController] Task prepared: action_id={action.id}, "
+            f"content_len={len(truncated_content)}, prompt_len={len(prompt)}"
+        )
+        self._run_ai_task(prompt, action_id=action.id)
+
+    @pyqtSlot(str, str, str, str, str)
+    def runCustomAction(
+        self,
+        action_id: str,
+        user_input: str,
+        current_note_json: str,
+        selection: str,
+        chat_history_json: str,
+    ):
+        """Run a custom AI action with full context."""
+        import json
+
+        if self._worker_manager.is_running():
+            self.errorOccurred.emit("이미 실행 중인 작업이 있습니다")
+            return
+
+        current_note = None
+        chat_history = []
+
+        try:
+            if current_note_json:
+                current_note = json.loads(current_note_json)
+        except json.JSONDecodeError:
+            logger.warning("[AssistantController] Failed to parse current_note_json")
+
+        try:
+            if chat_history_json:
+                chat_history = json.loads(chat_history_json)
+        except json.JSONDecodeError:
+            logger.warning("[AssistantController] Failed to parse chat_history_json")
+
+        action = self._prompt_service.get_action(action_id)
+
+        if not action:
+            logger.warning(f"[AssistantController] runCustomAction: Action not found: {action_id}")
+            self.errorOccurred.emit(f"알 수 없는 작업: {action_id}")
+            return
+
+        if not action.get("enabled", True):
+            self.errorOccurred.emit("이 AI 기능은 비활성화되어 있습니다.")
+            return
+
+        if action.get("archived", False):
+            self.errorOccurred.emit("이 AI 기능은 삭제되었습니다.")
+            return
+
+        from .prompt_variable_analyzer import PromptVariableAnalyzer
+        from .action_execution_context_builder import ActionExecutionContextBuilder
+
+        binding = self._prompt_service.repository.get_binding(action_id)
+        prompt_doc_id = binding.get("prompt_doc_id") if binding else None
+        prompt_doc = None
+
+        if prompt_doc_id:
+            prompt_doc = self._prompt_service.get_prompt_document(prompt_doc_id)
+
+        if not prompt_doc:
+            prompt_doc = self._prompt_service.get_prompt_document(action_id)
+
+        if not prompt_doc:
+            logger.warning(f"[AssistantController] runCustomAction: Prompt not found for action: {action_id}")
+            self.errorOccurred.emit("연결된 프롬프트를 찾을 수 없습니다.")
+            return
+
+        if prompt_doc.get("archived", False):
+            self.errorOccurred.emit("연결된 프롬프트가 삭제되었습니다.")
+            return
+
+        content_md = prompt_doc.get("content_md", "")
+        explicit_input_mode = action.get("input_mode", "auto")
+
+        validation = PromptVariableAnalyzer.build_validation_result(
+            action_id, prompt_doc_id or prompt_doc.get("prompt_doc_id"), content_md, explicit_input_mode
+        )
+
+        inferred_input_mode = validation.get("inferred_input_mode", explicit_input_mode)
+        if explicit_input_mode and explicit_input_mode != "auto":
+            inferred_input_mode = explicit_input_mode
+
+        preconditions = ActionExecutionContextBuilder.validate_execution_preconditions(
+            action, inferred_input_mode, current_note, user_input, selection
+        )
+
+        if not preconditions["valid"]:
+            for error in preconditions["errors"]:
+                self.errorOccurred.emit(error)
+            return
+
+        if preconditions["warnings"]:
+            for warning in preconditions["warnings"]:
+                logger.warning(f"[AssistantController] runCustomAction warning: {warning}")
+
+        use_rag = action.get("use_rag", False)
+        retriever = self._retriever if use_rag else None
+
+        context = ActionExecutionContextBuilder.build_context_for_action(
+            action, prompt_doc, user_input, current_note, selection, chat_history, retriever
+        )
+
+        rendered_prompt = self._prompt_service.render_prompt(action_id, context)
+        if not rendered_prompt:
+            logger.warning(f"[AssistantController] runCustomAction: Failed to render prompt: {action_id}")
+            self.errorOccurred.emit("프롬프트 렌더링에 실패했습니다.")
+            return
+
+        logger.info(
+            f"[AssistantController] runCustomAction: action_id={action_id}, "
+            f"prompt_doc_id={prompt_doc.get('prompt_doc_id')}, "
+            f"input_mode={inferred_input_mode}, "
+            f"variables={validation.get('variables', [])}, "
+            f"content_len={len(context.get('CONTENT', ''))}, "
+            f"user_input_len={len(context.get('USER_INPUT', ''))}, "
+            f"selection_len={len(context.get('SELECTION', ''))}, "
+            f"prompt_len={len(rendered_prompt)}"
+        )
+
+        self._run_ai_task(rendered_prompt, action_id=action_id)
 
     @pyqtSlot(str, str)
     def askQuestion(self, content: str, question: str):
@@ -200,11 +343,11 @@ class AssistantController(QObject):
             return
 
         if not content or not content.strip():
-            self.errorOccurred.emit("문서 내용이 없습니다")
+            self.errorOccurred.emit("현재 노트를 선택한 뒤 실행해주세요.")
             return
 
         if not question or not question.strip():
-            self.errorOccurred.emit("질문이 없습니다")
+            self.errorOccurred.emit("이 기능은 입력창에 질문이 필요합니다.")
             return
 
         self._last_query = question
@@ -223,7 +366,7 @@ class AssistantController(QObject):
     @pyqtSlot(str)
     def testPrompt(self, prompt: str):
         """Run a test prompt."""
-        self._run_ai_task(prompt)
+        self._run_ai_task(prompt, action_id="test_prompt")
 
     @pyqtSlot()
     def cancel(self):

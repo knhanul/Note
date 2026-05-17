@@ -12,11 +12,13 @@ from typing import Any
 
 from .ai_prompt_repository import PromptRepository
 from .ai_prompt_seed_service import PromptSeedService
+from .prompt_variable_analyzer import PromptVariableAnalyzer
 from .prompt_renderer import PromptRenderer
 
 logger = logging.getLogger(__name__)
 
 VARIABLE_PATTERN = re.compile(r"\{\{([A-Z_]+)\}\}")
+ACTION_ID_PATTERN = re.compile(r"^[a-z0-9_]+$")
 
 
 class PromptService:
@@ -31,8 +33,8 @@ class PromptService:
     def repository(self) -> PromptRepository:
         return self._repo
 
-    def list_actions(self) -> list[dict[str, Any]]:
-        actions = self._repo.list_actions()
+    def list_actions(self, include_archived: bool = False, enabled_only: bool = False) -> list[dict[str, Any]]:
+        actions = self._repo.list_actions(include_archived=include_archived, enabled_only=enabled_only)
         result: list[dict[str, Any]] = []
         for action in actions:
             if action.get("action_id") == "_schema_meta":
@@ -49,12 +51,207 @@ class PromptService:
                 "required_variables": self._parse_variables_json(action.get("required_variables_json")),
                 "enabled": bool(action.get("enabled", 1)),
                 "sort_order": int(action.get("sort_order", 0)),
+                "source_type": action.get("source_type", "default"),
+                "readonly": bool(action.get("readonly", 0)),
+                "archived": bool(action.get("archived", 0)),
+                "input_mode": action.get("input_mode", "auto"),
+                "use_rag": bool(action.get("use_rag", 0)),
+                "icon": action.get("icon", ""),
                 "prompt_doc_id": prompt_doc_id,
                 "binding_prompt_doc_id": binding.get("prompt_doc_id") if binding else prompt_doc_id,
                 "binding_updated_at": binding.get("updated_at") if binding else "",
                 "current_prompt": self._document_to_summary(prompt) if prompt else None,
             })
         return result
+
+    def get_action(self, action_id: str) -> dict[str, Any] | None:
+        action = self._repo.get_action(action_id)
+        if not action:
+            return None
+        summary = self._repo.get_prompt_summary_for_action(action_id)
+        prompt = summary.get("prompt") if summary else None
+        binding = summary.get("binding") if summary else None
+        prompt_doc_id = summary.get("prompt_doc_id") if summary else action_id
+        return {
+            "action_id": action["action_id"],
+            "name": action.get("name", ""),
+            "description": action.get("description", ""),
+            "category": action.get("category", ""),
+            "required_variables": self._parse_variables_json(action.get("required_variables_json")),
+            "enabled": bool(action.get("enabled", 1)),
+            "sort_order": int(action.get("sort_order", 0)),
+            "source_type": action.get("source_type", "default"),
+            "readonly": bool(action.get("readonly", 0)),
+            "archived": bool(action.get("archived", 0)),
+            "input_mode": action.get("input_mode", "auto"),
+            "use_rag": bool(action.get("use_rag", 0)),
+            "icon": action.get("icon", ""),
+            "created_at": action.get("created_at", ""),
+            "updated_at": action.get("updated_at", ""),
+            "prompt_doc_id": prompt_doc_id,
+            "binding_prompt_doc_id": binding.get("prompt_doc_id") if binding else prompt_doc_id,
+            "current_prompt": self._document_to_summary(prompt) if prompt else None,
+        }
+
+    def validate_action_id(self, action_id: str) -> tuple[bool, str]:
+        if not action_id:
+            return False, "action_id는 필수입니다"
+        if not ACTION_ID_PATTERN.match(action_id):
+            return False, "action_id는 영문 소문자, 숫자, underscore만 가능합니다"
+        return True, ""
+
+    def generate_action_id(self, name: str) -> str:
+        base = re.sub(r"[^a-z0-9]", "_", name.lower())
+        base = re.sub(r"_+", "_", base).strip("_")
+        if not base:
+            base = "custom_action"
+        if not self._repo.action_exists(base):
+            return base
+        for i in range(1, 100):
+            candidate = f"{base}_{i}"
+            if not self._repo.action_exists(candidate):
+                return candidate
+        return f"{base}_{uuid.uuid4().hex[:8]}"
+
+    def create_action(self, data: dict[str, Any]) -> dict[str, Any] | None:
+        action_id = data.get("action_id", "").strip() or self.generate_action_id(data.get("name", ""))
+        name = data.get("name", "").strip()
+        if not name:
+            logger.warning("[PromptService] create_action: name is required")
+            return None
+
+        valid, msg = self.validate_action_id(action_id)
+        if not valid:
+            logger.warning(f"[PromptService] create_action: {msg}")
+            return None
+
+        if self._repo.action_exists(action_id):
+            logger.warning(f"[PromptService] create_action: action_id already exists: {action_id}")
+            return None
+
+        sort_order = data.get("sort_order")
+        if sort_order is None:
+            sort_order = self._repo.get_next_sort_order()
+
+        record = {
+            "action_id": action_id,
+            "name": name,
+            "description": data.get("description", ""),
+            "category": data.get("category", "user"),
+            "required_variables_json": data.get("required_variables_json", "[]"),
+            "enabled": data.get("enabled", 1),
+            "sort_order": sort_order,
+            "source_type": "user",
+            "readonly": 0,
+            "archived": 0,
+            "input_mode": data.get("input_mode", "auto"),
+            "use_rag": data.get("use_rag", 0),
+            "icon": data.get("icon", ""),
+        }
+
+        if self._repo.create_action(record):
+            logger.info(f"[PromptService] Created action: {action_id}")
+            return self.get_action(action_id)
+        return None
+
+    def update_action(self, action_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
+        action = self._repo.get_action(action_id)
+        if not action:
+            logger.warning(f"[PromptService] update_action: action not found: {action_id}")
+            return None
+
+        if int(action.get("readonly", 0)):
+            logger.warning(f"[PromptService] update_action: cannot update readonly action: {action_id}")
+            return None
+
+        record = {
+            "name": data.get("name", action.get("name", "")),
+            "description": data.get("description", action.get("description", "")),
+            "category": data.get("category", action.get("category", "")),
+            "required_variables_json": data.get("required_variables_json", action.get("required_variables_json", "[]")),
+            "enabled": data.get("enabled", action.get("enabled", 1)),
+            "sort_order": data.get("sort_order", action.get("sort_order", 0)),
+            "source_type": action.get("source_type", "default"),
+            "readonly": action.get("readonly", 0),
+            "archived": action.get("archived", 0),
+            "input_mode": data.get("input_mode", action.get("input_mode", "auto")),
+            "use_rag": data.get("use_rag", action.get("use_rag", 0)),
+            "icon": data.get("icon", action.get("icon", "")),
+        }
+
+        if self._repo.update_action(action_id, record):
+            logger.info(f"[PromptService] Updated action: {action_id}")
+            return self.get_action(action_id)
+        return None
+
+    def duplicate_action(self, action_id: str) -> dict[str, Any] | None:
+        source = self.get_action(action_id)
+        if not source:
+            logger.warning(f"[PromptService] duplicate_action: action not found: {action_id}")
+            return None
+
+        new_action_id = self.generate_action_id(source.get("name", "action"))
+        new_name = f"{source.get('name', action_id)} (사본)"
+
+        data = {
+            "action_id": new_action_id,
+            "name": new_name,
+            "description": source.get("description", ""),
+            "category": source.get("category", "user"),
+            "required_variables_json": source.get("required_variables_json", "[]"),
+            "enabled": source.get("enabled", 1),
+            "input_mode": source.get("input_mode", "auto"),
+            "use_rag": source.get("use_rag", 0),
+            "icon": source.get("icon", ""),
+        }
+
+        new_action = self.create_action(data)
+        if not new_action:
+            return None
+
+        binding = self._repo.get_binding(action_id)
+        if binding:
+            self._repo.set_binding(new_action_id, binding.get("prompt_doc_id", new_action_id))
+
+        return new_action
+
+    def archive_action(self, action_id: str) -> bool:
+        action = self._repo.get_action(action_id)
+        if not action:
+            logger.warning(f"[PromptService] archive_action: action not found: {action_id}")
+            return False
+
+        if action.get("source_type") == "default":
+            logger.warning(f"[PromptService] archive_action: cannot archive default action: {action_id}")
+            return False
+
+        if self._repo.archive_action(action_id, True):
+            logger.info(f"[PromptService] Archived action: {action_id}")
+            return True
+        return False
+
+    def set_action_enabled(self, action_id: str, enabled: bool) -> bool:
+        action = self._repo.get_action(action_id)
+        if not action:
+            logger.warning(f"[PromptService] set_action_enabled: action not found: {action_id}")
+            return False
+
+        if self._repo.set_action_enabled(action_id, enabled):
+            logger.info(f"[PromptService] Set action enabled: {action_id} = {enabled}")
+            return True
+        return False
+
+    def move_action_up(self, action_id: str) -> bool:
+        if self._repo.move_action_up(action_id):
+            logger.info(f"[PromptService] Moved action up: {action_id}")
+            return True
+        return False
+
+    def move_action_down(self, action_id: str) -> bool:
+        if self._repo.move_action_down(action_id):
+            logger.info(f"[PromptService] Moved action down: {action_id}")
+            return True
+        return False
 
     def list_prompt_documents(self, include_archived: bool = False) -> list[dict[str, Any]]:
         docs = self._repo.list_prompt_documents(include_archived=include_archived)
@@ -211,14 +408,23 @@ class PromptService:
             return {"ok": False, "missing_required_variables": ["ACTION_OR_PROMPT_MISSING"], "unknown_variables": []}
 
         required = set(self._parse_variables_json(action.get("required_variables_json")))
-        known = set(self._extract_variables(prompt.get("content_md", ""))) | {"CONTENT", "SELECTION", "QUESTION", "TITLE", "TAGS", "CONTEXT"}
-        found = set(self._extract_variables(prompt.get("content_md", "")))
+        analysis = PromptVariableAnalyzer.analyze_variables(prompt.get("content_md", ""))
+        found = set(analysis.get("variables", []))
         missing_required = sorted(required - found)
-        unknown = sorted(found - known)
+        unknown = sorted(analysis.get("unknown_variables", []))
+        inferred_input_mode = PromptVariableAnalyzer.infer_input_mode(
+            prompt.get("content_md", ""),
+            action.get("input_mode", "auto"),
+        )
         return {
-            "ok": not missing_required and not unknown,
+            "ok": not missing_required,
             "missing_required_variables": missing_required,
             "unknown_variables": unknown,
+            "variables": sorted(found),
+            "inferred_input_mode": inferred_input_mode,
+            "needs_note": bool(analysis.get("needs_note", False)),
+            "needs_chat": bool(analysis.get("needs_chat", False)),
+            "needs_selection": bool(analysis.get("needs_selection", False)),
         }
 
     def get_effective_prompt(self, action_id: str) -> str:

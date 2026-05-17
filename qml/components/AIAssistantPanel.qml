@@ -23,6 +23,79 @@ Rectangle {
     property var aiModelList: typeof aiAssistantController !== "undefined" && aiAssistantController !== null ? aiAssistantController.modelList : []
     property bool aiRunning: false
 
+    property var aiActionControllerObj: typeof aiActionController !== "undefined" && aiActionController !== null ? aiActionController : null
+    property var enabledActionList: aiActionControllerObj ? aiActionControllerObj.enabledActionList : []
+    property var selectedAction: ({})
+
+    function getActionController() {
+        return aiActionControllerObj
+    }
+
+    function refreshActionList() {
+        var aac = getActionController()
+        if (aac && aac.refresh) {
+            aac.refresh()
+        }
+    }
+
+    function getInputModeText(mode) {
+        if (!mode || mode === "auto") return "자동"
+        if (mode === "note_required") return "노트 필요"
+        if (mode === "chat_only") return "채팅만"
+        if (mode === "note_and_chat") return "노트+채팅"
+        if (mode === "selection_required") return "선택문장 필요"
+        return "자동"
+    }
+
+    function getInputModePlaceholder(mode) {
+        if (!mode || mode === "auto") return "선택한 AI 기능을 실행할 내용을 입력하세요."
+        if (mode === "note_required") return "현재 노트를 기준으로 실행합니다. 필요한 요청이 있으면 입력하세요."
+        if (mode === "chat_only") return "AI에게 물어볼 내용을 입력하세요."
+        if (mode === "note_and_chat") return "현재 노트와 함께 AI에게 요청할 내용을 입력하세요."
+        if (mode === "selection_required") return "에디터에서 문장을 선택한 뒤 실행하세요."
+        return "선택한 AI 기능을 실행할 내용을 입력하세요."
+    }
+
+    function isDefaultAction(actionId) {
+        var defaults = ["summarize_note", "polish_selection", "extract_todo", "suggest_title_tags", "current_note_qa"]
+        return defaults.indexOf(actionId) >= 0
+    }
+
+    function runSelectedAction() {
+        var action = root.selectedAction
+        if (!action || !action.action_id) return
+
+        var ac = getAssistantController()
+        if (!ac) return
+
+        if (!canUseAI() || root.aiRunning) return
+
+        var userInput = actionInput.text || ""
+        var currentNoteJson = ""
+        var selection = ""
+
+        if (window.currentNote) {
+            currentNoteJson = JSON.stringify({
+                note_id: window.currentNote.note_id || "",
+                title: window.currentNote.title || "",
+                content: window.currentNote.content || "",
+                tags: window.currentNote.tags || ""
+            })
+        }
+
+        root.responseText = ""
+
+        if (isDefaultAction(action.action_id)) {
+            var content = ""
+            if (window.currentNote && window.currentNote.content) {
+                content = window.currentNote.content
+            }
+            ac.runTask(action.action_id, content)
+        } else {
+            ac.runCustomAction(action.action_id, userInput, currentNoteJson, selection, "[]")
+        }
+    }
+
     function getController() {
         return typeof aiAssistantController !== "undefined" && aiAssistantController !== null ? aiAssistantController : null
     }
@@ -53,19 +126,39 @@ Rectangle {
         root.aiRunning = ac.isRunning
 
         ac.tokenReceived.connect(function(token) {
+            console.log("[AIAssistantPanel] Token received: length=" + token.length + ", responseText.length=" + root.responseText.length)
             root.responseText += token
+        })
+
+        ac.resultReady.connect(function(result) {
+            console.log("[AIAssistantPanel] Result ready: length=" + result.length + ", responseText.length=" + root.responseText.length)
+            if (result && result !== "") {
+                root.responseText = result
+            }
         })
 
         ac.runningChanged.connect(function(running) {
             root.aiRunning = running
             if (!running) {
-                console.log("[AIAssistantPanel] Task finished")
+                console.log("[AIAssistantPanel] Task finished, responseText.length=" + root.responseText.length)
             }
         })
 
         ac.errorOccurred.connect(function(error) {
             root.responseText += "\n[오류] " + error
         })
+
+        root.refreshActionList()
+    }
+
+    Connections {
+        target: aiActionControllerObj
+        function onActionsChanged() {
+            root.refreshActionList()
+            if ((!root.selectedAction || !root.selectedAction.action_id) && root.enabledActionList.length > 0) {
+                root.selectedAction = root.enabledActionList[0]
+            }
+        }
     }
 
     ColumnLayout {
@@ -235,6 +328,143 @@ Rectangle {
                         width: parent.width - (Metrics.md * 2)
                         spacing: Metrics.sm
                         anchors.centerIn: parent
+
+                        Text {
+                            text: "AI 기능 선택"
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.bodySmall
+                            font.weight: Typography.weightMedium
+                            color: Colors.textPrimary
+                        }
+
+                        ComboBox {
+                            id: actionSelector
+                            width: parent.width
+                            height: 36
+                            model: root.enabledActionList.map(function(a) { return a.name || a.action_id })
+                            currentIndex: 0
+                            onCurrentIndexChanged: {
+                                if (currentIndex >= 0 && currentIndex < root.enabledActionList.length) {
+                                    root.selectedAction = root.enabledActionList[currentIndex]
+                                }
+                            }
+                            Component.onCompleted: {
+                                if (root.enabledActionList.length > 0) {
+                                    root.selectedAction = root.enabledActionList[0]
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            width: parent.width
+                            radius: Metrics.radiusMd
+                            color: Colors.bgSecondary
+                            border.color: Colors.borderLight
+                            visible: root.selectedAction && root.selectedAction.action_id
+
+                            ColumnLayout {
+                                width: parent.width - (Metrics.md * 2)
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                anchors.margins: Metrics.sm
+                                spacing: Metrics.xs
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: root.selectedAction ? (root.selectedAction.name || "") : ""
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.bodySmall
+                                        font.weight: Typography.weightMedium
+                                        color: Colors.textPrimary
+                                    }
+
+                                    Rectangle {
+                                        height: 20
+                                        radius: Metrics.radiusFull
+                                        color: Colors.primary100
+                                        width: modeBadgeText.implicitWidth + 16
+
+                                        Text {
+                                            id: modeBadgeText
+                                            anchors.centerIn: parent
+                                            text: root.selectedAction ? getInputModeText(root.selectedAction.input_mode) : ""
+                                            font.family: Typography.fontPrimary
+                                            font.pixelSize: 10
+                                            color: Colors.primary700
+                                        }
+                                    }
+                                }
+
+                                Text {
+                                    width: parent.width
+                                    text: root.selectedAction ? (root.selectedAction.description || "") : ""
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: Typography.caption
+                                    color: Colors.textSecondary
+                                    wrapMode: Text.Wrap
+                                }
+
+                                Text {
+                                    text: "연결 프롬프트: " + (root.selectedAction && root.selectedAction.binding_prompt_doc_id ? root.selectedAction.binding_prompt_doc_id : "기본")
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: 10
+                                    color: Colors.textTertiary
+                                }
+                            }
+                        }
+
+                        TextField {
+                            id: actionInput
+                            width: parent.width
+                            placeholderText: root.selectedAction ? getInputModePlaceholder(root.selectedAction.input_mode) : "AI 기능을 선택하세요"
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.bodySmall
+                            enabled: canUseAI() && !root.aiRunning
+                        }
+
+                        RowLayout {
+                            width: parent.width
+                            spacing: Metrics.sm
+
+                            Button {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 36
+                                text: root.aiRunning ? "중지" : "실행"
+                                enabled: canUseAI() && root.selectedAction && root.selectedAction.action_id
+                                contentItem: Text {
+                                    text: parent.text
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: Typography.bodySmall
+                                    font.weight: Typography.weightMedium
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                    color: parent.enabled ? Colors.white : Colors.textTertiary
+                                }
+                                background: Rectangle {
+                                    color: parent.enabled ? Colors.primary500 : Colors.bgTertiary
+                                    radius: Metrics.radiusSm
+                                }
+                                onClicked: {
+                                    if (root.aiRunning) {
+                                        var ac = getAssistantController()
+                                        if (ac) {
+                                            ac.cancel()
+                                            root.responseText += "\n[안내] 작업을 취소했습니다."
+                                        }
+                                    } else {
+                                        runSelectedAction()
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            width: parent.width
+                            height: 1
+                            color: Colors.borderLight
+                        }
 
                         Text {
                             text: "빠른 실행"

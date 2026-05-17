@@ -58,6 +58,20 @@ Rectangle {
         }
     }
 
+    function syncChatModelCombo() {
+        if (!chatModelCombo)
+            return
+        var idx = root.aiModelList.indexOf(root.aiChatModel)
+        chatModelCombo.currentIndex = idx >= 0 ? idx : -1
+    }
+
+    function syncEmbeddingModelCombo() {
+        if (!embeddingModelCombo)
+            return
+        var idx = root.aiModelList.indexOf(root.aiEmbeddingModel)
+        embeddingModelCombo.currentIndex = idx >= 0 ? idx : -1
+    }
+
     MouseArea {
         anchors.fill: parent
         onClicked: {}
@@ -168,7 +182,7 @@ Rectangle {
                                 anchors.verticalCenter: parent.verticalCenter
                                 anchors.left: parent.left
                                 anchors.leftMargin: Metrics.md
-                                text: "AI 프롬프트 관리"
+                                text: "프롬프트 연결"
                                 font.family: Typography.fontPrimary
                                 font.pixelSize: Typography.bodySmall
                                 font.weight: root.settingsMenuIndex === 1 ? Typography.weightSemibold : Typography.weightRegular
@@ -181,6 +195,34 @@ Rectangle {
                                 hoverEnabled: true
                                 enabled: root.hasPromptController()
                                 onClicked: root.settingsMenuIndex = 1
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 40
+                            radius: Metrics.radiusMd
+                            color: root.settingsMenuIndex === 2 ? Colors.primary50 : (actionSettingsMenuMA.containsMouse ? Colors.bgPrimary : "transparent")
+                            border.width: 1
+                            border.color: root.settingsMenuIndex === 2 ? Colors.primary200 : Colors.borderLight
+                            visible: typeof aiActionController !== "undefined" && aiActionController !== null
+
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.left: parent.left
+                                anchors.leftMargin: Metrics.md
+                                text: "AI 기능 관리"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodySmall
+                                font.weight: root.settingsMenuIndex === 2 ? Typography.weightSemibold : Typography.weightRegular
+                                color: root.settingsMenuIndex === 2 ? Colors.primary700 : Colors.textSecondary
+                            }
+
+                            MouseArea {
+                                id: actionSettingsMenuMA
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: root.settingsMenuIndex = 2
                             }
                         }
 
@@ -375,39 +417,47 @@ Rectangle {
                                             spacing: Metrics.sm
 
                                             ComboBox {
+                                                id: chatModelCombo
                                                 Layout.fillWidth: true
                                                 Layout.preferredHeight: 32
                                                 Layout.preferredWidth: 260
                                                 Layout.maximumWidth: 260
                                                 model: root.aiModelList
-                                                currentIndex: root.aiModelList.indexOf(root.aiChatModel)
-                                                onCurrentIndexChanged: {
+                                                currentIndex: -1
+                                                Component.onCompleted: syncChatModelCombo()
+                                                onModelChanged: syncChatModelCombo()
+                                                onActivated: {
                                                     var list = root.aiModelList
-                                                    if (currentIndex >= 0 && currentIndex < list.length) {
+                                                    if (chatModelCombo.currentIndex >= 0 && chatModelCombo.currentIndex < list.length) {
                                                         var c = getController()
                                                         if (c) {
-                                                            c.setChatModel(list[currentIndex])
+                                                            c.setChatModel(list[chatModelCombo.currentIndex])
                                                             c.check_connection()
                                                             syncAssistantSettings()
+                                                            syncChatModelCombo()
                                                         }
                                                     }
                                                 }
                                             }
 
                                             ComboBox {
+                                                id: embeddingModelCombo
                                                 Layout.fillWidth: true
                                                 Layout.preferredHeight: 32
                                                 Layout.preferredWidth: 260
                                                 Layout.maximumWidth: 260
                                                 model: root.aiModelList
-                                                currentIndex: root.aiModelList.indexOf(root.aiEmbeddingModel)
-                                                onCurrentIndexChanged: {
+                                                currentIndex: -1
+                                                Component.onCompleted: syncEmbeddingModelCombo()
+                                                onModelChanged: syncEmbeddingModelCombo()
+                                                onActivated: {
                                                     var list = root.aiModelList
-                                                    if (currentIndex >= 0 && currentIndex < list.length) {
+                                                    if (embeddingModelCombo.currentIndex >= 0 && embeddingModelCombo.currentIndex < list.length) {
                                                         var c = getController()
                                                         if (c) {
-                                                            c.setEmbeddingModel(list[currentIndex])
+                                                            c.setEmbeddingModel(list[embeddingModelCombo.currentIndex])
                                                             syncAssistantSettings()
+                                                            syncEmbeddingModelCombo()
                                                         }
                                                     }
                                                 }
@@ -573,6 +623,52 @@ Rectangle {
                                     Text {
                                         Layout.fillWidth: true
                                         text: "프롬프트 연결 기능을 사용할 수 없습니다."
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.bodySmall
+                                        color: Colors.textSecondary
+                                        horizontalAlignment: Text.AlignHCenter
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "이 탭은 work_ai_editor에서만 활성화됩니다."
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
+                                        color: Colors.textTertiary
+                                        horizontalAlignment: Text.AlignHCenter
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            radius: Metrics.radiusLg
+                            color: Colors.bgSecondary
+                            border.width: 1
+                            border.color: Colors.borderLight
+
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: Metrics.md
+                                spacing: Metrics.md
+
+                                AIActionManagementPanel {
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    visible: typeof aiActionController !== "undefined" && aiActionController !== null
+                                }
+
+                                ColumnLayout {
+                                    anchors.centerIn: parent
+                                    width: parent.width
+                                    spacing: Metrics.sm
+                                    visible: typeof aiActionController === "undefined" || aiActionController === null
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "AI 기능 관리를 사용할 수 없습니다."
                                         font.family: Typography.fontPrimary
                                         font.pixelSize: Typography.bodySmall
                                         color: Colors.textSecondary

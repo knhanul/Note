@@ -4057,6 +4057,50 @@ Window {
                                     }
                                 }
 
+                                // Delete button (only for user prompts)
+                                Rectangle {
+                                    width: 80
+                                    height: 28
+                                    radius: Metrics.radiusMd
+                                    color: deletePromptBtnArea.containsMouse ? Colors.error500 : Colors.error400
+                                    visible: window.currentAIPromptDocument && !window.currentAIPromptDocument.readonly && window.currentAIPromptDocument.source_type !== "default"
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "삭제"
+                                        font.family: Typography.fontPrimary
+                                        font.weight: Typography.weightMedium
+                                        font.pixelSize: 11
+                                        color: Colors.textInverse
+                                    }
+
+                                    MouseArea {
+                                        id: deletePromptBtnArea
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        onClicked: {
+                                            if (typeof promptDocumentController !== "undefined" && promptDocumentController && window.selectedAIPromptDocId) {
+                                                var bindingCount = promptDocumentController.countBindingsForPrompt(window.selectedAIPromptDocId)
+                                                if (bindingCount > 0) {
+                                                    var boundActions = promptDocumentController.listActionsBoundToPrompt(window.selectedAIPromptDocId)
+                                                    var actionNames = boundActions.map(function(a) { return a.name || a.action_id }).join(", ")
+                                                    if (confirm("이 프롬프트는 다음 AI 기능에 연결되어 있습니다: " + actionNames + ". 삭제하시겠습니까?")) {
+                                                        promptDocumentController.archivePromptDocument(window.selectedAIPromptDocId)
+                                                        window.selectedAIPromptDocId = ""
+                                                        window.currentAIPromptDocument = null
+                                                    }
+                                                } else {
+                                                    if (confirm("이 AI 프롬프트를 삭제하시겠습니까? 실제 삭제가 아니라 보관 처리되며 목록에서 숨겨집니다.")) {
+                                                        promptDocumentController.archivePromptDocument(window.selectedAIPromptDocId)
+                                                        window.selectedAIPromptDocId = ""
+                                                        window.currentAIPromptDocument = null
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
                                 // Info text for readonly
                                 Text {
                                     text: "기본 프롬프트입니다. 앱 업데이트 시 변경될 수 있으므로 직접 수정할 수 없습니다."
@@ -4546,6 +4590,7 @@ Window {
                 }
 
                 onOpenSettingsDialog: {
+                    aiSettingsDialog.settingsMenuIndex = 2
                     aiSettingsDialog.visible = true
                 }
             }

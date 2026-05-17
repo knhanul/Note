@@ -178,6 +178,108 @@ class AIPromptDocumentController(QObject):
             return True
         return bool(int(self._current_prompt_document.get("readonly", 0)))
 
+    @pyqtSlot(str, str, str, result="QVariantMap")
+    def createPromptDocument(self, title: str, content_md: str, description: str = "") -> dict:
+        """Create a new user prompt document."""
+        if not title:
+            title = "새 AI 프롬프트"
+
+        default_content = content_md or """# 새 AI 프롬프트
+
+아래 입력을 참고하여 답변해주세요.
+
+## 입력
+
+{{USER_INPUT}}
+
+## 답변
+
+"""
+
+        try:
+            new_doc = self._prompt_service.create_prompt_document(
+                title=title,
+                content_md=default_content,
+                description=description,
+                source_type="user",
+                readonly=0,
+                archived=0,
+            )
+            if new_doc:
+                logger.info(f"[AIPromptDocumentController] Created new prompt document: {new_doc.get('prompt_doc_id')}")
+                self.loadPromptDocuments()
+                self.selectPromptDocument(new_doc.get("prompt_doc_id", ""))
+                self.infoMessage.emit("새 프롬프트가 생성되었습니다.")
+                return new_doc
+            else:
+                logger.error("[AIPromptDocumentController] Failed to create prompt document")
+                self.errorOccurred.emit("프롬프트 생성에 실패했습니다.")
+                return {}
+        except Exception as e:
+            logger.error(f"[AIPromptDocumentController] Error creating prompt document: {e}")
+            self.errorOccurred.emit(f"프롬프트 생성 중 오류가 발생했습니다: {e}")
+            return {}
+
+    @pyqtSlot(str, result=bool)
+    def archivePromptDocument(self, prompt_doc_id: str) -> bool:
+        """Archive a user prompt document (soft delete)."""
+        if not prompt_doc_id:
+            logger.warning("[AIPromptDocumentController] archivePromptDocument: no prompt_doc_id")
+            return False
+
+        doc = self._prompt_service.get_prompt_document(prompt_doc_id)
+        if not doc:
+            logger.warning(f"[AIPromptDocumentController] archivePromptDocument: document not found: {prompt_doc_id}")
+            return False
+
+        if doc.get("source_type") == "default" or int(doc.get("readonly", 0)):
+            logger.warning(f"[AIPromptDocumentController] archivePromptDocument: cannot archive default or readonly: {prompt_doc_id}")
+            self.errorOccurred.emit("기본 프롬프트는 삭제할 수 없습니다.")
+            return False
+
+        try:
+            success = self._prompt_service.archive_prompt_document(prompt_doc_id, archived=True)
+            if success:
+                logger.info(f"[AIPromptDocumentController] Archived prompt document: {prompt_doc_id}")
+                self.loadPromptDocuments()
+                self.infoMessage.emit("프롬프트가 삭제되었습니다.")
+                if self._selected_prompt_doc_id == prompt_doc_id:
+                    self._selected_prompt_doc_id = ""
+                    self._current_prompt_document = None
+                    self.selectedPromptDocIdChanged.emit()
+                    self.currentPromptDocumentChanged.emit()
+                return True
+            else:
+                logger.error(f"[AIPromptDocumentController] Failed to archive prompt document: {prompt_doc_id}")
+                self.errorOccurred.emit("프롬프트 삭제에 실패했습니다.")
+                return False
+        except Exception as e:
+            logger.error(f"[AIPromptDocumentController] Error archiving prompt document: {e}")
+            self.errorOccurred.emit(f"프롬프트 삭제 중 오류가 발생했습니다: {e}")
+            return False
+
+    @pyqtSlot(str, result=int)
+    def countBindingsForPrompt(self, prompt_doc_id: str) -> int:
+        """Count how many AI actions are bound to this prompt."""
+        if not prompt_doc_id:
+            return 0
+        return self._prompt_service.repository.count_bindings_for_prompt(prompt_doc_id)
+
+    @pyqtSlot(str, result="QVariantList")
+    def listActionsBoundToPrompt(self, prompt_doc_id: str) -> list:
+        """List AI actions bound to this prompt."""
+        if not prompt_doc_id:
+            return []
+        return self._prompt_service.repository.list_actions_bound_to_prompt(prompt_doc_id)
+
+    @pyqtSlot(str, result=bool)
+    def isDefaultPrompt(self, prompt_doc_id: str) -> bool:
+        """Check if a prompt is a default (readonly) prompt."""
+        doc = self._prompt_service.get_prompt_document(prompt_doc_id)
+        if not doc:
+            return False
+        return doc.get("source_type") == "default" or int(doc.get("readonly", 0)) == 1
+
     def _initialize(self) -> None:
         """Initialize the controller and load initial data."""
         self.loadPromptDocuments()

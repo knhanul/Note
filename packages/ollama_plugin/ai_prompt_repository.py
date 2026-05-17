@@ -2,9 +2,22 @@
 
 from __future__ import annotations
 
+import logging
+import shutil
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_ACTION_IDS = frozenset({
+    "summarize_note",
+    "polish_selection",
+    "extract_todo",
+    "suggest_title_tags",
+    "current_note_qa",
+})
 
 
 class PromptRepository:
@@ -33,6 +46,9 @@ class PromptRepository:
         return dict(row)
 
     def ensure_schema(self) -> None:
+        # Backup safety: create backup before migration
+        self._create_backup_if_needed()
+
         expected_columns = {
             "ai_prompt_documents": {
                 "prompt_doc_id", "title", "description", "content_md", "source_type",
@@ -40,7 +56,8 @@ class PromptRepository:
             },
             "ai_actions": {
                 "action_id", "name", "description", "category", "required_variables_json",
-                "enabled", "sort_order"
+                "enabled", "sort_order", "source_type", "readonly", "archived",
+                "input_mode", "use_rag", "icon", "created_at", "updated_at"
             },
             "ai_action_prompt_bindings": {
                 "action_id", "prompt_doc_id", "updated_at"
@@ -76,7 +93,15 @@ class PromptRepository:
             category TEXT,
             required_variables_json TEXT,
             enabled INTEGER DEFAULT 1,
-            sort_order INTEGER DEFAULT 0
+            sort_order INTEGER DEFAULT 0,
+            source_type TEXT DEFAULT 'default',
+            readonly INTEGER DEFAULT 0,
+            archived INTEGER DEFAULT 0,
+            input_mode TEXT DEFAULT 'auto',
+            use_rag INTEGER DEFAULT 0,
+            icon TEXT DEFAULT '',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE TABLE IF NOT EXISTS ai_action_prompt_bindings (
@@ -97,32 +122,89 @@ class PromptRepository:
         """
 
         with self._connect() as conn:
-            for table_name, required in expected_columns.items():
-                rows = conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
-                    (table_name,),
-                ).fetchall()
-                if rows:
-                    current_columns = table_columns(conn, table_name)
-                    if not required.issubset(current_columns):
-                        legacy_name = f"{table_name}_legacy"
-                        conn.execute(f"DROP TABLE IF EXISTS {legacy_name}")
-                        conn.execute(f"ALTER TABLE {table_name} RENAME TO {legacy_name}")
+            # Create tables if not exist (additive only, no drop/rename)
             conn.executescript(schema)
+
+            # Additive migration for ai_actions - add missing columns
+            current_action_cols = table_columns(conn, "ai_actions")
+            new_action_columns = {
+                "source_type": "TEXT DEFAULT 'default'",
+                "readonly": "INTEGER DEFAULT 0",
+                "archived": "INTEGER DEFAULT 0",
+                "input_mode": "TEXT DEFAULT 'auto'",
+                "use_rag": "INTEGER DEFAULT 0",
+                "icon": "TEXT DEFAULT ''",
+                "created_at": "TEXT DEFAULT CURRENT_TIMESTAMP",
+                "updated_at": "TEXT DEFAULT CURRENT_TIMESTAMP",
+            }
+            for col_name, col_def in new_action_columns.items():
+                if col_name not in current_action_cols:
+                    try:
+                        conn.execute(f"ALTER TABLE ai_actions ADD COLUMN {col_name} {col_def}")
+                        logger.info(f"[PromptRepository] Added column {col_name} to ai_actions")
+                    except sqlite3.Error as e:
+                        logger.warning(f"[PromptRepository] Failed to add column {col_name}: {e}")
+
+            # Create indexes
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_ai_prompt_documents_archived_title ON ai_prompt_documents(archived, title COLLATE NOCASE)"
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_ai_prompt_history_prompt_doc_id ON ai_prompt_history(prompt_doc_id, created_at DESC)"
             )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ai_actions_archived_enabled ON ai_actions(archived, enabled)"
+            )
 
-    def list_actions(self) -> list[dict[str, Any]]:
+            # Correct default actions
+            self._correct_default_actions(conn)
+
+    def _create_backup_if_needed(self) -> None:
+        """Create backup before migration if it doesn't exist."""
+        if not self._db_path.exists():
+            return
+        backup_path = self._db_path.with_suffix(".db.backup")
+        if not backup_path.exists():
+            try:
+                shutil.copy2(self._db_path, backup_path)
+                logger.info(f"[PromptRepository] Created backup: {backup_path}")
+            except Exception as e:
+                logger.warning(f"[PromptRepository] Failed to create backup: {e}")
+
+    def _correct_default_actions(self, conn: sqlite3.Connection) -> None:
+        """Correct default actions with new columns."""
+        now = datetime.now().isoformat()
+        for action_id in DEFAULT_ACTION_IDS:
+            use_rag = 1 if action_id == "current_note_qa" else 0
+            conn.execute(
+                """
+                UPDATE ai_actions
+                SET source_type = 'default',
+                    readonly = 1,
+                    archived = 0,
+                    input_mode = 'auto',
+                    use_rag = ?,
+                    updated_at = ?
+                WHERE action_id = ?
+                """,
+                (use_rag, now, action_id),
+            )
+        logger.info("[PromptRepository] Corrected default actions")
+
+    def list_actions(self, include_archived: bool = False, enabled_only: bool = False) -> list[dict[str, Any]]:
+        conditions = []
+        if not include_archived:
+            conditions.append("archived = 0")
+        if enabled_only:
+            conditions.append("enabled = 1")
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         with self._connect() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT action_id, name, description, category, required_variables_json,
-                       enabled, sort_order
+                       enabled, sort_order, source_type, readonly, archived, input_mode, use_rag, icon, created_at, updated_at
                 FROM ai_actions
+                {where_clause}
                 ORDER BY sort_order ASC, name COLLATE NOCASE ASC
                 """
             ).fetchall()
@@ -133,7 +215,7 @@ class PromptRepository:
             row = conn.execute(
                 """
                 SELECT action_id, name, description, category, required_variables_json,
-                       enabled, sort_order
+                       enabled, sort_order, source_type, readonly, archived, input_mode, use_rag, icon, created_at, updated_at
                 FROM ai_actions
                 WHERE action_id = ?
                 """,
@@ -141,21 +223,195 @@ class PromptRepository:
             ).fetchone()
             return self._row_to_dict(row)
 
+    def action_exists(self, action_id: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute("SELECT 1 FROM ai_actions WHERE action_id = ?", (action_id,)).fetchone()
+            return row is not None
+
+    def create_action(self, record: dict[str, Any]) -> bool:
+        with self._connect() as conn:
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO ai_actions (
+                        action_id, name, description, category, required_variables_json,
+                        enabled, sort_order, source_type, readonly, archived, input_mode, use_rag, icon
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        record.get("action_id", ""),
+                        record.get("name", ""),
+                        record.get("description", ""),
+                        record.get("category", ""),
+                        record.get("required_variables_json", "[]"),
+                        int(bool(record.get("enabled", True))),
+                        int(record.get("sort_order", 0)),
+                        record.get("source_type", "user"),
+                        int(record.get("readonly", 0)),
+                        int(record.get("archived", 0)),
+                        record.get("input_mode", "auto"),
+                        int(record.get("use_rag", 0)),
+                        record.get("icon", ""),
+                    ),
+                )
+                return True
+            except sqlite3.Error as e:
+                logger.error(f"[PromptRepository] Failed to create action: {e}")
+                return False
+
+    def update_action(self, action_id: str, record: dict[str, Any]) -> bool:
+        with self._connect() as conn:
+            try:
+                conn.execute(
+                    """
+                    UPDATE ai_actions SET
+                        name = excluded.name,
+                        description = excluded.description,
+                        category = excluded.category,
+                        required_variables_json = excluded.required_variables_json,
+                        enabled = excluded.enabled,
+                        sort_order = excluded.sort_order,
+                        source_type = excluded.source_type,
+                        readonly = excluded.readonly,
+                        archived = excluded.archived,
+                        input_mode = excluded.input_mode,
+                        use_rag = excluded.use_rag,
+                        icon = excluded.icon,
+                        updated_at = CURRENT_TIMESTAMP
+                    FROM (SELECT ? AS action_id, ? AS name, ? AS description, ? AS category,
+                                 ? AS required_variables_json, ? AS enabled, ? AS sort_order,
+                                 ? AS source_type, ? AS readonly, ? AS archived,
+                                 ? AS input_mode, ? AS use_rag, ? AS icon) AS excluded
+                    WHERE ai_actions.action_id = excluded.action_id
+                    """,
+                    (
+                        action_id,
+                        record.get("name", ""),
+                        record.get("description", ""),
+                        record.get("category", ""),
+                        record.get("required_variables_json", "[]"),
+                        int(bool(record.get("enabled", True))),
+                        int(record.get("sort_order", 0)),
+                        record.get("source_type", "user"),
+                        int(record.get("readonly", 0)),
+                        int(record.get("archived", 0)),
+                        record.get("input_mode", "auto"),
+                        int(record.get("use_rag", 0)),
+                        record.get("icon", ""),
+                    ),
+                )
+                return True
+            except sqlite3.Error as e:
+                logger.error(f"[PromptRepository] Failed to update action: {e}")
+                return False
+
+    def archive_action(self, action_id: str, archived: bool = True) -> bool:
+        with self._connect() as conn:
+            try:
+                conn.execute(
+                    "UPDATE ai_actions SET archived = ?, updated_at = CURRENT_TIMESTAMP WHERE action_id = ?",
+                    (1 if archived else 0, action_id),
+                )
+                return True
+            except sqlite3.Error as e:
+                logger.error(f"[PromptRepository] Failed to archive action: {e}")
+                return False
+
+    def set_action_enabled(self, action_id: str, enabled: bool) -> bool:
+        with self._connect() as conn:
+            try:
+                conn.execute(
+                    "UPDATE ai_actions SET enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE action_id = ?",
+                    (1 if enabled else 0, action_id),
+                )
+                return True
+            except sqlite3.Error as e:
+                logger.error(f"[PromptRepository] Failed to set action enabled: {e}")
+                return False
+
+    def get_next_sort_order(self, step: int = 10) -> int:
+        with self._connect() as conn:
+            row = conn.execute("SELECT MAX(sort_order) as max_order FROM ai_actions").fetchone()
+            max_order = row["max_order"] if row and row["max_order"] is not None else 0
+            return max_order + step
+
+    def swap_action_sort_order(self, action_id_a: str, action_id_b: str) -> bool:
+        with self._connect() as conn:
+            try:
+                action_a = conn.execute("SELECT sort_order FROM ai_actions WHERE action_id = ?", (action_id_a,)).fetchone()
+                action_b = conn.execute("SELECT sort_order FROM ai_actions WHERE action_id = ?", (action_id_b,)).fetchone()
+                if not action_a or not action_b:
+                    return False
+                sort_a = action_a["sort_order"]
+                sort_b = action_b["sort_order"]
+                conn.execute("UPDATE ai_actions SET sort_order = ?, updated_at = CURRENT_TIMESTAMP WHERE action_id = ?", (sort_b, action_id_a))
+                conn.execute("UPDATE ai_actions SET sort_order = ?, updated_at = CURRENT_TIMESTAMP WHERE action_id = ?", (sort_a, action_id_b))
+                return True
+            except sqlite3.Error as e:
+                logger.error(f"[PromptRepository] Failed to swap sort order: {e}")
+                return False
+
+    def move_action_up(self, action_id: str) -> bool:
+        with self._connect() as conn:
+            action = conn.execute("SELECT sort_order FROM ai_actions WHERE action_id = ?", (action_id,)).fetchone()
+            if not action:
+                return False
+            current_order = action["sort_order"]
+            prev_action = conn.execute(
+                "SELECT action_id FROM ai_actions WHERE sort_order < ? ORDER BY sort_order DESC LIMIT 1",
+                (current_order,)
+            ).fetchone()
+            if not prev_action:
+                return False
+            return self.swap_action_sort_order(action_id, prev_action["action_id"])
+
+    def move_action_down(self, action_id: str) -> bool:
+        with self._connect() as conn:
+            action = conn.execute("SELECT sort_order FROM ai_actions WHERE action_id = ?", (action_id,)).fetchone()
+            if not action:
+                return False
+            current_order = action["sort_order"]
+            next_action = conn.execute(
+                "SELECT action_id FROM ai_actions WHERE sort_order > ? ORDER BY sort_order ASC LIMIT 1",
+                (current_order,)
+            ).fetchone()
+            if not next_action:
+                return False
+            return self.swap_action_sort_order(action_id, next_action["action_id"])
+
     def upsert_action(self, record: dict[str, Any]) -> None:
         with self._connect() as conn:
+            existing = conn.execute(
+                "SELECT source_type, readonly, archived, input_mode, use_rag, icon FROM ai_actions WHERE action_id = ?",
+                (record.get("action_id", ""),)
+            ).fetchone()
+
+            source_type = record.get("source_type") or (existing["source_type"] if existing else "default")
+            readonly = record.get("readonly") if record.get("readonly") is not None else (existing["readonly"] if existing else 0)
+            archived = record.get("archived") if record.get("archived") is not None else (existing["archived"] if existing else 0)
+            input_mode = record.get("input_mode") or (existing["input_mode"] if existing else "auto")
+            use_rag = record.get("use_rag") if record.get("use_rag") is not None else (existing["use_rag"] if existing else 0)
+            icon = record.get("icon") or (existing["icon"] if existing else "")
+
             conn.execute(
                 """
                 INSERT INTO ai_actions (
                     action_id, name, description, category, required_variables_json,
-                    enabled, sort_order
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    enabled, sort_order, source_type, readonly, archived, input_mode, use_rag, icon
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(action_id) DO UPDATE SET
                     name = excluded.name,
                     description = excluded.description,
                     category = excluded.category,
                     required_variables_json = excluded.required_variables_json,
                     enabled = excluded.enabled,
-                    sort_order = excluded.sort_order
+                    sort_order = excluded.sort_order,
+                    source_type = COALESCE(NULLIF(excluded.source_type, ''), ai_actions.source_type),
+                    readonly = COALESCE(excluded.readonly, ai_actions.readonly),
+                    archived = COALESCE(excluded.archived, ai_actions.archived),
+                    input_mode = COALESCE(NULLIF(excluded.input_mode, ''), ai_actions.input_mode),
+                    use_rag = COALESCE(excluded.use_rag, ai_actions.use_rag),
+                    icon = COALESCE(NULLIF(excluded.icon, ''), ai_actions.icon)
                 """,
                 (
                     record.get("action_id", ""),
@@ -165,6 +421,12 @@ class PromptRepository:
                     record.get("required_variables_json", "[]"),
                     int(bool(record.get("enabled", True))),
                     int(record.get("sort_order", 0)),
+                    source_type,
+                    int(readonly),
+                    int(archived),
+                    input_mode,
+                    int(use_rag),
+                    icon,
                 ),
             )
 
@@ -279,6 +541,50 @@ class PromptRepository:
 
     def reset_binding(self, action_id: str) -> None:
         self.set_binding(action_id, action_id)
+
+    def clear_binding(self, action_id: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM ai_action_prompt_bindings WHERE action_id = ?", (action_id,))
+
+    def count_bindings_for_prompt(self, prompt_doc_id: str, include_archived_actions: bool = False) -> int:
+        with self._connect() as conn:
+            if include_archived_actions:
+                row = conn.execute(
+                    "SELECT COUNT(*) as cnt FROM ai_action_prompt_bindings WHERE prompt_doc_id = ?",
+                    (prompt_doc_id,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*) as cnt FROM ai_action_prompt_bindings b
+                    JOIN ai_actions a ON a.action_id = b.action_id
+                    WHERE b.prompt_doc_id = ? AND a.archived = 0
+                    """,
+                    (prompt_doc_id,),
+                ).fetchone()
+            return row["cnt"] if row else 0
+
+    def list_actions_bound_to_prompt(self, prompt_doc_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT a.action_id, a.name, a.enabled, a.archived, a.source_type, a.readonly
+                FROM ai_actions a
+                JOIN ai_action_prompt_bindings b ON b.action_id = a.action_id
+                WHERE b.prompt_doc_id = ?
+                ORDER BY a.sort_order ASC
+                """,
+                (prompt_doc_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def list_action_bindings(self, include_archived: bool = False) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for action in self.list_actions(include_archived=include_archived):
+            summary = self.get_prompt_summary_for_action(action["action_id"])
+            if summary:
+                items.append(summary)
+        return items
 
     def insert_history(self, prompt_doc_id: str, content_md: str) -> None:
         with self._connect() as conn:

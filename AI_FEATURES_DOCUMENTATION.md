@@ -4,6 +4,62 @@
 
 Note2 프로젝트는 Ollama 기반의 AI 어시스턴트 기능을 제공하며, 사용자가 커스터마이즈 가능한 프롬프트 시스템을 통해 다양한 AI 작업을 수행할 수 있습니다.
 
+## Phase 6 최신 운영 가이드 (권장)
+
+아래 내용은 현재 기준의 최신 동작 규칙입니다. 기존 섹션과 충돌할 경우 이 섹션을 우선 참고하세요.
+
+### AI 기능 vs AI 프롬프트 노트
+- AI 기능: 실행 단위(`ai_actions`)로, 이름/정렬/활성화/input_mode/프롬프트 매핑을 관리합니다.
+- AI 프롬프트 노트: 실제 프롬프트 본문(`ai_prompt_documents`)을 관리합니다.
+- 매핑: `ai_action_prompt_bindings`를 통해 기능과 프롬프트를 연결합니다.
+
+### 관리 위치
+- AI 기능 관리: `AI 설정 > AI 기능 관리` 탭
+- 프롬프트 연결: `AI 설정 > 프롬프트 연결` 탭
+- AI 프롬프트 노트 편집: 메인 화면의 AI 프롬프트 가상 서재(`ai_prompts` 모드)
+
+### input_mode
+- `auto`: 프롬프트 변수 분석 결과로 실행 입력 유형을 추론
+- `chat_only`: 노트 없이 사용자 입력만으로 실행
+- `note_required`: 현재 노트가 있어야 실행
+- `note_and_chat`: 현재 노트 + 사용자 입력이 모두 필요
+- `selection_required`: 선택 문장이 필요 (미연동 시 안내 메시지 표시)
+
+### 지원 변수
+- `CONTENT`
+- `SELECTION`
+- `QUESTION`
+- `USER_INPUT`
+- `CHAT_MESSAGE`
+- `CHAT_HISTORY`
+- `TITLE`
+- `TAGS`
+- `CONTEXT`
+
+### 보호 정책
+- 기본 기능(`source_type=default` 또는 `readonly=1`)은 삭제할 수 없습니다.
+- 사용자 기능 삭제는 hard delete가 아니라 archive(`archived=1`) 처리입니다.
+- 기본 프롬프트는 직접 수정/삭제하지 않고 `복사해서 수정`으로만 편집합니다.
+
+### 성능 및 모델 권장
+- 기본 권장값
+  - `timeout=300`, `first_token_timeout=180`, `idle_timeout=60`
+  - `num_predict=256~512`, `num_ctx=2048~4096`, `temperature=0.2`, `keep_alive=10m`
+- 저사양 권장값
+  - `num_predict=256`, `num_ctx=2048`, `keep_alive=5m`
+- Q8 모델은 CPU 환경에서 느릴 수 있으므로 Q4 또는 소형 모델(1.5B~2B) 권장
+
+### 오류 메시지 가이드
+- 현재 노트를 선택한 뒤 실행해주세요.
+- 이 기능은 입력창에 질문이 필요합니다.
+- 이 기능은 선택한 문장이 필요합니다.
+- 연결된 프롬프트를 찾을 수 없습니다.
+- AI 응답 시간이 초과되었습니다. 더 가벼운 모델을 선택하거나 입력 길이를 줄여 다시 시도해보세요.
+- 연결 실패: Ollama가 실행 중인지 확인하세요.
+
+### 수동 테스트 체크리스트
+- `AI_PHASE6_SMOKE_CHECKLIST.md` 문서를 참고하세요.
+
 ## 시스템 아키텍처
 
 ### 주요 컴포넌트

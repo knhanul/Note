@@ -33,6 +33,8 @@ class PromptRenderer:
                 value = context[var_name]
                 replacement = self._apply_filters(var_name, value, context)
                 result = result.replace(match.group(0), str(replacement))
+            else:
+                result = result.replace(match.group(0), "")
 
         return result
 

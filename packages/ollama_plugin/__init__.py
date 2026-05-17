@@ -22,6 +22,7 @@ from .action_registry import ActionRegistry, AIAction
 from .ai_controller import AIAssistantController
 from .ai_prompt_controller import PromptController
 from .ai_prompt_document_controller import AIPromptDocumentController
+from .ai_action_controller import AIActionController
 from .ai_prompt_repository import PromptRepository
 from .ai_prompt_seed_service import PromptSeedService
 from .ai_prompt_service import PromptService
@@ -53,6 +54,7 @@ __all__ = [
     "AIAction",
     "PromptController",
     "AIPromptDocumentController",
+    "AIActionController",
     "PromptRepository",
     "PromptSeedService",
     "PromptService",
