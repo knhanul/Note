@@ -661,8 +661,8 @@ Rectangle {
                                 }
 
                                 ColumnLayout {
-                                    anchors.centerIn: parent
-                                    width: parent.width
+                                    Layout.alignment: Qt.AlignCenter
+                                    Layout.fillWidth: true
                                     spacing: Metrics.sm
                                     visible: typeof aiActionController === "undefined" || aiActionController === null
 

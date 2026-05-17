@@ -45,6 +45,11 @@ class PromptRepository:
             return None
         return dict(row)
 
+    @staticmethod
+    def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        return {row[1] for row in rows}
+
     def ensure_schema(self) -> None:
         # Backup safety: create backup before migration
         self._create_backup_if_needed()
@@ -67,9 +72,6 @@ class PromptRepository:
             },
         }
 
-        def table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
-            rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
-            return {row[1] for row in rows}
 
         schema = """
         CREATE TABLE IF NOT EXISTS ai_prompt_documents (
@@ -126,7 +128,7 @@ class PromptRepository:
             conn.executescript(schema)
 
             # Additive migration for ai_actions - add missing columns
-            current_action_cols = table_columns(conn, "ai_actions")
+            current_action_cols = self._table_columns(conn, "ai_actions")
             new_action_columns = {
                 "source_type": "TEXT DEFAULT 'default'",
                 "readonly": "INTEGER DEFAULT 0",
@@ -134,8 +136,6 @@ class PromptRepository:
                 "input_mode": "TEXT DEFAULT 'auto'",
                 "use_rag": "INTEGER DEFAULT 0",
                 "icon": "TEXT DEFAULT ''",
-                "created_at": "TEXT DEFAULT CURRENT_TIMESTAMP",
-                "updated_at": "TEXT DEFAULT CURRENT_TIMESTAMP",
             }
             for col_name, col_def in new_action_columns.items():
                 if col_name not in current_action_cols:
@@ -173,21 +173,33 @@ class PromptRepository:
 
     def _correct_default_actions(self, conn: sqlite3.Connection) -> None:
         """Correct default actions with new columns."""
+        current_action_cols = self._table_columns(conn, "ai_actions")
         now = datetime.now().isoformat()
         for action_id in DEFAULT_ACTION_IDS:
             use_rag = 1 if action_id == "current_note_qa" else 0
+            
+            # Build SET clause dynamically based on existing columns
+            set_clauses = [
+                "source_type = 'default'",
+                "readonly = 1",
+                "archived = 0",
+                "input_mode = 'auto'",
+                f"use_rag = {use_rag}"
+            ]
+            
+            # Only add updated_at if column exists
+            if "updated_at" in current_action_cols:
+                set_clauses.append(f"updated_at = '{now}'")
+            
+            set_clause = ", ".join(set_clauses)
+            
             conn.execute(
-                """
+                f"""
                 UPDATE ai_actions
-                SET source_type = 'default',
-                    readonly = 1,
-                    archived = 0,
-                    input_mode = 'auto',
-                    use_rag = ?,
-                    updated_at = ?
+                SET {set_clause}
                 WHERE action_id = ?
                 """,
-                (use_rag, now, action_id),
+                (action_id,),
             )
         logger.info("[PromptRepository] Corrected default actions")
 
@@ -199,10 +211,17 @@ class PromptRepository:
             conditions.append("enabled = 1")
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         with self._connect() as conn:
+            # Get actual columns to handle missing timestamp columns in old DB
+            cols = self._table_columns(conn, "ai_actions")
+            select_cols = ["action_id", "name", "description", "category", "required_variables_json",
+                          "enabled", "sort_order"]
+            for col in ["source_type", "readonly", "archived", "input_mode", "use_rag", "icon", "created_at", "updated_at"]:
+                if col in cols:
+                    select_cols.append(col)
+            
             rows = conn.execute(
                 f"""
-                SELECT action_id, name, description, category, required_variables_json,
-                       enabled, sort_order, source_type, readonly, archived, input_mode, use_rag, icon, created_at, updated_at
+                SELECT {', '.join(select_cols)}
                 FROM ai_actions
                 {where_clause}
                 ORDER BY sort_order ASC, name COLLATE NOCASE ASC
@@ -212,10 +231,17 @@ class PromptRepository:
 
     def get_action(self, action_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
+            # Get actual columns to handle missing timestamp columns in old DB
+            cols = self._table_columns(conn, "ai_actions")
+            select_cols = ["action_id", "name", "description", "category", "required_variables_json",
+                          "enabled", "sort_order"]
+            for col in ["source_type", "readonly", "archived", "input_mode", "use_rag", "icon", "created_at", "updated_at"]:
+                if col in cols:
+                    select_cols.append(col)
+            
             row = conn.execute(
-                """
-                SELECT action_id, name, description, category, required_variables_json,
-                       enabled, sort_order, source_type, readonly, archived, input_mode, use_rag, icon, created_at, updated_at
+                f"""
+                SELECT {', '.join(select_cols)}
                 FROM ai_actions
                 WHERE action_id = ?
                 """,

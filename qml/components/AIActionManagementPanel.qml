@@ -547,11 +547,7 @@ Rectangle {
                                 font.family: Typography.fontPrimary
                                 font.pixelSize: Typography.bodySmall
                                 color: Colors.textPrimary
-                                background: Rectangle {
-                                    color: Colors.bgSecondary
-                                    radius: Metrics.radiusSm
-                                    border.color: Colors.borderLight
-                                }
+                                selectByMouse: true
                                 onTextChanged: {
                                     var c = getController()
                                     if (c && text.trim()) {
@@ -576,11 +572,7 @@ Rectangle {
                                 font.family: Typography.fontPrimary
                                 font.pixelSize: Typography.bodySmall
                                 color: Colors.textPrimary
-                                background: Rectangle {
-                                    color: Colors.bgSecondary
-                                    radius: Metrics.radiusSm
-                                    border.color: Colors.borderLight
-                                }
+                                selectByMouse: true
                             }
 
                             Text {
@@ -599,11 +591,7 @@ Rectangle {
                                 font.family: Typography.fontPrimary
                                 font.pixelSize: Typography.bodySmall
                                 color: Colors.textPrimary
-                                background: Rectangle {
-                                    color: Colors.bgSecondary
-                                    radius: Metrics.radiusSm
-                                    border.color: Colors.borderLight
-                                }
+                                selectByMouse: true
                             }
 
                             Text {
@@ -671,11 +659,7 @@ Rectangle {
                                 font.family: Typography.fontPrimary
                                 font.pixelSize: Typography.bodySmall
                                 color: Colors.textPrimary
-                                background: Rectangle {
-                                    color: Colors.bgSecondary
-                                    radius: Metrics.radiusSm
-                                    border.color: Colors.borderLight
-                                }
+                                selectByMouse: true
                             }
 
                             RowLayout {
@@ -776,11 +760,7 @@ Rectangle {
                                 font.pixelSize: Typography.bodySmall
                                 color: Colors.textPrimary
                                 readOnly: isDefaultAction(root.currentAction)
-                                background: Rectangle {
-                                    color: Colors.bgSecondary
-                                    radius: Metrics.radiusSm
-                                    border.color: Colors.borderLight
-                                }
+                                selectByMouse: true
                             }
 
                             Text {
@@ -800,11 +780,7 @@ Rectangle {
                                 font.family: Typography.fontPrimary
                                 font.pixelSize: Typography.bodySmall
                                 color: Colors.textPrimary
-                                background: Rectangle {
-                                    color: Colors.bgSecondary
-                                    radius: Metrics.radiusSm
-                                    border.color: Colors.borderLight
-                                }
+                                selectByMouse: true
                             }
 
                             Text {
@@ -899,11 +875,7 @@ Rectangle {
                                 font.family: Typography.fontPrimary
                                 font.pixelSize: Typography.bodySmall
                                 color: Colors.textPrimary
-                                background: Rectangle {
-                                    color: Colors.bgSecondary
-                                    radius: Metrics.radiusSm
-                                    border.color: Colors.borderLight
-                                }
+                                selectByMouse: true
                             }
 
                             Rectangle {
@@ -1257,22 +1229,24 @@ Rectangle {
 
         // Delete confirmation dialog
         Rectangle {
-            anchors.fill: parent
+            Layout.fillWidth: true
+            Layout.fillHeight: true
             radius: Metrics.radiusXxl
             color: "#80000000"
             visible: root.showDeleteConfirm
 
             Rectangle {
-                anchors.centerIn: parent
-                width: 300
-                height: 120
+                Layout.alignment: Qt.AlignCenter
+                Layout.preferredWidth: 300
+                Layout.preferredHeight: 120
                 radius: Metrics.radiusLg
                 color: Colors.bgPrimary
                 border.color: Colors.borderLight
 
                 ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: Metrics.md
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.margins: Metrics.md
                     spacing: Metrics.md
 
                     Text {
