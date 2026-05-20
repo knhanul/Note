@@ -51,9 +51,18 @@ def plugin_setup(engine, services, config):
     engine._prompt_document_controller = prompt_document_controller  # Prevent GC
 
     # Setup AIActionController for action management (Phase 1)
-    ai_action_controller = AIActionController(config.app_data_dir)
-    engine.rootContext().setContextProperty("aiActionController", ai_action_controller)
-    engine._ai_action_controller = ai_action_controller  # Prevent GC
+    try:
+        logger.info("[work_ai_editor] Initializing AIActionController...")
+        ai_action_controller = AIActionController(config.app_data_dir)
+        engine.rootContext().setContextProperty("aiActionController", ai_action_controller)
+        engine._ai_action_controller = ai_action_controller  # Prevent GC
+        logger.info("[work_ai_editor] AIActionController initialized successfully")
+    except Exception as e:
+        import traceback
+        logger.error(f"[work_ai_editor] Failed to initialize AIActionController: {e}")
+        logger.error(f"[work_ai_editor] Traceback: {traceback.format_exc()}")
+        engine.rootContext().setContextProperty("aiActionController", None)
+        engine._ai_action_controller = None
 
     logger.info("[work_ai_editor] AI Assistant Controller initialized")
 

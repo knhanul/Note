@@ -640,31 +640,59 @@ Rectangle {
                                 }
                             }
                         }
+                    }
 
-                        Rectangle {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            radius: Metrics.radiusLg
-                            color: Colors.bgSecondary
-                            border.width: 1
-                            border.color: Colors.borderLight
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        radius: Metrics.radiusLg
+                        color: Colors.bgSecondary
+                        border.width: 1
+                        border.color: Colors.borderLight
 
-                            ColumnLayout {
-                                anchors.fill: parent
-                                anchors.margins: Metrics.md
-                                spacing: Metrics.md
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: Metrics.md
+                            spacing: Metrics.md
 
-                                AIActionManagementPanel {
-                                    Layout.fillWidth: true
-                                    Layout.fillHeight: true
-                                    visible: typeof aiActionController !== "undefined" && aiActionController !== null
-                                }
+                            Text {
+                                text: "AI 기능 관리"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.h5
+                                font.weight: Typography.weightSemibold
+                                color: Colors.textPrimary
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: "AI 기능을 등록, 수정, 삭제하고 프롬프트에 연결합니다."
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodySmall
+                                color: Colors.textSecondary
+                                wrapMode: Text.Wrap
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                height: 1
+                                color: Colors.borderLight
+                            }
+
+                            AIActionManagementPanel {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                visible: typeof aiActionController !== "undefined" && aiActionController !== null
+                            }
+
+                            Item {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                visible: typeof aiActionController === "undefined" || aiActionController === null
 
                                 ColumnLayout {
                                     Layout.alignment: Qt.AlignCenter
                                     Layout.fillWidth: true
                                     spacing: Metrics.sm
-                                    visible: typeof aiActionController === "undefined" || aiActionController === null
 
                                     Text {
                                         Layout.fillWidth: true
