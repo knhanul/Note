@@ -11,6 +11,8 @@ Rectangle {
     border.width: 1
 
     property var aiActionControllerObj: typeof aiActionController !== "undefined" && aiActionController !== null ? aiActionController : null
+
+    // Use direct binding to Python properties; notify signals will trigger updates
     property var actionList: aiActionControllerObj ? aiActionControllerObj.actionList : []
     property var currentAction: aiActionControllerObj ? aiActionControllerObj.currentAction : ({})
 
@@ -29,14 +31,6 @@ Rectangle {
         if (!c || !actionId)
             return
         c.load_action(actionId)
-    }
-
-    function refreshFromController() {
-        var c = getController()
-        if (!c)
-            return
-        root.actionList = c.actionList
-        root.currentAction = c.currentAction
     }
 
     function formatVariables(variablesJson) {
@@ -327,16 +321,19 @@ Rectangle {
     }
 
     Component.onCompleted: {
-        refreshFromController()
-        if (root.actionList && root.actionList.length > 0) {
+        if (root.actionList && root.actionList.length > 0 && (!root.currentAction || !root.currentAction.action_id)) {
             selectAction(root.actionList[0].action_id)
         }
     }
 
     Connections {
-        target: aiActionControllerObj
-        function onActionsChanged() { root.refreshFromController() }
-        function onCurrentActionChanged() { root.refreshFromController() }
+        target: typeof aiActionController !== "undefined" && aiActionController !== null ? aiActionController : null
+        function onActionsChanged() {
+            // Python notify signal will refresh the property binding automatically
+            if (root.actionList && root.actionList.length > 0 && (!root.currentAction || !root.currentAction.action_id)) {
+                root.selectAction(root.actionList[0].action_id)
+            }
+        }
         function onInfoMessage(msg) { root.statusMessage = msg }
         function onErrorOccurred(msg) { root.statusMessage = msg }
     }
@@ -422,12 +419,36 @@ Rectangle {
                         color: Colors.textPrimary
                     }
 
+                    // Empty state for action list
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        visible: !root.actionList || root.actionList.length === 0
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: "AI 기능이 없습니다"
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.bodySmall
+                            color: Colors.textTertiary
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+
+                        Button {
+                            Layout.alignment: Qt.AlignHCenter
+                            text: "새 기능 만들기"
+                            onClicked: root.startNewAction()
+                        }
+                    }
+
                     ListView {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         model: root.actionList
                         clip: true
                         spacing: 2
+                        visible: root.actionList && root.actionList.length > 0
 
                         delegate: Rectangle {
                             width: ListView.view.width
@@ -539,11 +560,10 @@ Rectangle {
                                 color: Colors.textSecondary
                             }
 
-                            TextInput {
+                            TextField {
                                 id: newActionName
                                 Layout.fillWidth: true
                                 height: 32
-                                padding: 8
                                 font.family: Typography.fontPrimary
                                 font.pixelSize: Typography.bodySmall
                                 color: Colors.textPrimary
@@ -568,11 +588,10 @@ Rectangle {
                                 color: Colors.textSecondary
                             }
 
-                            TextInput {
+                            TextField {
                                 id: newActionId
                                 Layout.fillWidth: true
                                 height: 32
-                                padding: 8
                                 font.family: Typography.fontPrimary
                                 font.pixelSize: Typography.bodySmall
                                 color: Colors.textPrimary
@@ -591,11 +610,10 @@ Rectangle {
                                 color: Colors.textSecondary
                             }
 
-                            TextInput {
+                            TextField {
                                 id: newActionDescription
                                 Layout.fillWidth: true
                                 height: 32
-                                padding: 8
                                 font.family: Typography.fontPrimary
                                 font.pixelSize: Typography.bodySmall
                                 color: Colors.textPrimary
@@ -662,11 +680,10 @@ Rectangle {
                                 color: Colors.textSecondary
                             }
 
-                            TextInput {
+                            TextField {
                                 id: newActionRequiredVars
                                 Layout.fillWidth: true
                                 height: 32
-                                padding: 8
                                 text: "[]"
                                 font.family: Typography.fontPrimary
                                 font.pixelSize: Typography.bodySmall
@@ -766,11 +783,10 @@ Rectangle {
                                 color: Colors.textSecondary
                             }
 
-                            TextInput {
+                            TextField {
                                 id: editName
                                 Layout.fillWidth: true
                                 height: 32
-                                padding: 8
                                 text: root.currentAction ? root.currentAction.name : ""
                                 font.family: Typography.fontPrimary
                                 font.pixelSize: Typography.bodySmall
@@ -791,11 +807,10 @@ Rectangle {
                                 color: Colors.textSecondary
                             }
 
-                            TextInput {
+                            TextField {
                                 id: editDescription
                                 Layout.fillWidth: true
                                 height: 32
-                                padding: 8
                                 text: root.currentAction ? root.currentAction.description : ""
                                 font.family: Typography.fontPrimary
                                 font.pixelSize: Typography.bodySmall
@@ -890,11 +905,10 @@ Rectangle {
                                 color: Colors.textSecondary
                             }
 
-                            TextInput {
+                            TextField {
                                 id: editRequiredVars
                                 Layout.fillWidth: true
                                 height: 32
-                                padding: 8
                                 text: root.currentAction ? root.currentAction.required_variables_json || "[]" : "[]"
                                 font.family: Typography.fontPrimary
                                 font.pixelSize: Typography.bodySmall
