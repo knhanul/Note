@@ -11,85 +11,69 @@ Rectangle {
     border.width: 1
 
     property var aiActionControllerObj: typeof aiActionController !== "undefined" && aiActionController !== null ? aiActionController : null
+    property var promptControllerObj: typeof promptController !== "undefined" && promptController !== null ? promptController : null
 
-    // Use direct binding to Python properties; notify signals will trigger updates
     property var actionList: aiActionControllerObj ? aiActionControllerObj.actionList : []
+    property var promptDocumentList: promptControllerObj ? promptControllerObj.promptDocumentList : []
+    property var filteredPromptList: {
+        if (!promptDocumentList || promptDocumentList.length === 0) return []
+        // AI 프롬프트 서재에서 미리 작성된 프롬프트만 필터링
+        return promptDocumentList.filter(function(doc) {
+            // 기본 제공 프롬프트 제외, 사용자 정의 프롬프트만 포함
+            return !doc.readonly && doc.source_type !== "default"
+        })
+    }
     property var currentAction: aiActionControllerObj ? aiActionControllerObj.currentAction : ({})
 
-    property var promptDocumentList: typeof promptDocumentController !== "undefined" && promptDocumentController !== null ? promptDocumentController.promptDocumentList : []
-
     property bool isNewMode: false
+    property bool isEditMode: false
     property string statusMessage: ""
     property bool showDeleteConfirm: false
 
-    function getController() {
+    function getActionController() {
         return aiActionControllerObj
     }
 
+    function getPromptController() {
+        return promptControllerObj
+    }
+
     function selectAction(actionId) {
-        var c = getController()
-        if (!c || !actionId)
+        var ac = getActionController()
+        if (!ac || !actionId)
             return
-        c.load_action(actionId)
+
+        ac.load_action(actionId)
+        root.isNewMode = false
+        root.isEditMode = false
     }
 
-    function formatVariables(variablesJson) {
-        if (!variablesJson)
-            return "없음"
-        try {
-            var arr = JSON.parse(variablesJson)
-            if (!arr || !arr.length)
-                return "없음"
-            return arr.map(function(v) { return "{{" + v + "}}" }).join(", ")
-        } catch (e) {
-            return "없음"
-        }
+    function refreshFromController() {
+        // Properties will auto-update via Python signals
     }
 
-    function promptDocDisplayTitle(doc) {
-        if (!doc)
-            return ""
-        var prefix = doc.readonly ? "[기본] " : "[사용자] "
-        return prefix + (doc.title || doc.prompt_doc_id || "")
-    }
-
-    function getPromptDocIdFromIndex(index) {
-        if (index < 0 || index >= root.promptDocumentList.length)
-            return ""
-        return root.promptDocumentList[index].prompt_doc_id
-    }
-
-    function getPromptDocIndexFromId(promptDocId) {
-        if (!promptDocId)
-            return -1
-        for (var i = 0; i < root.promptDocumentList.length; i++) {
-            if (root.promptDocumentList[i].prompt_doc_id === promptDocId)
-                return i
-        }
-        return -1
-    }
-
-    function isDefaultAction(action) {
-        return action && (action.readonly === true || action.source_type === "default")
+    function bindSelectedPrompt(actionId, promptDocId) {
+        var ac = getActionController()
+        if (!ac || !actionId || !promptDocId)
+            return false
+        return ac.set_binding(actionId, promptDocId)
     }
 
     function startNewAction() {
         root.isNewMode = true
+        root.isEditMode = false
         root.statusMessage = "새 기능을 입력하세요"
     }
 
-    function cancelNewAction() {
+    function cancelEdit() {
         root.isNewMode = false
+        root.isEditMode = false
         root.statusMessage = ""
-        if (root.actionList && root.actionList.length > 0) {
-            selectAction(root.actionList[0].action_id)
-        }
     }
 
     function saveNewAction() {
-        var c = getController()
-        if (!c)
-            return
+        var c = getActionController()
+        if (!c) return
 
         var name = newActionName.text.trim()
         if (!name) {
@@ -98,13 +82,21 @@ Rectangle {
         }
 
         var actionId = newActionId.text.trim() || c.generate_action_id(name)
+        
+        // Check if action_id already exists
+        var existingAction = root.actionList.find(function(a) { return a.action_id === actionId })
+        if (existingAction) {
+            root.statusMessage = "이미 존재하는 기능 ID입니다. 다른 ID를 사용해주세요."
+            return
+        }
+
         var description = newActionDescription.text.trim()
         var category = newActionCategory.currentText || "user"
         var inputMode = newActionInputMode.currentText || "auto"
         var useRag = newActionUseRag.checked
         var requiredVars = newActionRequiredVars.text.trim() || "[]"
 
-        var result = c.create_action(name, actionId, description, category, inputMode, useRag, requiredVars)
+        var result = c.create_action(name, actionId, description, category, inputMode, useRag, requiredVars, true)
         if (result && result.action_id) {
             root.isNewMode = false
             root.statusMessage = "'" + name + "' 기능이 생성되었습니다"
@@ -115,15 +107,9 @@ Rectangle {
     }
 
     function saveCurrentAction() {
-        var c = getController()
+        var c = getActionController()
         var action = root.currentAction
-        if (!c || !action || !action.action_id)
-            return
-
-        if (isDefaultAction(action)) {
-            root.statusMessage = "기본 기능은 수정할 수 없습니다"
-            return
-        }
+        if (!c || !action || !action.action_id) return
 
         var name = editName.text.trim()
         if (!name) {
@@ -139,53 +125,32 @@ Rectangle {
 
         var result = c.update_action(action.action_id, name, description, category, inputMode, useRag, requiredVars)
         if (result && result.action_id) {
+            root.isEditMode = false
             root.statusMessage = "저장되었습니다"
-            selectAction(result.action_id)
+            selectAction(action.action_id)
         } else {
             root.statusMessage = "저장에 실패했습니다"
         }
     }
 
-    function duplicateCurrentAction() {
-        var c = getController()
-        var action = root.currentAction
-        if (!c || !action || !action.action_id)
-            return
-
-        var result = c.duplicate_action(action.action_id)
-        if (result && result.action_id) {
-            root.statusMessage = "기능이 복사되었습니다"
-            selectAction(result.action_id)
-        } else {
-            root.statusMessage = "복제에 실패했습니다"
-        }
-    }
-
     function deleteCurrentAction() {
-        var c = getController()
         var action = root.currentAction
-        if (!c || !action || !action.action_id)
-            return
-
-        if (isDefaultAction(action)) {
-            root.statusMessage = "기본 기능은 삭제할 수 없습니다"
+        if (!action || !action.action_id) {
+            root.statusMessage = "삭제할 기능이 없습니다"
             return
         }
-
         root.showDeleteConfirm = true
     }
 
     function confirmDelete() {
-        var c = getController()
+        var c = getActionController()
         var action = root.currentAction
-        if (!c || !action || !action.action_id)
-            return
+        if (!c || !action || !action.action_id) return
 
         var ok = c.archive_action(action.action_id)
         if (ok) {
             root.statusMessage = "삭제되었습니다"
             root.showDeleteConfirm = false
-            refreshFromController()
             if (root.actionList && root.actionList.length > 0) {
                 selectAction(root.actionList[0].action_id)
             }
@@ -194,146 +159,17 @@ Rectangle {
         }
     }
 
-    function moveCurrentActionUp() {
-        var c = getController()
-        var action = root.currentAction
-        if (!c || !action || !action.action_id)
-            return
-
-        var ok = c.move_action_up(action.action_id)
-        if (ok) {
-            root.statusMessage = ""
-            refreshFromController()
-        }
-    }
-
-    function moveCurrentActionDown() {
-        var c = getController()
-        var action = root.currentAction
-        if (!c || !action || !action.action_id)
-            return
-
-        var ok = c.move_action_down(action.action_id)
-        if (ok) {
-            root.statusMessage = ""
-            refreshFromController()
-        }
-    }
-
-    function toggleEnabled() {
-        var c = getController()
-        var action = root.currentAction
-        if (!c || !action || !action.action_id)
-            return
-
-        var newEnabled = !action.enabled
-        c.set_action_enabled(action.action_id, newEnabled)
-        root.statusMessage = newEnabled ? "활성화되었습니다" : "비활성화되었습니다"
-        refreshFromController()
-    }
-
-    function openBoundPrompt() {
-        var action = root.currentAction
-        if (!action || !action.binding_prompt_doc_id)
-            return
-
-        var pc = typeof promptController !== "undefined" && promptController !== null ? promptController : null
-        if (pc && pc.requestOpenPromptDocument) {
-            pc.requestOpenPromptDocument(action.binding_prompt_doc_id)
-        }
-    }
-
-    function saveBinding() {
-        var c = getController()
-        var action = root.currentAction
-        if (!c || !action || !action.action_id)
-            return
-
-        var promptIdx = editPromptCombo.currentIndex
-        var promptDocId = getPromptDocIdFromIndex(promptIdx)
-        if (!promptDocId) {
-            root.statusMessage = "프롬프트를 선택하세요"
-            return
-        }
-
-        var ok = c.set_binding(action.action_id, promptDocId)
-        if (ok) {
-            root.statusMessage = "프롬프트 연결이 변경되었습니다"
-            refreshFromController()
-        } else {
-            root.statusMessage = "프롬프트 연결에 실패했습니다"
-        }
-    }
-
-    function createNewPromptAndBind() {
-        var pdc = typeof promptDocumentController !== "undefined" && promptDocumentController !== null ? promptDocumentController : null
-        var c = getController()
-        var action = root.currentAction
-
-        if (!pdc) {
-            root.statusMessage = "프롬프트 컨트롤러가 없습니다"
-            return
-        }
-
-        var newDoc = pdc.createPromptDocument("새 AI 프롬프트", "", "")
-        if (newDoc && newDoc.prompt_doc_id && c && action && action.action_id) {
-            c.set_binding(action.action_id, newDoc.prompt_doc_id)
-            root.statusMessage = "새 프롬프트를 만들고 연결했습니다"
-            refreshFromController()
-        } else {
-            root.statusMessage = "새 프롬프트 생성에 실패했습니다"
-        }
-    }
-
-    function duplicatePromptAndBind() {
-        var pdc = typeof promptDocumentController !== "undefined" && promptDocumentController !== null ? promptDocumentController : null
-        var c = getController()
-        var action = root.currentAction
-
-        if (!pdc) {
-            root.statusMessage = "프롬프트 컨트롤러가 없습니다"
-            return
-        }
-
-        if (!action || !action.binding_prompt_doc_id) {
-            root.statusMessage = "연결된 프롬프트가 없습니다"
-            return
-        }
-
-        var newDocId = pdc.duplicatePromptDocument(action.binding_prompt_doc_id)
-        if (newDocId && c && action && action.action_id) {
-            c.set_binding(action.action_id, newDocId)
-            root.statusMessage = "프롬프트를 복사해서 연결했습니다"
-            refreshFromController()
-        } else {
-            root.statusMessage = "프롬프트 복제에 실패했습니다"
-        }
-    }
-
-    function validateCurrentBinding() {
-        var c = getController()
-        var action = root.currentAction
-        if (!c || !action || !action.action_id)
-            return {ok: true, missing_required_variables: [], unknown_variables: []}
-
-        var promptDocId = action.binding_prompt_doc_id || action.action_id
-        return c.validate_prompt_for_action(action.action_id, promptDocId)
-    }
-
     Component.onCompleted: {
-        if (root.actionList && root.actionList.length > 0 && (!root.currentAction || !root.currentAction.action_id)) {
+        refreshFromController()
+        if (root.actionList && root.actionList.length > 0) {
             selectAction(root.actionList[0].action_id)
         }
     }
 
     Connections {
-        target: typeof aiActionController !== "undefined" && aiActionController !== null ? aiActionController : null
-        function onActionsChanged() {
-            // Python notify signal will refresh the property binding automatically
-            if (root.actionList && root.actionList.length > 0 && (!root.currentAction || !root.currentAction.action_id)) {
-                root.selectAction(root.actionList[0].action_id)
-            }
-        }
+        target: aiActionControllerObj
+        function onActionsChanged() { root.refreshFromController() }
+        function onCurrentActionChanged() { root.refreshFromController() }
         function onInfoMessage(msg) { root.statusMessage = msg }
         function onErrorOccurred(msg) { root.statusMessage = msg }
     }
@@ -343,48 +179,52 @@ Rectangle {
         anchors.margins: Metrics.md
         spacing: Metrics.sm
 
+        // Header
         RowLayout {
             Layout.fillWidth: true
-            spacing: Metrics.sm
+            spacing: Metrics.md
 
-            Text {
+            ColumnLayout {
                 Layout.fillWidth: true
-                text: "AI 기능 관리"
-                font.family: Typography.fontPrimary
-                font.pixelSize: Typography.h5
-                font.weight: Typography.weightSemibold
-                color: Colors.textPrimary
+                spacing: Metrics.xs
+
+                Text {
+                    text: "AI 기능 관리"
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.h5
+                    font.weight: Typography.weightSemibold
+                    color: Colors.textPrimary
+                }
+
+                Text {
+                    text: "AI 기능을 등록, 수정, 삭제하고 프롬프트 문서와 연결합니다."
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.bodySmall
+                    color: Colors.textSecondary
+                }
             }
 
             Rectangle {
+                width: 32
                 height: 32
-                radius: Metrics.radiusMd
-                color: newBtnArea.containsMouse ? Colors.primary500 : Colors.primary400
+                radius: Metrics.radiusSm
+                color: addBtnArea.containsMouse ? Colors.primary50 : "transparent"
 
                 Text {
                     anchors.centerIn: parent
-                    text: "+ 새 기능"
+                    text: "+"
                     font.family: Typography.fontPrimary
-                    font.weight: Typography.weightMedium
-                    font.pixelSize: Typography.bodySmall
-                    color: Colors.textInverse
+                    font.pixelSize: 20
+                    color: Colors.primary500
                 }
 
                 MouseArea {
-                    id: newBtnArea
+                    id: addBtnArea
                     anchors.fill: parent
                     hoverEnabled: true
                     onClicked: root.startNewAction()
                 }
             }
-        }
-
-        Text {
-            Layout.fillWidth: true
-            text: "AI 기능을 등록, 수정, 삭제하고 프롬프트에 연결합니다."
-            font.family: Typography.fontPrimary
-            font.pixelSize: Typography.bodySmall
-            color: Colors.textSecondary
         }
 
         Rectangle {
@@ -393,11 +233,13 @@ Rectangle {
             color: Colors.borderLight
         }
 
+        // Main Content
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: Metrics.md
 
+            // Left: Action List
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -419,86 +261,31 @@ Rectangle {
                         color: Colors.textPrimary
                     }
 
-                    // Empty state for action list
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        visible: !root.actionList || root.actionList.length === 0
-
-                        Text {
-                            Layout.fillWidth: true
-                            text: "AI 기능이 없습니다"
-                            font.family: Typography.fontPrimary
-                            font.pixelSize: Typography.bodySmall
-                            color: Colors.textTertiary
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-
-                        Button {
-                            Layout.alignment: Qt.AlignHCenter
-                            text: "새 기능 만들기"
-                            onClicked: root.startNewAction()
-                        }
-                    }
-
                     ListView {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         model: root.actionList
                         clip: true
-                        spacing: 2
-                        visible: root.actionList && root.actionList.length > 0
+                        spacing: 1
 
                         delegate: Rectangle {
                             width: ListView.view.width
-                            height: 48
+                            height: 36
                             radius: Metrics.radiusSm
-                            color: {
-                                if (!modelData.enabled)
-                                    return Colors.bgTertiary
-                                if (actionMouse.containsMouse)
-                                    return Colors.primary50
-                                if (root.currentAction && root.currentAction.action_id === modelData.action_id)
-                                    return Colors.primary100
-                                return "transparent"
-                            }
-                            opacity: modelData.enabled ? 1.0 : 0.5
+                            color: actionMouse.containsMouse ? Colors.primary50 : (root.currentAction && root.currentAction.action_id === modelData.action_id ? Colors.primary100 : "transparent")
 
-                            ColumnLayout {
+                            RowLayout {
                                 anchors.fill: parent
                                 anchors.leftMargin: Metrics.sm
                                 anchors.rightMargin: Metrics.sm
-                                anchors.verticalCenter: parent.verticalCenter
-                                spacing: 2
-
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: Metrics.xs
-
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: modelData.name || modelData.action_id || ""
-                                        font.family: Typography.fontPrimary
-                                        font.pixelSize: Typography.bodySmall
-                                        font.weight: Typography.weightMedium
-                                        color: Colors.textPrimary
-                                        elide: Text.ElideRight
-                                    }
-
-                                    Text {
-                                        text: modelData.readonly || modelData.source_type === "default" ? "기본" : ""
-                                        font.family: Typography.fontPrimary
-                                        font.pixelSize: 10
-                                        color: Colors.textTertiary
-                                    }
-                                }
+                                spacing: Metrics.sm
 
                                 Text {
-                                    text: modelData.action_id || ""
+                                    Layout.fillWidth: true
+                                    text: modelData.name || modelData.action_id || ""
                                     font.family: Typography.fontPrimary
-                                    font.pixelSize: 10
-                                    color: Colors.textTertiary
+                                    font.pixelSize: Typography.bodySmall
+                                    color: Colors.textPrimary
                                     elide: Text.ElideRight
                                 }
                             }
@@ -508,19 +295,19 @@ Rectangle {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 onClicked: {
-                                    root.isNewMode = false
                                     root.selectAction(modelData.action_id)
                                 }
                             }
                         }
 
                         ScrollBar.vertical: ScrollBar {
-                            policy: ScrollBar.AsNeeded
+                            policy: ScrollBar.AlwaysOn
                         }
                     }
                 }
             }
 
+            // Right: Action Details
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -528,6 +315,7 @@ Rectangle {
                 radius: Metrics.radiusMd
                 border.color: Colors.borderLight
                 border.width: 1
+                visible: root.currentAction && root.currentAction.action_id
 
                 ScrollView {
                     anchors.fill: parent
@@ -536,802 +324,613 @@ Rectangle {
 
                     ColumnLayout {
                         width: parent.width
-                        spacing: Metrics.md
+                        spacing: Metrics.sm
 
-                        // New Action Form
-                        ColumnLayout {
+                        // Action Header
+                        RowLayout {
                             Layout.fillWidth: true
                             spacing: Metrics.sm
-                            visible: root.isNewMode
 
-                            Text {
-                                text: "새 기능 만들기"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.h6
-                                font.weight: Typography.weightSemibold
-                                color: Colors.textPrimary
-                            }
-
-                            Text {
-                                text: "기능 이름"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                font.weight: Typography.weightMedium
-                                color: Colors.textSecondary
-                            }
-
-                            TextField {
-                                id: newActionName
+                            ColumnLayout {
                                 Layout.fillWidth: true
-                                height: 32
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                color: Colors.textPrimary
-                                selectByMouse: true
-                                onTextChanged: {
-                                    var c = getController()
-                                    if (c && text.trim()) {
-                                        newActionId.text = c.generate_action_id(text.trim())
-                                    }
-                                }
-                            }
-
-                            Text {
-                                text: "action_id"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                font.weight: Typography.weightMedium
-                                color: Colors.textSecondary
-                            }
-
-                            TextField {
-                                id: newActionId
-                                Layout.fillWidth: true
-                                height: 32
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                color: Colors.textPrimary
-                                selectByMouse: true
-                            }
-
-                            Text {
-                                text: "설명"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                font.weight: Typography.weightMedium
-                                color: Colors.textSecondary
-                            }
-
-                            TextField {
-                                id: newActionDescription
-                                Layout.fillWidth: true
-                                height: 32
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                color: Colors.textPrimary
-                                selectByMouse: true
-                            }
-
-                            Text {
-                                text: "카테고리"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                font.weight: Typography.weightMedium
-                                color: Colors.textSecondary
-                            }
-
-                            ComboBox {
-                                id: newActionCategory
-                                Layout.fillWidth: true
-                                height: 32
-                                model: ["user", "문서 처리", "문서 질문", "기타"]
-                                currentIndex: 0
-                            }
-
-                            Text {
-                                text: "입력 모드"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                font.weight: Typography.weightMedium
-                                color: Colors.textSecondary
-                            }
-
-                            ComboBox {
-                                id: newActionInputMode
-                                Layout.fillWidth: true
-                                height: 32
-                                model: ["auto", "note_required", "chat_only", "note_and_chat", "selection_required"]
-                                currentIndex: 0
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
+                                spacing: Metrics.xs
 
                                 Text {
-                                    text: "RAG 사용"
+                                    text: root.currentAction ? (root.currentAction.name || root.currentAction.action_id || "") : ""
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: Typography.h6
+                                    font.weight: Typography.weightSemibold
+                                    color: Colors.textPrimary
+                                }
+
+                                Text {
+                                    text: root.currentAction ? (root.currentAction.description || "") : ""
                                     font.family: Typography.fontPrimary
                                     font.pixelSize: Typography.bodySmall
                                     color: Colors.textSecondary
+                                    wrapMode: Text.WordWrap
                                 }
-
-                                CheckBox {
-                                    id: newActionUseRag
-                                    checked: false
-                                }
-                            }
-
-                            Text {
-                                text: "필수 변수 (JSON 배열)"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                font.weight: Typography.weightMedium
-                                color: Colors.textSecondary
-                            }
-
-                            TextField {
-                                id: newActionRequiredVars
-                                Layout.fillWidth: true
-                                height: 32
-                                text: "[]"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                color: Colors.textPrimary
-                                selectByMouse: true
                             }
 
                             RowLayout {
-                                Layout.fillWidth: true
-                                spacing: Metrics.sm
+                                spacing: Metrics.xs
 
                                 Rectangle {
-                                    Layout.fillWidth: true
-                                    height: 32
-                                    radius: Metrics.radiusMd
-                                    color: saveNewBtnArea.containsMouse ? Colors.primary500 : Colors.primary400
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "저장"
-                                        font.family: Typography.fontPrimary
-                                        font.weight: Typography.weightMedium
-                                        font.pixelSize: Typography.bodySmall
-                                        color: Colors.textInverse
-                                    }
-
-                                    MouseArea {
-                                        id: saveNewBtnArea
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        onClicked: root.saveNewAction()
-                                    }
-                                }
-
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    height: 32
-                                    radius: Metrics.radiusMd
-                                    color: cancelNewBtnArea.containsMouse ? Colors.bgTertiary : Colors.bgSecondary
+                                    width: 60
+                                    height: 28
+                                    radius: Metrics.radiusSm
+                                    color: editBtnArea.containsMouse ? Colors.bgTertiary : "transparent"
                                     border.color: Colors.borderLight
+                                    border.width: 1
 
                                     Text {
                                         anchors.centerIn: parent
-                                        text: "취소"
-                                        font.family: Typography.fontPrimary
-                                        font.weight: Typography.weightMedium
-                                        font.pixelSize: Typography.bodySmall
+                                        text: "수정"
+                                        font.pixelSize: 12
                                         color: Colors.textSecondary
                                     }
 
                                     MouseArea {
-                                        id: cancelNewBtnArea
+                                        id: editBtnArea
                                         anchors.fill: parent
                                         hoverEnabled: true
-                                        onClicked: root.cancelNewAction()
-                                    }
-                                }
-                            }
-                        }
-
-                        // Edit Action Form
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: Metrics.sm
-                            visible: !root.isNewMode && root.currentAction && root.currentAction.action_id
-
-                            Text {
-                                text: root.currentAction ? (root.currentAction.name || root.currentAction.action_id || "") : ""
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.h6
-                                font.weight: Typography.weightSemibold
-                                color: Colors.textPrimary
-                            }
-
-                            Text {
-                                text: "action_id: " + (root.currentAction ? root.currentAction.action_id : "")
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.caption
-                                color: Colors.textTertiary
-                            }
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                height: 1
-                                color: Colors.borderLight
-                            }
-
-                            Text {
-                                text: "기능명"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                font.weight: Typography.weightMedium
-                                color: Colors.textSecondary
-                            }
-
-                            TextField {
-                                id: editName
-                                Layout.fillWidth: true
-                                height: 32
-                                text: root.currentAction ? root.currentAction.name : ""
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                color: Colors.textPrimary
-                                readOnly: isDefaultAction(root.currentAction)
-                                selectByMouse: true
-                            }
-
-                            Text {
-                                text: "설명"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                font.weight: Typography.weightMedium
-                                color: Colors.textSecondary
-                            }
-
-                            TextField {
-                                id: editDescription
-                                Layout.fillWidth: true
-                                height: 32
-                                text: root.currentAction ? root.currentAction.description : ""
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                color: Colors.textPrimary
-                                selectByMouse: true
-                            }
-
-                            Text {
-                                text: "카테고리"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                font.weight: Typography.weightMedium
-                                color: Colors.textSecondary
-                            }
-
-                            ComboBox {
-                                id: editCategory
-                                Layout.fillWidth: true
-                                height: 32
-                                model: ["user", "문서 처리", "문서 질문", "기타"]
-                                currentIndex: {
-                                    var cat = root.currentAction ? root.currentAction.category : "user"
-                                    var idx = model.indexOf(cat)
-                                    return idx >= 0 ? idx : 0
-                                }
-                            }
-
-                            Text {
-                                text: "입력 모드"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                font.weight: Typography.weightMedium
-                                color: Colors.textSecondary
-                            }
-
-                            ComboBox {
-                                id: editInputMode
-                                Layout.fillWidth: true
-                                height: 32
-                                model: ["auto", "note_required", "chat_only", "note_and_chat", "selection_required"]
-                                currentIndex: {
-                                    var mode = root.currentAction ? root.currentAction.input_mode : "auto"
-                                    var idx = model.indexOf(mode)
-                                    return idx >= 0 ? idx : 0
-                                }
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-
-                                Text {
-                                    text: "활성"
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.bodySmall
-                                    color: Colors.textSecondary
-                                }
-
-                                CheckBox {
-                                    id: editEnabled
-                                    checked: root.currentAction ? root.currentAction.enabled : true
-                                    onCheckedChanged: {
-                                        var c = getController()
-                                        if (c && root.currentAction && root.currentAction.action_id && checked !== root.currentAction.enabled) {
-                                            c.set_action_enabled(root.currentAction.action_id, checked)
-                                            root.refreshFromController()
-                                        }
-                                    }
-                                }
-
-                                Text {
-                                    text: "RAG 사용"
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.bodySmall
-                                    color: Colors.textSecondary
-                                }
-
-                                CheckBox {
-                                    id: editUseRag
-                                    checked: root.currentAction ? root.currentAction.use_rag : false
-                                }
-                            }
-
-                            Text {
-                                text: "필수 변수"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                font.weight: Typography.weightMedium
-                                color: Colors.textSecondary
-                            }
-
-                            TextField {
-                                id: editRequiredVars
-                                Layout.fillWidth: true
-                                height: 32
-                                text: root.currentAction ? root.currentAction.required_variables_json || "[]" : "[]"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                color: Colors.textPrimary
-                                selectByMouse: true
-                            }
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                height: 1
-                                color: Colors.borderLight
-                            }
-
-                            Text {
-                                text: "연결 프롬프트"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                font.weight: Typography.weightMedium
-                                color: Colors.textPrimary
-                            }
-
-                            ComboBox {
-                                id: editPromptCombo
-                                Layout.fillWidth: true
-                                height: 32
-                                model: root.promptDocumentList.map(function(doc) { return promptDocDisplayTitle(doc) })
-                                currentIndex: {
-                                    var bindingId = root.currentAction ? root.currentAction.binding_prompt_doc_id : ""
-                                    return getPromptDocIndexFromId(bindingId)
-                                }
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: Metrics.sm
-
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    height: 32
-                                    radius: Metrics.radiusMd
-                                    color: saveBindingBtnArea.containsMouse ? Colors.primary500 : Colors.primary400
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "연결 저장"
-                                        font.family: Typography.fontPrimary
-                                        font.weight: Typography.weightMedium
-                                        font.pixelSize: Typography.bodySmall
-                                        color: Colors.textInverse
-                                    }
-
-                                    MouseArea {
-                                        id: saveBindingBtnArea
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        onClicked: root.saveBinding()
+                                        onClicked: root.isEditMode = true
                                     }
                                 }
 
                                 Rectangle {
-                                    Layout.fillWidth: true
-                                    height: 32
-                                    radius: Metrics.radiusMd
-                                    color: openPromptBtnArea.containsMouse ? Colors.primary500 : Colors.primary400
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "프롬프트 열기"
-                                        font.family: Typography.fontPrimary
-                                        font.weight: Typography.weightMedium
-                                        font.pixelSize: Typography.bodySmall
-                                        color: Colors.textInverse
-                                    }
-
-                                    MouseArea {
-                                        id: openPromptBtnArea
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        onClicked: root.openBoundPrompt()
-                                    }
-                                }
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: Metrics.sm
-
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    height: 32
-                                    radius: Metrics.radiusMd
-                                    color: newPromptBtnArea.containsMouse ? Colors.primary500 : Colors.primary400
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "+ 새 프롬프트"
-                                        font.family: Typography.fontPrimary
-                                        font.weight: Typography.weightMedium
-                                        font.pixelSize: Typography.bodySmall
-                                        color: Colors.textInverse
-                                    }
-
-                                    MouseArea {
-                                        id: newPromptBtnArea
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        onClicked: root.createNewPromptAndBind()
-                                    }
-                                }
-
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    height: 32
-                                    radius: Metrics.radiusMd
-                                    color: duplicatePromptBtnArea.containsMouse ? Colors.primary500 : Colors.primary400
-                                    visible: root.currentAction && root.currentAction.binding_prompt_doc_id
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "복사해서 수정"
-                                        font.family: Typography.fontPrimary
-                                        font.weight: Typography.weightMedium
-                                        font.pixelSize: Typography.bodySmall
-                                        color: Colors.textInverse
-                                    }
-
-                                    MouseArea {
-                                        id: duplicatePromptBtnArea
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        onClicked: root.duplicatePromptAndBind()
-                                    }
-                                }
-                            }
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                height: 1
-                                color: Colors.borderLight
-                            }
-
-                            // Validation result
-                            Rectangle {
-                                Layout.fillWidth: true
-                                height: 30
-                                radius: Metrics.radiusSm
-                                color: Colors.bgTertiary
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: {
-                                        var validation = validateCurrentBinding()
-                                        if (validation.ok)
-                                            return "✓ 변수 검사 통과"
-                                        return "⚠ 누락: " + (validation.missing_required_variables || []).join(", ")
-                                    }
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.bodySmall
-                                    color: validation.ok ? Colors.success700 : Colors.warning700
-                                }
-                            }
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                height: 1
-                                color: Colors.borderLight
-                            }
-
-                            // Action buttons
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: Metrics.sm
-
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    height: 32
-                                    radius: Metrics.radiusMd
-                                    color: saveBtnArea.containsMouse ? Colors.primary500 : Colors.primary400
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "저장"
-                                        font.family: Typography.fontPrimary
-                                        font.weight: Typography.weightMedium
-                                        font.pixelSize: Typography.bodySmall
-                                        color: Colors.textInverse
-                                    }
-
-                                    MouseArea {
-                                        id: saveBtnArea
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        onClicked: root.saveCurrentAction()
-                                    }
-                                }
-
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    height: 32
-                                    radius: Metrics.radiusMd
-                                    color: duplicateBtnArea.containsMouse ? Colors.primary500 : Colors.primary400
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "복사"
-                                        font.family: Typography.fontPrimary
-                                        font.weight: Typography.weightMedium
-                                        font.pixelSize: Typography.bodySmall
-                                        color: Colors.textInverse
-                                    }
-
-                                    MouseArea {
-                                        id: duplicateBtnArea
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        onClicked: root.duplicateCurrentAction()
-                                    }
-                                }
-
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    height: 32
-                                    radius: Metrics.radiusMd
-                                    color: deleteBtnArea.containsMouse ? Colors.error500 : Colors.error400
-                                    visible: !isDefaultAction(root.currentAction)
+                                    width: 60
+                                    height: 28
+                                    radius: Metrics.radiusSm
+                                    color: delBtnArea.containsMouse ? Colors.error50 : "transparent"
+                                    border.color: Colors.error200
+                                    border.width: 1
 
                                     Text {
                                         anchors.centerIn: parent
                                         text: "삭제"
-                                        font.family: Typography.fontPrimary
-                                        font.weight: Typography.weightMedium
-                                        font.pixelSize: Typography.bodySmall
-                                        color: Colors.textInverse
+                                        font.pixelSize: 12
+                                        color: Colors.error500
                                     }
 
                                     MouseArea {
-                                        id: deleteBtnArea
+                                        id: delBtnArea
                                         anchors.fill: parent
                                         hoverEnabled: true
                                         onClicked: root.deleteCurrentAction()
                                     }
                                 }
-
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    height: 32
-                                    radius: Metrics.radiusMd
-                                    color: Colors.bgTertiary
-                                    border.color: Colors.borderLight
-                                    visible: isDefaultAction(root.currentAction)
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "기본 기능"
-                                        font.family: Typography.fontPrimary
-                                        font.weight: Typography.weightMedium
-                                        font.pixelSize: Typography.bodySmall
-                                        color: Colors.textTertiary
-                                    }
-                                }
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: Metrics.sm
-
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    height: 32
-                                    radius: Metrics.radiusMd
-                                    color: moveUpBtnArea.containsMouse ? Colors.bgTertiary : Colors.bgSecondary
-                                    border.color: Colors.borderLight
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "↑ 위로"
-                                        font.family: Typography.fontPrimary
-                                        font.weight: Typography.weightMedium
-                                        font.pixelSize: Typography.bodySmall
-                                        color: Colors.textSecondary
-                                    }
-
-                                    MouseArea {
-                                        id: moveUpBtnArea
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        onClicked: root.moveCurrentActionUp()
-                                    }
-                                }
-
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    height: 32
-                                    radius: Metrics.radiusMd
-                                    color: moveDownBtnArea.containsMouse ? Colors.bgTertiary : Colors.bgSecondary
-                                    border.color: Colors.borderLight
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "↓ 아래로"
-                                        font.family: Typography.fontPrimary
-                                        font.weight: Typography.weightMedium
-                                        font.pixelSize: Typography.bodySmall
-                                        color: Colors.textSecondary
-                                    }
-
-                                    MouseArea {
-                                        id: moveDownBtnArea
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        onClicked: root.moveCurrentActionDown()
-                                    }
-                                }
                             }
                         }
 
-                        // Empty state
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 1
+                            color: Colors.borderLight
+                        }
+
+                        // Connected Prompt
                         ColumnLayout {
                             Layout.fillWidth: true
-                            visible: !root.isNewMode && (!root.currentAction || !root.currentAction.action_id)
+                            spacing: Metrics.xs
 
                             Text {
-                                Layout.fillWidth: true
-                                text: "기능을 선택하거나 새 기능을 만드세요"
+                                text: "연결된 프롬프트"
                                 font.family: Typography.fontPrimary
                                 font.pixelSize: Typography.bodySmall
-                                color: Colors.textSecondary
-                                horizontalAlignment: Text.AlignHCenter
+                                font.weight: Typography.weightMedium
+                                color: Colors.textPrimary
+                            }
+
+                            ComboBox {
+                                Layout.fillWidth: true
+                                model: root.filteredPromptList.map(function(doc) { return doc.title || doc.prompt_doc_id || "" })
+                                currentIndex: {
+                                    if (!root.currentAction || !root.currentAction.binding_prompt_doc_id)
+                                        return -1
+                                    for (var i = 0; i < root.filteredPromptList.length; i++) {
+                                        if (root.filteredPromptList[i].prompt_doc_id === root.currentAction.binding_prompt_doc_id)
+                                            return i
+                                    }
+                                    return -1
+                                }
+                                onActivated: function(index) {
+                                    if (index >= 0 && index < root.filteredPromptList.length) {
+                                        var promptDocId = root.filteredPromptList[index].prompt_doc_id
+                                        var actionId = root.currentAction ? root.currentAction.action_id : ""
+                                        if (actionId && promptDocId) {
+                                            root.bindSelectedPrompt(actionId, promptDocId)
+                                            root.selectAction(actionId)
+                                        }
+                                    }
+                                }
                             }
                         }
 
-                        Item {
-                            Layout.fillHeight: true
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 1
+                            color: Colors.borderLight
+                        }
+
+                        // Action Info
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: Metrics.xs
+
+                            Text {
+                                text: "기능 정보"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodySmall
+                                font.weight: Typography.weightMedium
+                                color: Colors.textPrimary
+                            }
+
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: 2
+                                columnSpacing: Metrics.md
+                                rowSpacing: Metrics.xs
+
+                                Text { text: "카테고리:"; color: Colors.textSecondary; font.pixelSize: Typography.caption }
+                                Text { text: root.currentAction ? (root.currentAction.category || "user") : ""; color: Colors.textPrimary; font.pixelSize: Typography.caption }
+
+                                Text { text: "입력 모드:"; color: Colors.textSecondary; font.pixelSize: Typography.caption }
+                                Text { text: root.currentAction ? (root.currentAction.input_mode || "auto") : ""; color: Colors.textPrimary; font.pixelSize: Typography.caption }
+
+                                Text { text: "RAG 사용:"; color: Colors.textSecondary; font.pixelSize: Typography.caption }
+                                Text { text: root.currentAction ? (root.currentAction.use_rag ? "예" : "아니오") : ""; color: Colors.textPrimary; font.pixelSize: Typography.caption }
+
+                                Text { text: "필수 변수:"; color: Colors.textSecondary; font.pixelSize: Typography.caption }
+                                Text { 
+                                    text: root.currentAction ? (root.currentAction.required_variables && root.currentAction.required_variables.length > 0 ? root.currentAction.required_variables.join(", ") : "없음") : ""
+                                    color: Colors.textPrimary
+                                    font.pixelSize: Typography.caption
+                                }
+                            }
                         }
                     }
                 }
             }
         }
 
-        // Status message
+        // Status Message
         Rectangle {
             Layout.fillWidth: true
             height: 32
             radius: Metrics.radiusSm
-            color: Colors.bgPrimary
+            color: Colors.bgSecondary
             border.color: Colors.borderLight
+            visible: root.statusMessage !== ""
 
             Text {
                 anchors.centerIn: parent
                 text: root.statusMessage
                 font.family: Typography.fontPrimary
-                font.pixelSize: Typography.bodySmall
+                font.pixelSize: 11
                 color: Colors.textSecondary
             }
+
+            Timer {
+                interval: 5000
+                running: root.statusMessage !== ""
+                onTriggered: root.statusMessage = ""
+            }
         }
+    }
 
-        // Delete confirmation dialog
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            radius: Metrics.radiusXxl
-            color: "#80000000"
-            visible: root.showDeleteConfirm
+    // New Action Form
+    Rectangle {
+        anchors.fill: parent
+        color: Colors.bgPrimary
+        visible: root.isNewMode
+        z: 10
 
-            Rectangle {
-                Layout.alignment: Qt.AlignCenter
-                Layout.preferredWidth: 300
-                Layout.preferredHeight: 120
-                radius: Metrics.radiusLg
-                color: Colors.bgPrimary
-                border.color: Colors.borderLight
+        ScrollView {
+            anchors.fill: parent
+            anchors.margins: Metrics.md
+            clip: true
 
-                ColumnLayout {
+            ColumnLayout {
+                width: parent.width
+                spacing: Metrics.sm
+
+                Text {
+                    text: "새 AI 기능 등록"
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.h6
+                    font.weight: Typography.weightSemibold
+                    color: Colors.textPrimary
+                }
+
+                Rectangle { Layout.fillWidth: true; height: 1; color: Colors.borderLight }
+
+                Text { text: "기능 이름"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                TextField {
+                    id: newActionName
                     Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    Layout.margins: Metrics.md
-                    spacing: Metrics.md
-
-                    Text {
-                        Layout.fillWidth: true
-                        text: "삭제 확인"
-                        font.family: Typography.fontPrimary
-                        font.pixelSize: Typography.h6
-                        font.weight: Typography.weightSemibold
-                        color: Colors.textPrimary
-                        horizontalAlignment: Text.AlignHCenter
-                    }
-
-                    Text {
-                        Layout.fillWidth: true
-                        text: "이 AI 기능을 삭제하시겠습니까?"
-                        font.family: Typography.fontPrimary
-                        font.pixelSize: Typography.bodySmall
-                        color: Colors.textSecondary
-                        horizontalAlignment: Text.AlignHCenter
-                        wrapMode: Text.Wrap
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: Metrics.sm
-
-                        Rectangle {
-                            Layout.fillWidth: true
-                            height: 32
-                            radius: Metrics.radiusMd
-                            color: confirmDelBtnArea.containsMouse ? Colors.error500 : Colors.error400
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: "삭제"
-                                font.family: Typography.fontPrimary
-                                font.weight: Typography.weightMedium
-                                font.pixelSize: Typography.bodySmall
-                                color: Colors.textInverse
-                            }
-
-                            MouseArea {
-                                id: confirmDelBtnArea
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                onClicked: root.confirmDelete()
+                    height: 32
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.bodySmall
+                    color: Colors.textPrimary
+                    selectByMouse: true
+                    placeholderText: "예: 문서 요약하기"
+                    onTextChanged: {
+                        var ac = getActionController()
+                        if (ac && text.trim()) {
+                            var generatedId = ac.generate_action_id(text.trim())
+                            if (newActionId.text !== generatedId) {
+                                newActionId.text = generatedId
                             }
                         }
+                    }
+                }
 
-                        Rectangle {
+                Text { text: "기능 ID (action_id)"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                TextField {
+                    id: newActionId
+                    Layout.fillWidth: true
+                    height: 32
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.bodySmall
+                    color: Colors.textPrimary
+                    selectByMouse: true
+                    placeholderText: "예: summarize_doc"
+                }
+
+                Text { text: "설명"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                TextField {
+                    id: newActionDescription
+                    Layout.fillWidth: true
+                    height: 32
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.bodySmall
+                    color: Colors.textPrimary
+                    selectByMouse: true
+                    placeholderText: "이 기능에 대한 설명을 입력하세요"
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Metrics.md
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Text { text: "카테고리"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                        ComboBox {
+                            id: newActionCategory
                             Layout.fillWidth: true
                             height: 32
-                            radius: Metrics.radiusMd
-                            color: cancelDelBtnArea.containsMouse ? Colors.bgTertiary : Colors.bgSecondary
-                            border.color: Colors.borderLight
+                            model: ["user", "문서 처리", "문서 질문", "기타"]
+                        }
+                    }
 
-                            Text {
-                                anchors.centerIn: parent
-                                text: "취소"
-                                font.family: Typography.fontPrimary
-                                font.weight: Typography.weightMedium
-                                font.pixelSize: Typography.bodySmall
-                                color: Colors.textSecondary
-                            }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Text { text: "입력 모드"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                        ComboBox {
+                            id: newActionInputMode
+                            Layout.fillWidth: true
+                            height: 32
+                            model: ["auto", "note_required", "chat_only", "note_and_chat", "selection_required"]
+                        }
+                    }
+                }
 
-                            MouseArea {
-                                id: cancelDelBtnArea
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                onClicked: root.showDeleteConfirm = false
+                RowLayout {
+                    Layout.fillWidth: true
+                    CheckBox { 
+                        id: newActionUseRag
+                        text: "RAG(문서 검색) 사용"
+                        font.family: Typography.fontPrimary
+                        font.pixelSize: Typography.bodySmall
+                    }
+                }
+
+                Text { text: "필수 변수 (JSON)"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                TextField {
+                    id: newActionRequiredVars
+                    Layout.fillWidth: true
+                    height: 32
+                    text: "[]"
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.bodySmall
+                    color: Colors.textPrimary
+                    selectByMouse: true
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Metrics.sm
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 36
+                        radius: Metrics.radiusMd
+                        color: saveNewBtn.containsMouse ? Colors.primary500 : Colors.primary400
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "등록"
+                            color: Colors.textInverse
+                            font.weight: Typography.weightMedium
+                        }
+
+                        MouseArea {
+                            id: saveNewBtn
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: root.saveNewAction()
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 36
+                        radius: Metrics.radiusMd
+                        color: cancelNewBtn.containsMouse ? Colors.bgTertiary : Colors.bgSecondary
+                        border.color: Colors.borderLight
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "취소"
+                            color: Colors.textSecondary
+                        }
+
+                        MouseArea {
+                            id: cancelNewBtn
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: root.cancelEdit()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Edit Action Form
+    Rectangle {
+        anchors.fill: parent
+        color: Colors.bgPrimary
+        visible: root.isEditMode
+        z: 10
+
+        ScrollView {
+            anchors.fill: parent
+            anchors.margins: Metrics.md
+            clip: true
+
+            ColumnLayout {
+                width: parent.width
+                spacing: Metrics.sm
+
+                Text {
+                    text: "AI 기능 수정"
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.h6
+                    font.weight: Typography.weightSemibold
+                    color: Colors.textPrimary
+                }
+
+                Rectangle { Layout.fillWidth: true; height: 1; color: Colors.borderLight }
+
+                Text { text: "기능명"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                TextField {
+                    id: editName
+                    Layout.fillWidth: true
+                    height: 32
+                    text: root.currentAction ? (root.currentAction.name || "") : ""
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.bodySmall
+                    color: Colors.textPrimary
+                    selectByMouse: true
+                }
+
+                Text { text: "설명"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                TextField {
+                    id: editDescription
+                    Layout.fillWidth: true
+                    height: 32
+                    text: root.currentAction ? (root.currentAction.description || "") : ""
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.bodySmall
+                    color: Colors.textPrimary
+                    selectByMouse: true
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Metrics.md
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Text { text: "카테고리"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                        ComboBox {
+                            id: editCategory
+                            Layout.fillWidth: true
+                            height: 32
+                            model: ["user", "문서 처리", "문서 질문", "기타"]
+                            currentIndex: {
+                                var cat = root.currentAction ? root.currentAction.category : "user"
+                                var idx = model.indexOf(cat)
+                                return idx >= 0 ? idx : 0
                             }
+                        }
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Text { text: "입력 모드"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                        ComboBox {
+                            id: editInputMode
+                            Layout.fillWidth: true
+                            height: 32
+                            model: ["auto", "note_required", "chat_only", "note_and_chat", "selection_required"]
+                            currentIndex: {
+                                var mode = root.currentAction ? root.currentAction.input_mode : "auto"
+                                var idx = model.indexOf(mode)
+                                return idx >= 0 ? idx : 0
+                            }
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    CheckBox { 
+                        id: editUseRag
+                        text: "RAG(문서 검색) 사용"
+                        checked: root.currentAction ? root.currentAction.use_rag : false
+                        font.family: Typography.fontPrimary
+                        font.pixelSize: Typography.bodySmall
+                    }
+                }
+
+                Text { text: "필수 변수 (JSON)"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                TextField {
+                    id: editRequiredVars
+                    Layout.fillWidth: true
+                    height: 32
+                    text: root.currentAction ? root.currentAction.required_variables_json || "[]" : "[]"
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.bodySmall
+                    color: Colors.textPrimary
+                    selectByMouse: true
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Metrics.sm
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 36
+                        radius: Metrics.radiusMd
+                        color: saveEditBtn.containsMouse ? Colors.primary500 : Colors.primary400
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "저장"
+                            color: Colors.textInverse
+                            font.weight: Typography.weightMedium
+                        }
+
+                        MouseArea {
+                            id: saveEditBtn
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: root.saveCurrentAction()
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 36
+                        radius: Metrics.radiusMd
+                        color: cancelEditBtn.containsMouse ? Colors.bgTertiary : Colors.bgSecondary
+                        border.color: Colors.borderLight
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "취소"
+                            color: Colors.textSecondary
+                        }
+
+                        MouseArea {
+                            id: cancelEditBtn
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: root.cancelEdit()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Delete Confirmation Dialog
+    Rectangle {
+        anchors.fill: parent
+        color: "#80000000"
+        visible: root.showDeleteConfirm
+        z: 100
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: 300
+            height: 160
+            radius: Metrics.radiusLg
+            color: Colors.bgPrimary
+            border.color: Colors.borderLight
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: Metrics.lg
+                spacing: Metrics.md
+
+                Text {
+                    Layout.fillWidth: true
+                    text: "AI 기능 삭제"
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.h6
+                    font.weight: Typography.weightSemibold
+                    color: Colors.textPrimary
+                    horizontalAlignment: Text.AlignHCenter
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: "이 AI 기능을 정말 삭제하시겠습니까?\n삭제된 기능은 목록에서 사라집니다."
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.bodySmall
+                    color: Colors.textSecondary
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.Wrap
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Metrics.sm
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 32
+                        radius: Metrics.radiusMd
+                        color: confirmDelBtn.containsMouse ? Colors.error500 : Colors.error400
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "삭제"
+                            color: Colors.textInverse
+                        }
+
+                        MouseArea {
+                            id: confirmDelBtn
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: root.confirmDelete()
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 32
+                        radius: Metrics.radiusMd
+                        color: cancelDelBtn.containsMouse ? Colors.bgTertiary : Colors.bgSecondary
+                        border.color: Colors.borderLight
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "취소"
+                            color: Colors.textSecondary
+                        }
+
+                        MouseArea {
+                            id: cancelDelBtn
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: root.showDeleteConfirm = false
                         }
                     }
                 }

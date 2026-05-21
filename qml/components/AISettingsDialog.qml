@@ -182,7 +182,7 @@ Rectangle {
                                 anchors.verticalCenter: parent.verticalCenter
                                 anchors.left: parent.left
                                 anchors.leftMargin: Metrics.md
-                                text: "프롬프트 연결"
+                                text: "AI 기능 관리"
                                 font.family: Typography.fontPrimary
                                 font.pixelSize: Typography.bodySmall
                                 font.weight: root.settingsMenuIndex === 1 ? Typography.weightSemibold : Typography.weightRegular
@@ -195,34 +195,6 @@ Rectangle {
                                 hoverEnabled: true
                                 enabled: root.hasPromptController()
                                 onClicked: root.settingsMenuIndex = 1
-                            }
-                        }
-
-                        Rectangle {
-                            Layout.fillWidth: true
-                            height: 40
-                            radius: Metrics.radiusMd
-                            color: root.settingsMenuIndex === 2 ? Colors.primary50 : (actionSettingsMenuMA.containsMouse ? Colors.bgPrimary : "transparent")
-                            border.width: 1
-                            border.color: root.settingsMenuIndex === 2 ? Colors.primary200 : Colors.borderLight
-                            visible: typeof aiActionController !== "undefined" && aiActionController !== null
-
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                anchors.left: parent.left
-                                anchors.leftMargin: Metrics.md
-                                text: "AI 기능 관리"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                font.weight: root.settingsMenuIndex === 2 ? Typography.weightSemibold : Typography.weightRegular
-                                color: root.settingsMenuIndex === 2 ? Colors.primary700 : Colors.textSecondary
-                            }
-
-                            MouseArea {
-                                id: actionSettingsMenuMA
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                onClicked: root.settingsMenuIndex = 2
                             }
                         }
 
@@ -569,150 +541,34 @@ Rectangle {
                         }
                     }
 
-                    Rectangle {
+                    AIActionManagementPanel {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        radius: Metrics.radiusLg
-                        color: Colors.bgSecondary
-                        border.width: 1
-                        border.color: Colors.borderLight
-
-                        ColumnLayout {
-                            anchors.fill: parent
-                            anchors.margins: Metrics.md
-                            spacing: Metrics.md
-
-                            Text {
-                                text: "프롬프트 관리"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.h5
-                                font.weight: Typography.weightSemibold
-                                color: Colors.textPrimary
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: "AI 기능에 사용되는 프롬프트 템플릿을 관리합니다."
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                color: Colors.textSecondary
-                                wrapMode: Text.Wrap
-                            }
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                height: 1
-                                color: Colors.borderLight
-                            }
-
-                            Item {
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-
-                                PromptBindingPanel {
-                                    anchors.fill: parent
-                                    visible: root.hasPromptController()
-                                }
-
-                                ColumnLayout {
-                                    anchors.centerIn: parent
-                                    width: parent.width
-                                    spacing: Metrics.sm
-                                    visible: !root.hasPromptController()
-
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: "프롬프트 연결 기능을 사용할 수 없습니다."
-                                        font.family: Typography.fontPrimary
-                                        font.pixelSize: Typography.bodySmall
-                                        color: Colors.textSecondary
-                                        horizontalAlignment: Text.AlignHCenter
-                                    }
-
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: "이 탭은 work_ai_editor에서만 활성화됩니다."
-                                        font.family: Typography.fontPrimary
-                                        font.pixelSize: Typography.caption
-                                        color: Colors.textTertiary
-                                        horizontalAlignment: Text.AlignHCenter
-                                    }
-                                }
-                            }
-                        }
+                        visible: root.hasPromptController()
                     }
 
-                    Rectangle {
+                    ColumnLayout {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        radius: Metrics.radiusLg
-                        color: Colors.bgSecondary
-                        border.width: 1
-                        border.color: Colors.borderLight
+                        spacing: Metrics.sm
+                        visible: !root.hasPromptController()
 
-                        ColumnLayout {
-                            anchors.fill: parent
-                            anchors.margins: Metrics.md
-                            spacing: Metrics.md
+                        Text {
+                            Layout.fillWidth: true
+                            text: "AI 기능 관리 기능을 사용할 수 없습니다."
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.bodySmall
+                            color: Colors.textSecondary
+                            horizontalAlignment: Text.AlignHCenter
+                        }
 
-                            Text {
-                                text: "AI 기능 관리"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.h5
-                                font.weight: Typography.weightSemibold
-                                color: Colors.textPrimary
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: "AI 기능을 등록, 수정, 삭제하고 프롬프트에 연결합니다."
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                color: Colors.textSecondary
-                                wrapMode: Text.Wrap
-                            }
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                height: 1
-                                color: Colors.borderLight
-                            }
-
-                            AIActionManagementPanel {
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                visible: typeof aiActionController !== "undefined" && aiActionController !== null
-                            }
-
-                            Item {
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                visible: typeof aiActionController === "undefined" || aiActionController === null
-
-                                ColumnLayout {
-                                    Layout.alignment: Qt.AlignCenter
-                                    Layout.fillWidth: true
-                                    spacing: Metrics.sm
-
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: "AI 기능 관리를 사용할 수 없습니다."
-                                        font.family: Typography.fontPrimary
-                                        font.pixelSize: Typography.bodySmall
-                                        color: Colors.textSecondary
-                                        horizontalAlignment: Text.AlignHCenter
-                                    }
-
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: "이 탭은 work_ai_editor에서만 활성화됩니다."
-                                        font.family: Typography.fontPrimary
-                                        font.pixelSize: Typography.caption
-                                        color: Colors.textTertiary
-                                        horizontalAlignment: Text.AlignHCenter
-                                    }
-                                }
-                            }
+                        Text {
+                            Layout.fillWidth: true
+                            text: "이 탭은 work_ai_editor에서만 활성화됩니다."
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.caption
+                            color: Colors.textTertiary
+                            horizontalAlignment: Text.AlignHCenter
                         }
                     }
                 }

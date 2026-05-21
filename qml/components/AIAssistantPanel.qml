@@ -154,10 +154,8 @@ Rectangle {
     Connections {
         target: aiActionControllerObj
         function onActionsChanged() {
-            root.refreshActionList()
-            if ((!root.selectedAction || !root.selectedAction.action_id) && root.enabledActionList.length > 0) {
-                root.selectedAction = root.enabledActionList[0]
-            }
+            // Avoid recursion by not calling refreshActionList here
+            // The actionList property will auto-update via signals
         }
     }
 
