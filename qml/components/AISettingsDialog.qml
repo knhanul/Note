@@ -7,8 +7,8 @@ Rectangle {
     id: root
     visible: false
     anchors.centerIn: parent
-    width: 800
-    height: 500
+    width: 900
+    height: 650
     radius: Metrics.radiusXxl
     color: Colors.bgPrimary
     border.color: Colors.borderLight
@@ -173,10 +173,10 @@ Rectangle {
                             Layout.fillWidth: true
                             height: 40
                             radius: Metrics.radiusMd
-                            color: root.settingsMenuIndex === 1 ? Colors.primary50 : (promptSettingsMenuMA.containsMouse ? Colors.bgPrimary : "transparent")
+                            color: root.settingsMenuIndex === 1 ? Colors.primary50 : (actionSettingsMenuMA.containsMouse ? Colors.bgPrimary : "transparent")
                             border.width: 1
                             border.color: root.settingsMenuIndex === 1 ? Colors.primary200 : Colors.borderLight
-                            visible: root.hasPromptController()
+                            visible: typeof aiActionController !== "undefined" && aiActionController !== null
 
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
@@ -190,10 +190,9 @@ Rectangle {
                             }
 
                             MouseArea {
-                                id: promptSettingsMenuMA
+                                id: actionSettingsMenuMA
                                 anchors.fill: parent
                                 hoverEnabled: true
-                                enabled: root.hasPromptController()
                                 onClicked: root.settingsMenuIndex = 1
                             }
                         }
@@ -544,18 +543,18 @@ Rectangle {
                     AIActionManagementPanel {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        visible: root.hasPromptController()
+                        visible: typeof aiActionController !== "undefined" && aiActionController !== null
                     }
 
                     ColumnLayout {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         spacing: Metrics.sm
-                        visible: !root.hasPromptController()
+                        visible: typeof aiActionController === "undefined" || aiActionController === null
 
                         Text {
                             Layout.fillWidth: true
-                            text: "AI 기능 관리 기능을 사용할 수 없습니다."
+                            text: "AI 기능 관리를 사용할 수 없습니다."
                             font.family: Typography.fontPrimary
                             font.pixelSize: Typography.bodySmall
                             color: Colors.textSecondary

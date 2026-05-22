@@ -4590,7 +4590,7 @@ Window {
                 }
 
                 onOpenSettingsDialog: {
-                    aiSettingsDialog.settingsMenuIndex = 2
+                    aiSettingsDialog.settingsMenuIndex = 0
                     aiSettingsDialog.visible = true
                 }
             }

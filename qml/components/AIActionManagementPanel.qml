@@ -17,11 +17,8 @@ Rectangle {
     property var promptDocumentList: promptControllerObj ? promptControllerObj.promptDocumentList : []
     property var filteredPromptList: {
         if (!promptDocumentList || promptDocumentList.length === 0) return []
-        // AI 프롬프트 서재에서 미리 작성된 프롬프트만 필터링
-        return promptDocumentList.filter(function(doc) {
-            // 기본 제공 프롬프트 제외, 사용자 정의 프롬프트만 포함
-            return !doc.readonly && doc.source_type !== "default"
-        })
+        // 모든 프롬프트 표시
+        return promptDocumentList
     }
     property var currentAction: aiActionControllerObj ? aiActionControllerObj.currentAction : ({})
 
@@ -81,14 +78,7 @@ Rectangle {
             return
         }
 
-        var actionId = newActionId.text.trim() || c.generate_action_id(name)
-        
-        // Check if action_id already exists
-        var existingAction = root.actionList.find(function(a) { return a.action_id === actionId })
-        if (existingAction) {
-            root.statusMessage = "이미 존재하는 기능 ID입니다. 다른 ID를 사용해주세요."
-            return
-        }
+        var actionId = c.generate_action_id(name)
 
         var description = newActionDescription.text.trim()
         var category = newActionCategory.currentText || "user"
@@ -98,6 +88,13 @@ Rectangle {
 
         var result = c.create_action(name, actionId, description, category, inputMode, useRag, requiredVars, true)
         if (result && result.action_id) {
+            // 프롬프트 연결 처리
+            var promptIdx = newActionPromptBinding.currentIndex
+            if (promptIdx >= 0 && promptIdx < root.filteredPromptList.length) {
+                var promptDocId = root.filteredPromptList[promptIdx].prompt_doc_id
+                c.set_binding(actionId, promptDocId)
+            }
+            newActionPromptBinding.currentIndex = -1
             root.isNewMode = false
             root.statusMessage = "'" + name + "' 기능이 생성되었습니다"
             selectAction(result.action_id)
@@ -125,6 +122,12 @@ Rectangle {
 
         var result = c.update_action(action.action_id, name, description, category, inputMode, useRag, requiredVars)
         if (result && result.action_id) {
+            // 프롬프트 연결 처리
+            var promptIdx = editActionPromptBinding.currentIndex
+            if (promptIdx >= 0 && promptIdx < root.filteredPromptList.length) {
+                var promptDocId = root.filteredPromptList[promptIdx].prompt_doc_id
+                c.set_binding(action.action_id, promptDocId)
+            }
             root.isEditMode = false
             root.statusMessage = "저장되었습니다"
             selectAction(action.action_id)
@@ -204,26 +207,25 @@ Rectangle {
                 }
             }
 
-            Rectangle {
-                width: 32
-                height: 32
-                radius: Metrics.radiusSm
-                color: addBtnArea.containsMouse ? Colors.primary50 : "transparent"
-
-                Text {
-                    anchors.centerIn: parent
-                    text: "+"
+            Button {
+                text: "+ AI 기능 추가"
+                Layout.preferredHeight: 32
+                contentItem: Text {
+                    text: parent.text
                     font.family: Typography.fontPrimary
-                    font.pixelSize: 20
-                    color: Colors.primary500
+                    font.pixelSize: Typography.bodySmall
+                    font.weight: Typography.weightMedium
+                    color: Colors.primary600
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
                 }
-
-                MouseArea {
-                    id: addBtnArea
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    onClicked: root.startNewAction()
+                background: Rectangle {
+                    color: parent.hovered ? Colors.primary50 : Colors.bgPrimary
+                    radius: Metrics.radiusSm
+                    border.color: Colors.primary200
+                    border.width: 1
                 }
+                onClicked: root.startNewAction()
             }
         }
 
@@ -241,7 +243,7 @@ Rectangle {
 
             // Left: Action List
             Rectangle {
-                Layout.fillWidth: true
+                Layout.preferredWidth: 260
                 Layout.fillHeight: true
                 color: Colors.bgPrimary
                 radius: Metrics.radiusMd
@@ -311,6 +313,7 @@ Rectangle {
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                Layout.minimumWidth: 400
                 color: Colors.bgPrimary
                 radius: Metrics.radiusMd
                 border.color: Colors.borderLight
@@ -555,27 +558,6 @@ Rectangle {
                     color: Colors.textPrimary
                     selectByMouse: true
                     placeholderText: "예: 문서 요약하기"
-                    onTextChanged: {
-                        var ac = getActionController()
-                        if (ac && text.trim()) {
-                            var generatedId = ac.generate_action_id(text.trim())
-                            if (newActionId.text !== generatedId) {
-                                newActionId.text = generatedId
-                            }
-                        }
-                    }
-                }
-
-                Text { text: "기능 ID (action_id)"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
-                TextField {
-                    id: newActionId
-                    Layout.fillWidth: true
-                    height: 32
-                    font.family: Typography.fontPrimary
-                    font.pixelSize: Typography.bodySmall
-                    color: Colors.textPrimary
-                    selectByMouse: true
-                    placeholderText: "예: summarize_doc"
                 }
 
                 Text { text: "설명"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
@@ -625,6 +607,15 @@ Rectangle {
                         font.family: Typography.fontPrimary
                         font.pixelSize: Typography.bodySmall
                     }
+                }
+
+                Text { text: "연결할 프롬프트"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                ComboBox {
+                    id: newActionPromptBinding
+                    Layout.fillWidth: true
+                    height: 32
+                    model: root.filteredPromptList.map(function(doc) { return doc.title || doc.prompt_doc_id || "" })
+                    currentIndex: -1
                 }
 
                 Text { text: "필수 변수 (JSON)"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
@@ -725,6 +716,7 @@ Rectangle {
                     font.pixelSize: Typography.bodySmall
                     color: Colors.textPrimary
                     selectByMouse: true
+                    readOnly: true
                 }
 
                 Text { text: "설명"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
@@ -784,6 +776,23 @@ Rectangle {
                         checked: root.currentAction ? root.currentAction.use_rag : false
                         font.family: Typography.fontPrimary
                         font.pixelSize: Typography.bodySmall
+                    }
+                }
+
+                Text { text: "연결할 프롬프트"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                ComboBox {
+                    id: editActionPromptBinding
+                    Layout.fillWidth: true
+                    height: 32
+                    model: root.filteredPromptList.map(function(doc) { return doc.title || doc.prompt_doc_id || "" })
+                    currentIndex: {
+                        if (!root.currentAction || !root.currentAction.binding_prompt_doc_id)
+                            return -1
+                        for (var i = 0; i < root.filteredPromptList.length; i++) {
+                            if (root.filteredPromptList[i].prompt_doc_id === root.currentAction.binding_prompt_doc_id)
+                                return i
+                        }
+                        return -1
                     }
                 }
 
