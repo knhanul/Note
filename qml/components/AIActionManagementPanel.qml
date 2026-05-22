@@ -164,7 +164,7 @@ Rectangle {
     }
 
     function refreshFromController() {
-        // Properties are kept in sync via bindings and controller signals.
+        // Properties are kept in sync via QML expression bindings automatically.
     }
 
     function bindSelectedPrompt(actionId, promptDocId) {
@@ -637,12 +637,14 @@ Rectangle {
 
                         Rectangle {
                             Layout.fillWidth: true
+                            implicitHeight: actionDetailGrid.implicitHeight + Metrics.md * 2
                             radius: Metrics.radiusMd
                             color: Colors.bgSecondary
                             border.color: Colors.borderLight
                             border.width: 1
 
                             GridLayout {
+                                id: actionDetailGrid
                                 anchors.fill: parent
                                 anchors.margins: Metrics.md
                                 columns: 2
@@ -663,20 +665,26 @@ Rectangle {
 
                                 Text { text: "사용 여부"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
                                 Text { text: root.currentAction && root.currentAction.enabled ? "사용 중" : "사용 안 함"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textPrimary }
+
+                                Text { text: "필수 변수"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                                Text {
+                                    text: {
+                                        var vars = root.currentAction ? root.currentAction.required_variables_json : "[]"
+                                        try {
+                                            var arr = JSON.parse(vars)
+                                            return arr.length > 0 ? arr.join(", ") : "없음"
+                                        } catch(e) { return "없음" }
+                                    }
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: Typography.caption
+                                    color: Colors.textPrimary
+                                }
                             }
                         }
 
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: Metrics.sm
-
-                            Text {
-                                text: "연결 프롬프트"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                font.weight: Typography.weightMedium
-                                color: Colors.textPrimary
-                            }
 
                             Rectangle {
                                 Layout.fillWidth: true
@@ -840,6 +848,12 @@ Rectangle {
                     font.pixelSize: Typography.bodySmall
                     selectByMouse: true
                     placeholderText: "이 기능이 어떤 상황에서 어떤 답변을 해주면 좋은지 적어주세요."
+                    background: Rectangle {
+                        color: Colors.bgPrimary
+                        radius: Metrics.radiusMd
+                        border.color: Colors.borderLight
+                        border.width: 1
+                    }
                 }
 
                 RowLayout {
@@ -1171,6 +1185,12 @@ Rectangle {
                     font.family: Typography.fontPrimary
                     font.pixelSize: Typography.bodySmall
                     selectByMouse: true
+                    background: Rectangle {
+                        color: Colors.bgPrimary
+                        radius: Metrics.radiusMd
+                        border.color: Colors.borderLight
+                        border.width: 1
+                    }
                 }
 
                 RowLayout {

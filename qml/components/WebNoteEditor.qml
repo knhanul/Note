@@ -406,6 +406,12 @@ ColumnLayout {
     function insertQuote() {
         webView.runJavaScript("if (window.editorAPI) { window.editorAPI.insertQuote(); }")
     }
+
+    function insertMarkdownAtCursor(markdown) {
+        if (!markdown || markdown.length === 0) return
+        var setMarkdown = "window.__insertMarkdown = " + JSON.stringify(markdown) + ";"
+        webView.runJavaScript(setMarkdown + "if (window.editorAPI) { window.editorAPI.insertMarkdownAtCursor(window.__insertMarkdown); }")
+    }
     
     // Extract first line from markdown content as title
     function extractFirstLine(content) {

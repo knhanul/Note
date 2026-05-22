@@ -93,6 +93,26 @@ Window {
     property var currentAIPromptDocument: null
     property string lastRealLibraryIdBeforeAIPromptMode: ""
     property int promptListRefreshCounter: 0  // Force ListView refresh
+    property string aiPromptTitleDraft: ""
+    property var promptRuleInsertItems: [
+        { "label": "역할", "value": "## 역할\n\n당신은 사내 업무 문서를 돕는 AI 업무비서입니다.\n" },
+        { "label": "입력 변수", "value": "## 입력\n\n{{CONTENT}}\n" },
+        { "label": "출력 형식", "value": "## 출력 형식\n\n- 핵심 요약:\n- 중요한 항목:\n- 확인할 사항:\n" },
+        { "label": "답변 길이", "value": "## 답변 길이\n\n- 답변은 5개 항목 이내로 작성합니다.\n- 각 항목은 1~2문장으로 작성합니다.\n" },
+        { "label": "말투", "value": "## 말투\n\n- 한국어로 작성합니다.\n- 사내 보고서에 어울리는 간결하고 공손한 문체를 사용합니다.\n" },
+        { "label": "금지사항", "value": "## 금지사항\n\n- 문서에 없는 내용은 추측하지 않습니다.\n- 원문을 불필요하게 길게 반복하지 않습니다.\n- 개인정보나 민감정보를 임의로 생성하지 않습니다.\n" },
+        { "label": "불확실할 때", "value": "## 불확실할 때\n\n- 근거가 부족하면 \"문서에서 확인되지 않습니다\"라고 답변합니다.\n" },
+        { "label": "예시 출력", "value": "## 예시 출력\n\n- 핵심 요약:\n- 근거:\n- 후속 확인 사항:\n" }
+    ]
+    property var promptVariableInsertItems: [
+        { "label": "{{CONTENT}}", "value": "{{CONTENT}}" },
+        { "label": "{{SELECTION}}", "value": "{{SELECTION}}" },
+        { "label": "{{QUESTION}}", "value": "{{QUESTION}}" },
+        { "label": "{{USER_INPUT}}", "value": "{{USER_INPUT}}" },
+        { "label": "{{TITLE}}", "value": "{{TITLE}}" },
+        { "label": "{{TAGS}}", "value": "{{TAGS}}" },
+        { "label": "{{CONTEXT}}", "value": "{{CONTEXT}}" }
+    ]
 
     // Reload prompt documents when switching to AI prompt mode
     onActiveContentModeChanged: {
@@ -109,6 +129,44 @@ Window {
                 console.log("[Main] promptDocumentController not available")
             }
         }
+    }
+
+    onCurrentAIPromptDocumentChanged: {
+        window.aiPromptTitleDraft = window.currentAIPromptDocument ? (window.currentAIPromptDocument.title || "") : ""
+        if (aiPromptTitleField) {
+            aiPromptTitleField.text = window.aiPromptTitleDraft
+        }
+    }
+
+    onSelectedAIPromptDocIdChanged: {
+        if (!window.selectedAIPromptDocId) {
+            window.aiPromptTitleDraft = ""
+            if (aiPromptTitleField) {
+                aiPromptTitleField.text = ""
+            }
+        }
+    }
+
+    Timer {
+        id: aiPromptTitleSaveTimer
+        interval: 600
+        repeat: false
+        onTriggered: {
+            if (window.activeContentMode === "ai_prompts" && window.selectedAIPromptDocId !== "" && !window.currentPromptReadonly()) {
+                window.flushSaveIfDirty()
+            }
+        }
+    }
+
+    function currentPromptReadonly() {
+        return !!(window.currentAIPromptDocument && window.currentAIPromptDocument.readonly)
+    }
+
+    function insertPromptSnippet(text) {
+        if (window.activeContentMode !== "ai_prompts") return
+        if (window.currentPromptReadonly()) return
+        if (!noteEditor || !text) return
+        noteEditor.insertMarkdownAtCursor(text)
     }
 
     function forcePromptListRefresh() {
@@ -1524,6 +1582,23 @@ Window {
             if (typeof promptDocumentController !== "undefined" && promptDocumentController) {
                 promptDocumentController.loadPromptDocuments()
                 promptDocumentController.selectPromptDocument(prompt_doc_id)
+            }
+        }
+    }
+
+    Connections {
+        target: typeof promptDocumentController !== "undefined" ? promptDocumentController : null
+        enabled: typeof promptDocumentController !== "undefined"
+        function onSelectedPromptDocIdChanged() {
+            window.selectedAIPromptDocId = promptDocumentController ? (promptDocumentController.selectedPromptDocId || "") : ""
+        }
+        function onCurrentPromptDocumentChanged() {
+            var currentDoc = promptDocumentController ? promptDocumentController.currentPromptDocument : null
+            window.currentAIPromptDocument = currentDoc && Object.keys(currentDoc).length > 0 ? currentDoc : null
+        }
+        function onPromptDocumentsChanged() {
+            if (window.activeContentMode === "ai_prompts") {
+                window.forcePromptListRefresh()
             }
         }
     }
@@ -3941,25 +4016,27 @@ Window {
 
                                 Text {
                                     Layout.alignment: Qt.AlignHCenter
-                                    text: "📝"
+                                    text: window.activeContentMode === "ai_prompts" ? "📋" : "📝"
                                     font.pixelSize: 48
                                 }
 
                                 Text {
                                     Layout.alignment: Qt.AlignHCenter
-                                    text: "노트를 선택하거나 새로 만들어보세요"
+                                    text: window.activeContentMode === "ai_prompts" ? "프롬프트를 선택하거나 새로 만들어보세요" : "노트를 선택하거나 새로 만들어보세요"
                                     font.family: Typography.fontPrimary
                                     font.weight: Typography.weightMedium
                                     font.pixelSize: 14
                                     color: Colors.textSecondary
                                 }
 
+                                // Notes mode: 새 노트 만들기
                                 Rectangle {
                                     Layout.alignment: Qt.AlignHCenter
                                     width: 140
                                     height: 36
                                     radius: Metrics.radiusLg
                                     color: createNoteBtnArea.containsMouse ? Colors.primary500 : Colors.primary400
+                                    visible: window.activeContentMode === "notes"
 
                                     MouseArea {
                                         id: createNoteBtnArea
@@ -3979,6 +4056,41 @@ Window {
                                         color: Colors.textInverse
                                     }
                                 }
+
+                                // AI Prompts mode: 새 프롬프트 만들기
+                                Rectangle {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    width: 160
+                                    height: 36
+                                    radius: Metrics.radiusLg
+                                    color: createPromptBtnArea.containsMouse ? Colors.primary500 : Colors.primary400
+                                    visible: window.activeContentMode === "ai_prompts"
+
+                                    MouseArea {
+                                        id: createPromptBtnArea
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        onClicked: {
+                                            if (typeof promptDocumentController !== "undefined" && promptDocumentController) {
+                                                var newDoc = promptDocumentController.createPromptDocument("새 AI 프롬프트", "", "새로 만든 프롬프트입니다.")
+                                                if (newDoc && newDoc.prompt_doc_id) {
+                                                    promptDocumentController.selectPromptDocument(newDoc.prompt_doc_id)
+                                                    window.selectedAIPromptDocId = newDoc.prompt_doc_id
+                                                    window.currentAIPromptDocument = newDoc
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "새 프롬프트 만들기"
+                                        font.family: Typography.fontPrimary
+                                        font.weight: Typography.weightSemibold
+                                        font.pixelSize: Typography.bodySmall
+                                        color: Colors.textInverse
+                                    }
+                                }
                             }
                         }
 
@@ -3986,114 +4098,119 @@ Window {
                         Rectangle {
                             Layout.fillWidth: true
                             visible: window.activeContentMode === "ai_prompts" && window.selectedAIPromptDocId !== ""
-                            height: 40
+                            implicitHeight: promptEditorToolsLayout.implicitHeight + Metrics.md * 2
                             color: Colors.bgSecondary
                             border.color: Colors.borderLight
                             border.width: 1
 
-                            RowLayout {
+                            ColumnLayout {
+                                id: promptEditorToolsLayout
                                 anchors.fill: parent
-                                anchors.leftMargin: Metrics.md
-                                anchors.rightMargin: Metrics.md
-                                spacing: Metrics.md
+                                anchors.margins: Metrics.md
+                                spacing: Metrics.sm
 
-                                // Status badge
-                                Rectangle {
-                                    height: 24
-                                    radius: Metrics.radiusSm
-                                    color: {
-                                        if (!window.currentAIPromptDocument) return "#10B981"
-                                        if (window.currentAIPromptDocument.readonly) return "#FCD34D"
-                                        return "#10B981"
-                                    }
-                                    visible: window.currentAIPromptDocument !== null
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        anchors.leftMargin: 8
-                                        anchors.rightMargin: 8
-                                        text: (window.currentAIPromptDocument && window.currentAIPromptDocument.readonly) ? "기본 프롬프트 / 읽기 전용" : "사용자 프롬프트 / 편집 가능"
-                                        font.family: Typography.fontPrimary
-                                        font.pixelSize: 11
-                                        color: {
-                                            if (!window.currentAIPromptDocument) return "#059669"
-                                            if (window.currentAIPromptDocument.readonly) return "#D97706"
-                                            return "#059669"
-                                        }
-                                    }
-                                }
-
-                                // Spacer
-                                Item {
+                                RowLayout {
                                     Layout.fillWidth: true
-                                }
+                                    spacing: Metrics.md
 
-                                // Duplicate button (only for readonly prompts)
-                                Rectangle {
-                                    width: 120
-                                    height: 28
-                                    radius: Metrics.radiusMd
-                                    color: duplicateBtnArea.containsMouse ? Colors.primary500 : Colors.primary400
-                                    visible: window.currentAIPromptDocument && window.currentAIPromptDocument.readonly
+                                    // Status badge
+                                    Rectangle {
+                                        height: 24
+                                        radius: Metrics.radiusSm
+                                        color: {
+                                            if (!window.currentAIPromptDocument) return "#10B981"
+                                            if (window.currentAIPromptDocument.readonly) return "#FCD34D"
+                                            return "#10B981"
+                                        }
+                                        visible: window.currentAIPromptDocument !== null
 
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "복사해서 수정"
-                                        font.family: Typography.fontPrimary
-                                        font.weight: Typography.weightMedium
-                                        font.pixelSize: 11
-                                        color: Colors.textInverse
-                                    }
-
-                                    MouseArea {
-                                        id: duplicateBtnArea
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        onClicked: {
-                                            if (typeof promptDocumentController !== "undefined" && promptDocumentController && window.selectedAIPromptDocId) {
-                                                promptDocumentController.duplicatePromptDocument(window.selectedAIPromptDocId)
+                                        Text {
+                                            anchors.centerIn: parent
+                                            anchors.leftMargin: 8
+                                            anchors.rightMargin: 8
+                                            text: (window.currentAIPromptDocument && window.currentAIPromptDocument.readonly) ? "기본 프롬프트 / 읽기 전용" : "사용자 프롬프트 / 편집 가능"
+                                            font.family: Typography.fontPrimary
+                                            font.pixelSize: 11
+                                            color: {
+                                                if (!window.currentAIPromptDocument) return "#059669"
+                                                if (window.currentAIPromptDocument.readonly) return "#D97706"
+                                                return "#059669"
                                             }
                                         }
                                     }
-                                }
 
-                                // Delete button (only for user prompts)
-                                Rectangle {
-                                    width: 80
-                                    height: 28
-                                    radius: Metrics.radiusMd
-                                    color: deletePromptBtnArea.containsMouse ? Colors.error500 : Colors.error400
-                                    visible: window.currentAIPromptDocument && !window.currentAIPromptDocument.readonly && window.currentAIPromptDocument.source_type !== "default"
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "삭제"
-                                        font.family: Typography.fontPrimary
-                                        font.weight: Typography.weightMedium
-                                        font.pixelSize: 11
-                                        color: Colors.textInverse
+                                    // Spacer
+                                    Item {
+                                        Layout.fillWidth: true
                                     }
 
-                                    MouseArea {
-                                        id: deletePromptBtnArea
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        onClicked: {
-                                            if (typeof promptDocumentController !== "undefined" && promptDocumentController && window.selectedAIPromptDocId) {
-                                                var bindingCount = promptDocumentController.countBindingsForPrompt(window.selectedAIPromptDocId)
-                                                if (bindingCount > 0) {
-                                                    var boundActions = promptDocumentController.listActionsBoundToPrompt(window.selectedAIPromptDocId)
-                                                    var actionNames = boundActions.map(function(a) { return a.name || a.action_id }).join(", ")
-                                                    if (confirm("이 프롬프트는 다음 AI 기능에 연결되어 있습니다: " + actionNames + ". 삭제하시겠습니까?")) {
-                                                        promptDocumentController.archivePromptDocument(window.selectedAIPromptDocId)
-                                                        window.selectedAIPromptDocId = ""
-                                                        window.currentAIPromptDocument = null
-                                                    }
-                                                } else {
-                                                    if (confirm("이 AI 프롬프트를 삭제하시겠습니까? 실제 삭제가 아니라 보관 처리되며 목록에서 숨겨집니다.")) {
-                                                        promptDocumentController.archivePromptDocument(window.selectedAIPromptDocId)
-                                                        window.selectedAIPromptDocId = ""
-                                                        window.currentAIPromptDocument = null
+                                    // Duplicate button (only for readonly prompts)
+                                    Rectangle {
+                                        width: 120
+                                        height: 28
+                                        radius: Metrics.radiusMd
+                                        color: duplicateBtnArea.containsMouse ? Colors.primary500 : Colors.primary400
+                                        visible: window.currentAIPromptDocument && window.currentAIPromptDocument.readonly
+
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "복사해서 수정"
+                                            font.family: Typography.fontPrimary
+                                            font.weight: Typography.weightMedium
+                                            font.pixelSize: 11
+                                            color: Colors.textInverse
+                                        }
+
+                                        MouseArea {
+                                            id: duplicateBtnArea
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            onClicked: {
+                                                if (typeof promptDocumentController !== "undefined" && promptDocumentController && window.selectedAIPromptDocId) {
+                                                    promptDocumentController.duplicatePromptDocument(window.selectedAIPromptDocId)
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Delete button (only for user prompts)
+                                    Rectangle {
+                                        width: 80
+                                        height: 28
+                                        radius: Metrics.radiusMd
+                                        color: deletePromptBtnArea.containsMouse ? Colors.error500 : Colors.error400
+                                        visible: window.currentAIPromptDocument && !window.currentAIPromptDocument.readonly && window.currentAIPromptDocument.source_type !== "default"
+
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "삭제"
+                                            font.family: Typography.fontPrimary
+                                            font.weight: Typography.weightMedium
+                                            font.pixelSize: 11
+                                            color: Colors.textInverse
+                                        }
+
+                                        MouseArea {
+                                            id: deletePromptBtnArea
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            onClicked: {
+                                                if (typeof promptDocumentController !== "undefined" && promptDocumentController && window.selectedAIPromptDocId) {
+                                                    var bindingCount = promptDocumentController.countBindingsForPrompt(window.selectedAIPromptDocId)
+                                                    if (bindingCount > 0) {
+                                                        var boundActions = promptDocumentController.listActionsBoundToPrompt(window.selectedAIPromptDocId)
+                                                        var actionNames = boundActions.map(function(a) { return a.name || a.action_id }).join(", ")
+                                                        if (confirm("이 프롬프트는 다음 AI 기능에 연결되어 있습니다: " + actionNames + ". 삭제하시겠습니까?")) {
+                                                            promptDocumentController.archivePromptDocument(window.selectedAIPromptDocId)
+                                                            window.selectedAIPromptDocId = ""
+                                                            window.currentAIPromptDocument = null
+                                                        }
+                                                    } else {
+                                                        if (confirm("이 AI 프롬프트를 삭제하시겠습니까? 실제 삭제가 아니라 보관 처리되며 목록에서 숨겨집니다.")) {
+                                                            promptDocumentController.archivePromptDocument(window.selectedAIPromptDocId)
+                                                            window.selectedAIPromptDocId = ""
+                                                            window.currentAIPromptDocument = null
+                                                        }
                                                     }
                                                 }
                                             }
@@ -4101,13 +4218,112 @@ Window {
                                     }
                                 }
 
-                                // Info text for readonly
-                                Text {
-                                    text: "기본 프롬프트입니다. 앱 업데이트 시 변경될 수 있으므로 직접 수정할 수 없습니다."
+                                TextField {
+                                    id: aiPromptTitleField
+                                    Layout.fillWidth: true
+                                    height: 36
+                                    text: window.aiPromptTitleDraft
+                                    readOnly: window.currentPromptReadonly()
+                                    selectByMouse: true
+                                    placeholderText: "프롬프트 제목"
                                     font.family: Typography.fontPrimary
-                                    font.pixelSize: 11
-                                    color: Colors.textSecondary
-                                    visible: window.currentAIPromptDocument && window.currentAIPromptDocument.readonly
+                                    font.pixelSize: Typography.bodySmall
+                                    color: Colors.textPrimary
+                                    background: Rectangle {
+                                        color: window.currentPromptReadonly() ? Colors.bgSecondary : Colors.bgPrimary
+                                        radius: Metrics.radiusMd
+                                        border.color: Colors.borderLight
+                                        border.width: 1
+                                    }
+                                    onTextEdited: {
+                                        window.aiPromptTitleDraft = text
+                                        if (!window.currentAIPromptDocument) {
+                                            window.currentAIPromptDocument = {}
+                                        }
+                                        window.currentAIPromptDocument.title = text
+                                        aiPromptTitleSaveTimer.restart()
+                                    }
+                                }
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    implicitHeight: promptToolCardLayout.implicitHeight + Metrics.md * 2
+                                    radius: Metrics.radiusMd
+                                    color: Colors.bgPrimary
+                                    border.color: Colors.borderLight
+                                    border.width: 1
+
+                                    ColumnLayout {
+                                        id: promptToolCardLayout
+                                        anchors.fill: parent
+                                        anchors.margins: Metrics.md
+                                        spacing: Metrics.sm
+
+                                        Text {
+                                            text: "프롬프트 규칙 삽입"
+                                            font.family: Typography.fontPrimary
+                                            font.pixelSize: Typography.bodySmall
+                                            font.weight: Typography.weightMedium
+                                            color: Colors.textPrimary
+                                        }
+
+                                        Item {
+                                            Layout.fillWidth: true
+                                            implicitHeight: promptRuleFlow.implicitHeight
+
+                                            Flow {
+                                                id: promptRuleFlow
+                                                width: parent.width
+                                                spacing: Metrics.xs
+
+                                                Repeater {
+                                                    model: window.promptRuleInsertItems
+
+                                                    Button {
+                                                        text: modelData.label
+                                                        enabled: !window.currentPromptReadonly()
+                                                        onClicked: window.insertPromptSnippet(modelData.value)
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        Text {
+                                            text: "변수 삽입"
+                                            font.family: Typography.fontPrimary
+                                            font.pixelSize: Typography.caption
+                                            color: Colors.textSecondary
+                                        }
+
+                                        Item {
+                                            Layout.fillWidth: true
+                                            implicitHeight: promptVarFlow.implicitHeight
+
+                                            Flow {
+                                                id: promptVarFlow
+                                                width: parent.width
+                                                spacing: Metrics.xs
+
+                                                Repeater {
+                                                    model: window.promptVariableInsertItems
+
+                                                    Button {
+                                                        text: modelData.label
+                                                        enabled: !window.currentPromptReadonly()
+                                                        onClicked: window.insertPromptSnippet(modelData.value)
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        Text {
+                                            text: "기본 프롬프트는 직접 수정할 수 없습니다. 복사해서 수정해주세요."
+                                            font.family: Typography.fontPrimary
+                                            font.pixelSize: 11
+                                            color: Colors.textSecondary
+                                            visible: window.currentAIPromptDocument && window.currentAIPromptDocument.readonly
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -4133,7 +4349,6 @@ Window {
                                 if (window.activeContentMode === "ai_prompts") {
                                     // Update AI prompt document cache
                                     if (!window.currentAIPromptDocument) window.currentAIPromptDocument = {}
-                                    window.currentAIPromptDocument.title = newTitle || ""
                                     window.currentAIPromptDocument.content_md = newMarkdown || ""
                                     return
                                 }

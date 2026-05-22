@@ -305,6 +305,39 @@ export default function App() {
     scheduleDebouncedSave()
   }, [publishMarkdownPayload, scheduleDebouncedSave])
 
+  const appendMarkdownToEnd = useCallback((insertText) => {
+    const payloadText = insertText || ''
+    if (!payloadText) return
+
+    let currentMarkdown = ''
+    try {
+      currentMarkdown = editorRef.current?.storage?.markdown?.getMarkdown() || markdownDraftRef.current || ''
+    } catch (_) {
+      currentMarkdown = markdownDraftRef.current || ''
+    }
+
+    const needsSpacer = currentMarkdown.length > 0 && !currentMarkdown.endsWith('\n')
+    const nextMarkdown = currentMarkdown + (needsSpacer ? '\n' : '') + payloadText
+
+    setMarkdownDraft(nextMarkdown)
+    if (editorRef.current) {
+      editorRef.current.commands.setContent(nextMarkdown, false)
+      const payload = publishPayload(editorRef.current)
+      setMarkdownDraft(payload.markdown || nextMarkdown)
+      requestAnimationFrame(() => {
+        editorRef.current?.commands.focus('end')
+      })
+    } else {
+      publishMarkdownPayload()
+    }
+
+    if (isNewNoteRef.current && nextMarkdown.trim().length > 0) {
+      hasTypedRef.current = true
+    }
+
+    scheduleDebouncedSave()
+  }, [publishPayload, publishMarkdownPayload, scheduleDebouncedSave, setMarkdownDraft])
+
   // ── Tiptap 에디터 초기화 ─────────────────────────────────────────
   const editor = useEditor({
     extensions: [
@@ -517,7 +550,7 @@ export default function App() {
           insertIntoMarkdownAtCursor(markdown || '')
           return
         }
-        editor.chain().focus().insertContent(markdown).run()
+        appendMarkdownToEnd(markdown || '')
       },
       focus() {
         if (modeRef.current === 'markdown') {
@@ -631,6 +664,7 @@ export default function App() {
     buildPayload,
     buildMarkdownPayload,
     insertIntoMarkdownAtCursor,
+    appendMarkdownToEnd,
     publishMarkdownPayload,
     setMarkdownDraft,
     switchEditorMode,
