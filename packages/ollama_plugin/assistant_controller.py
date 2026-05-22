@@ -16,6 +16,11 @@ logger = logging.getLogger(__name__)
 
 MAX_CONTENT_LENGTH = 4000
 MAX_OUTPUT_LENGTH = 500
+RESPONSE_LENGTH_TO_NUM_PREDICT = {
+    "short": 256,
+    "medium": 512,
+    "long": 1024,
+}
 
 
 class AssistantController(QObject):
@@ -92,7 +97,21 @@ class AssistantController(QObject):
         """Handle status changed."""
         self.statusChanged.emit(status)
 
-    def _run_ai_task(self, prompt: str, action_id: str = ""):
+    def _resolve_response_length(self, action: dict | None) -> str:
+        value = (action or {}).get("response_length", "medium")
+        if value not in RESPONSE_LENGTH_TO_NUM_PREDICT:
+            return "medium"
+        return value
+
+    def _build_generation_options(self, settings, action: dict | None = None) -> dict:
+        response_length = self._resolve_response_length(action)
+        return {
+            "num_predict": RESPONSE_LENGTH_TO_NUM_PREDICT[response_length],
+            "num_ctx": settings.num_ctx,
+            "temperature": settings.temperature,
+        }
+
+    def _run_ai_task(self, prompt: str, action_id: str = "", action: dict | None = None):
         """Run an AI task with the given prompt."""
         if self._worker_manager.is_running():
             logger.warning("[AssistantController] Task already running")
@@ -104,17 +123,14 @@ class AssistantController(QObject):
             self.errorOccurred.emit("모델이 선택되지 않았습니다")
             return
 
-        options = {
-            "num_predict": settings.num_predict,
-            "num_ctx": settings.num_ctx,
-            "temperature": settings.temperature,
-        }
+        options = self._build_generation_options(settings, action)
 
         logger.info(
             f"[AssistantController] Running AI task: action_id={action_id}, "
             f"model={settings.chat_model}, prompt_len={len(prompt)}, "
             f"timeout={settings.timeout}, stream={settings.streaming}, "
-            f"options={options}, keep_alive={settings.keep_alive}"
+            f"options={options}, keep_alive={settings.keep_alive}, "
+            f"response_length={self._resolve_response_length(action)}"
         )
         self._response_text = ""
         self.runningChanged.emit(True)
@@ -215,7 +231,10 @@ class AssistantController(QObject):
             f"[AssistantController] Task prepared: action_id={action.id}, "
             f"content_len={len(truncated_content)}, prompt_len={len(prompt)}"
         )
-        self._run_ai_task(prompt, action_id=action.id)
+        action_dict = {
+            "response_length": getattr(action, "response_length", "medium"),
+        }
+        self._run_ai_task(prompt, action_id=action.id, action=action_dict)
 
     @pyqtSlot(str, str, str, str, str)
     def runCustomAction(
@@ -333,7 +352,7 @@ class AssistantController(QObject):
             f"prompt_len={len(rendered_prompt)}"
         )
 
-        self._run_ai_task(rendered_prompt, action_id=action_id)
+        self._run_ai_task(rendered_prompt, action_id=action_id, action=action)
 
     @pyqtSlot(str, str)
     def askQuestion(self, content: str, question: str):

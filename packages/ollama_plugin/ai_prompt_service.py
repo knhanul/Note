@@ -49,6 +49,7 @@ class PromptService:
                 "description": action.get("description", ""),
                 "category": action.get("category", ""),
                 "required_variables": self._parse_variables_json(action.get("required_variables_json")),
+                "required_variables_json": action.get("required_variables_json", "[]"),
                 "enabled": bool(action.get("enabled", 1)),
                 "sort_order": int(action.get("sort_order", 0)),
                 "source_type": action.get("source_type", "default"),
@@ -56,6 +57,7 @@ class PromptService:
                 "archived": bool(action.get("archived", 0)),
                 "input_mode": action.get("input_mode", "auto"),
                 "use_rag": bool(action.get("use_rag", 0)),
+                "response_length": action.get("response_length", "medium"),
                 "icon": action.get("icon", ""),
                 "prompt_doc_id": prompt_doc_id,
                 "binding_prompt_doc_id": binding.get("prompt_doc_id") if binding else prompt_doc_id,
@@ -78,6 +80,7 @@ class PromptService:
             "description": action.get("description", ""),
             "category": action.get("category", ""),
             "required_variables": self._parse_variables_json(action.get("required_variables_json")),
+            "required_variables_json": action.get("required_variables_json", "[]"),
             "enabled": bool(action.get("enabled", 1)),
             "sort_order": int(action.get("sort_order", 0)),
             "source_type": action.get("source_type", "default"),
@@ -85,6 +88,7 @@ class PromptService:
             "archived": bool(action.get("archived", 0)),
             "input_mode": action.get("input_mode", "auto"),
             "use_rag": bool(action.get("use_rag", 0)),
+            "response_length": action.get("response_length", "medium"),
             "icon": action.get("icon", ""),
             "created_at": action.get("created_at", ""),
             "updated_at": action.get("updated_at", ""),
@@ -146,6 +150,7 @@ class PromptService:
             "archived": 0,
             "input_mode": data.get("input_mode", "auto"),
             "use_rag": data.get("use_rag", 0),
+            "response_length": data.get("response_length", "medium"),
             "icon": data.get("icon", ""),
         }
 
@@ -176,6 +181,7 @@ class PromptService:
             "archived": action.get("archived", 0),
             "input_mode": data.get("input_mode", action.get("input_mode", "auto")),
             "use_rag": data.get("use_rag", action.get("use_rag", 0)),
+            "response_length": data.get("response_length", action.get("response_length", "medium")),
             "icon": data.get("icon", action.get("icon", "")),
         }
 
@@ -202,6 +208,7 @@ class PromptService:
             "enabled": source.get("enabled", 1),
             "input_mode": source.get("input_mode", "auto"),
             "use_rag": source.get("use_rag", 0),
+            "response_length": source.get("response_length", "medium"),
             "icon": source.get("icon", ""),
         }
 

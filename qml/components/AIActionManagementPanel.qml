@@ -12,20 +12,32 @@ Rectangle {
 
     property var aiActionControllerObj: typeof aiActionController !== "undefined" && aiActionController !== null ? aiActionController : null
     property var promptControllerObj: typeof promptController !== "undefined" && promptController !== null ? promptController : null
+    property var promptDocumentControllerObj: typeof promptDocumentController !== "undefined" && promptDocumentController !== null ? promptDocumentController : null
 
     property var actionList: aiActionControllerObj ? aiActionControllerObj.actionList : []
     property var promptDocumentList: promptControllerObj ? promptControllerObj.promptDocumentList : []
-    property var filteredPromptList: {
-        if (!promptDocumentList || promptDocumentList.length === 0) return []
-        // 모든 프롬프트 표시
-        return promptDocumentList
-    }
     property var currentAction: aiActionControllerObj ? aiActionControllerObj.currentAction : ({})
 
     property bool isNewMode: false
     property bool isEditMode: false
-    property string statusMessage: ""
     property bool showDeleteConfirm: false
+    property bool showAdvancedNew: false
+    property bool showAdvancedEdit: false
+    property string statusMessage: ""
+
+    property var categoryOptions: ["문서 작업", "문서 질문", "요약/정리", "번역", "코드/수식", "기타"]
+    property var inputModeOptions: [
+        { "value": "auto", "label": "자동 감지", "description": "프롬프트 내용에 맞춰 입력 방식을 자동으로 판단합니다." },
+        { "value": "note_required", "label": "현재 문서 기반", "description": "현재 열려 있는 문서를 기준으로 AI 기능을 실행합니다." },
+        { "value": "chat_only", "label": "채팅만 사용", "description": "문서 없이 질문이나 요청만 입력해서 실행합니다." },
+        { "value": "note_and_chat", "label": "문서 + 질문", "description": "현재 문서를 참고하고, 추가 질문도 함께 전달합니다." },
+        { "value": "selection_required", "label": "선택 문장 기반", "description": "문서에서 선택한 문장만 대상으로 실행합니다." }
+    ]
+    property var responseLengthOptions: [
+        { "value": "short", "label": "짧게", "description": "핵심만 빠르게 답변합니다." },
+        { "value": "medium", "label": "보통", "description": "일반적인 업무용 답변 길이입니다." },
+        { "value": "long", "label": "자세히", "description": "맥락과 설명을 더 충분히 제공합니다." }
+    ]
 
     function getActionController() {
         return aiActionControllerObj
@@ -33,6 +45,112 @@ Rectangle {
 
     function getPromptController() {
         return promptControllerObj
+    }
+
+    function getPromptDocumentController() {
+        return promptDocumentControllerObj
+    }
+
+    function findPromptById(promptDocId) {
+        if (!promptDocId || !root.promptDocumentList)
+            return null
+        for (var i = 0; i < root.promptDocumentList.length; i++) {
+            if (root.promptDocumentList[i].prompt_doc_id === promptDocId)
+                return root.promptDocumentList[i]
+        }
+        return null
+    }
+
+    function indexOfPromptDocId(promptDocId) {
+        if (!promptDocId || !root.promptDocumentList)
+            return -1
+        for (var i = 0; i < root.promptDocumentList.length; i++) {
+            if (root.promptDocumentList[i].prompt_doc_id === promptDocId)
+                return i
+        }
+        return -1
+    }
+
+    function selectedPromptFromCombo(combo) {
+        if (!combo || combo.currentIndex < 0 || combo.currentIndex >= root.promptDocumentList.length)
+            return null
+        return root.promptDocumentList[combo.currentIndex]
+    }
+
+    function promptTitle(doc) {
+        return doc ? (doc.title || doc.prompt_doc_id || "") : "선택 안 됨"
+    }
+
+    function promptTypeLabel(doc) {
+        if (!doc)
+            return "선택 안 됨"
+        return (doc.source_type === "default" || doc.readonly) ? "기본 프롬프트" : "사용자 프롬프트"
+    }
+
+    function promptTypeDescription(doc) {
+        if (!doc)
+            return "아직 연결된 프롬프트가 없습니다."
+        if (doc.source_type === "default" || doc.readonly)
+            return "기본 제공 프롬프트입니다. 본문 편집은 메인 에디터에서 진행합니다."
+        return "사용자가 만든 프롬프트입니다. 본문 편집은 메인 에디터에서 진행합니다."
+    }
+
+    function getInputModeLabel(mode) {
+        for (var i = 0; i < root.inputModeOptions.length; i++) {
+            if (root.inputModeOptions[i].value === mode)
+                return root.inputModeOptions[i].label
+        }
+        return "자동 감지"
+    }
+
+    function getInputModeDescription(mode) {
+        for (var i = 0; i < root.inputModeOptions.length; i++) {
+            if (root.inputModeOptions[i].value === mode)
+                return root.inputModeOptions[i].description
+        }
+        return root.inputModeOptions[0].description
+    }
+
+    function inputModeIndex(mode) {
+        for (var i = 0; i < root.inputModeOptions.length; i++) {
+            if (root.inputModeOptions[i].value === mode)
+                return i
+        }
+        return 0
+    }
+
+    function getResponseLengthLabel(value) {
+        for (var i = 0; i < root.responseLengthOptions.length; i++) {
+            if (root.responseLengthOptions[i].value === value)
+                return root.responseLengthOptions[i].label
+        }
+        return "보통"
+    }
+
+    function getResponseLengthDescription(value) {
+        for (var i = 0; i < root.responseLengthOptions.length; i++) {
+            if (root.responseLengthOptions[i].value === value)
+                return root.responseLengthOptions[i].description
+        }
+        return root.responseLengthOptions[1].description
+    }
+
+    function responseLengthIndex(value) {
+        for (var i = 0; i < root.responseLengthOptions.length; i++) {
+            if (root.responseLengthOptions[i].value === value)
+                return i
+        }
+        return 1
+    }
+
+    function selectedResponseLength(combo) {
+        if (!combo || combo.currentIndex < 0 || combo.currentIndex >= root.responseLengthOptions.length)
+            return "medium"
+        return root.responseLengthOptions[combo.currentIndex].value
+    }
+
+    function currentPromptInfo() {
+        return findPromptById(root.currentAction ? root.currentAction.binding_prompt_doc_id : "")
     }
 
     function selectAction(actionId) {
@@ -46,7 +164,7 @@ Rectangle {
     }
 
     function refreshFromController() {
-        // Properties will auto-update via Python signals
+        // Properties are kept in sync via bindings and controller signals.
     }
 
     function bindSelectedPrompt(actionId, promptDocId) {
@@ -59,13 +177,51 @@ Rectangle {
     function startNewAction() {
         root.isNewMode = true
         root.isEditMode = false
-        root.statusMessage = "새 기능을 입력하세요"
+        root.showAdvancedNew = false
+        root.statusMessage = "업무용 AI 기능 정보를 입력하세요."
+
+        newActionName.text = ""
+        newActionDescription.text = ""
+        newActionCategory.currentIndex = 0
+        newActionInputMode.currentIndex = 0
+        newActionUseRag.checked = false
+        newActionResponseLength.currentIndex = 1
+        newActionEnabled.checked = true
+        newActionPromptBinding.currentIndex = -1
+        newActionRequiredVars.text = "[]"
     }
 
     function cancelEdit() {
         root.isNewMode = false
         root.isEditMode = false
+        root.showAdvancedNew = false
+        root.showAdvancedEdit = false
         root.statusMessage = ""
+    }
+
+    function openPromptEditor(promptDocId) {
+        var c = getPromptController()
+        if (!c || !promptDocId)
+            return
+        c.requestOpenPromptDocument(promptDocId)
+    }
+
+    function createAndOpenPrompt() {
+        var docController = getPromptDocumentController()
+        var promptCtrl = getPromptController()
+        if (!docController || !promptCtrl) {
+            root.statusMessage = "프롬프트 편집 기능을 사용할 수 없습니다."
+            return
+        }
+
+        var created = docController.createPromptDocument("새 AI 프롬프트", "", "")
+        if (created && created.prompt_doc_id) {
+            promptCtrl.refresh()
+            promptCtrl.requestOpenPromptDocument(created.prompt_doc_id)
+            root.statusMessage = "새 프롬프트를 열었습니다."
+        } else {
+            root.statusMessage = "새 프롬프트 생성에 실패했습니다."
+        }
     }
 
     function saveNewAction() {
@@ -74,33 +230,57 @@ Rectangle {
 
         var name = newActionName.text.trim()
         if (!name) {
-            root.statusMessage = "기능 이름은 필수입니다"
+            root.statusMessage = "기능 이름은 필수입니다."
             return
         }
 
         var actionId = c.generate_action_id(name)
 
         var description = newActionDescription.text.trim()
-        var category = newActionCategory.currentText || "user"
-        var inputMode = newActionInputMode.currentText || "auto"
+        var category = newActionCategory.currentText || "문서 작업"
+        var inputMode = newActionInputMode.currentValue || "auto"
         var useRag = newActionUseRag.checked
+        var responseLength = root.selectedResponseLength(newActionResponseLength)
+        var enabled = newActionEnabled.checked
         var requiredVars = newActionRequiredVars.text.trim() || "[]"
 
-        var result = c.create_action(name, actionId, description, category, inputMode, useRag, requiredVars, true)
+        var result = c.create_action(name, actionId, description, category, inputMode, useRag, requiredVars, enabled, responseLength)
         if (result && result.action_id) {
-            // 프롬프트 연결 처리
-            var promptIdx = newActionPromptBinding.currentIndex
-            if (promptIdx >= 0 && promptIdx < root.filteredPromptList.length) {
-                var promptDocId = root.filteredPromptList[promptIdx].prompt_doc_id
-                c.set_binding(actionId, promptDocId)
-            }
-            newActionPromptBinding.currentIndex = -1
+            var promptDoc = root.selectedPromptFromCombo(newActionPromptBinding)
+            if (promptDoc)
+                c.set_binding(result.action_id, promptDoc.prompt_doc_id)
             root.isNewMode = false
-            root.statusMessage = "'" + name + "' 기능이 생성되었습니다"
+            root.statusMessage = "'" + name + "' 기능을 만들었습니다."
             selectAction(result.action_id)
         } else {
-            root.statusMessage = "기능 생성에 실패했습니다"
+            root.statusMessage = "기능 생성에 실패했습니다."
         }
+    }
+
+    function startEditAction() {
+        if (!root.currentAction || !root.currentAction.action_id)
+            return
+        root.isNewMode = false
+        root.isEditMode = true
+        root.showAdvancedEdit = false
+        root.syncEditFields()
+    }
+
+    function syncEditFields() {
+        if (!root.currentAction || !root.currentAction.action_id)
+            return
+
+        editName.text = root.currentAction.name || ""
+        editDescription.text = root.currentAction.description || ""
+
+        var categoryIndex = root.categoryOptions.indexOf(root.currentAction.category || "문서 작업")
+        editCategory.currentIndex = categoryIndex >= 0 ? categoryIndex : 0
+        editInputMode.currentIndex = root.inputModeIndex(root.currentAction.input_mode || "auto")
+        editUseRag.checked = !!root.currentAction.use_rag
+        editResponseLength.currentIndex = root.responseLengthIndex(root.currentAction.response_length || "medium")
+        editEnabled.checked = root.currentAction.enabled === undefined ? true : !!root.currentAction.enabled
+        editActionPromptBinding.currentIndex = root.indexOfPromptDocId(root.currentAction.binding_prompt_doc_id || "")
+        editRequiredVars.text = root.currentAction.required_variables_json || "[]"
     }
 
     function saveCurrentAction() {
@@ -110,36 +290,35 @@ Rectangle {
 
         var name = editName.text.trim()
         if (!name) {
-            root.statusMessage = "기능 이름은 필수입니다"
+            root.statusMessage = "기능 이름은 필수입니다."
             return
         }
 
         var description = editDescription.text.trim()
-        var category = editCategory.currentText || "user"
-        var inputMode = editInputMode.currentText || "auto"
+        var category = editCategory.currentText || "문서 작업"
+        var inputMode = editInputMode.currentValue || "auto"
         var useRag = editUseRag.checked
+        var responseLength = root.selectedResponseLength(editResponseLength)
+        var enabled = editEnabled.checked
         var requiredVars = editRequiredVars.text.trim() || "[]"
 
-        var result = c.update_action(action.action_id, name, description, category, inputMode, useRag, requiredVars)
+        var result = c.update_action(action.action_id, name, description, category, inputMode, useRag, requiredVars, enabled, responseLength)
         if (result && result.action_id) {
-            // 프롬프트 연결 처리
-            var promptIdx = editActionPromptBinding.currentIndex
-            if (promptIdx >= 0 && promptIdx < root.filteredPromptList.length) {
-                var promptDocId = root.filteredPromptList[promptIdx].prompt_doc_id
-                c.set_binding(action.action_id, promptDocId)
-            }
+            var promptDoc = root.selectedPromptFromCombo(editActionPromptBinding)
+            if (promptDoc)
+                c.set_binding(action.action_id, promptDoc.prompt_doc_id)
             root.isEditMode = false
-            root.statusMessage = "저장되었습니다"
+            root.statusMessage = "변경 내용을 저장했습니다."
             selectAction(action.action_id)
         } else {
-            root.statusMessage = "저장에 실패했습니다"
+            root.statusMessage = "저장에 실패했습니다."
         }
     }
 
     function deleteCurrentAction() {
         var action = root.currentAction
         if (!action || !action.action_id) {
-            root.statusMessage = "삭제할 기능이 없습니다"
+            root.statusMessage = "삭제할 기능이 없습니다."
             return
         }
         root.showDeleteConfirm = true
@@ -152,13 +331,13 @@ Rectangle {
 
         var ok = c.archive_action(action.action_id)
         if (ok) {
-            root.statusMessage = "삭제되었습니다"
             root.showDeleteConfirm = false
+            root.statusMessage = "AI 기능을 삭제했습니다."
             if (root.actionList && root.actionList.length > 0) {
                 selectAction(root.actionList[0].action_id)
             }
         } else {
-            root.statusMessage = "삭제에 실패했습니다"
+            root.statusMessage = "삭제에 실패했습니다."
         }
     }
 
@@ -172,7 +351,11 @@ Rectangle {
     Connections {
         target: aiActionControllerObj
         function onActionsChanged() { root.refreshFromController() }
-        function onCurrentActionChanged() { root.refreshFromController() }
+        function onCurrentActionChanged() {
+            root.refreshFromController()
+            if (root.isEditMode)
+                root.syncEditFields()
+        }
         function onInfoMessage(msg) { root.statusMessage = msg }
         function onErrorOccurred(msg) { root.statusMessage = msg }
     }
@@ -182,7 +365,6 @@ Rectangle {
         anchors.margins: Metrics.md
         spacing: Metrics.sm
 
-        // Header
         RowLayout {
             Layout.fillWidth: true
             spacing: Metrics.md
@@ -200,22 +382,24 @@ Rectangle {
                 }
 
                 Text {
-                    text: "AI 기능을 등록, 수정, 삭제하고 프롬프트 문서와 연결합니다."
+                    Layout.fillWidth: true
+                    text: "일반 사무 업무에 맞는 AI 기능을 쉽게 등록하고, 프롬프트와 연결할 수 있습니다."
                     font.family: Typography.fontPrimary
                     font.pixelSize: Typography.bodySmall
                     color: Colors.textSecondary
+                    wrapMode: Text.Wrap
                 }
             }
 
             Button {
                 text: "+ AI 기능 추가"
-                Layout.preferredHeight: 32
+                Layout.preferredHeight: 34
                 contentItem: Text {
                     text: parent.text
                     font.family: Typography.fontPrimary
                     font.pixelSize: Typography.bodySmall
                     font.weight: Typography.weightMedium
-                    color: Colors.primary600
+                    color: Colors.primary700
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
                 }
@@ -235,15 +419,13 @@ Rectangle {
             color: Colors.borderLight
         }
 
-        // Main Content
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: Metrics.md
 
-            // Left: Action List
             Rectangle {
-                Layout.preferredWidth: 260
+                Layout.preferredWidth: 270
                 Layout.fillHeight: true
                 color: Colors.bgPrimary
                 radius: Metrics.radiusMd
@@ -253,7 +435,7 @@ Rectangle {
                 ColumnLayout {
                     anchors.fill: parent
                     anchors.margins: Metrics.sm
-                    spacing: Metrics.xs
+                    spacing: Metrics.sm
 
                     Text {
                         text: "기능 목록"
@@ -263,73 +445,111 @@ Rectangle {
                         color: Colors.textPrimary
                     }
 
+                    Text {
+                        Layout.fillWidth: true
+                        text: "실행 중으로 사용할 기능만 AI 패널에 표시됩니다."
+                        font.family: Typography.fontPrimary
+                        font.pixelSize: Typography.caption
+                        color: Colors.textSecondary
+                        wrapMode: Text.Wrap
+                    }
+
                     ListView {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         model: root.actionList
                         clip: true
-                        spacing: 1
+                        spacing: Metrics.xs
 
                         delegate: Rectangle {
                             width: ListView.view.width
-                            height: 36
+                            height: 72
                             radius: Metrics.radiusSm
-                            color: actionMouse.containsMouse ? Colors.primary50 : (root.currentAction && root.currentAction.action_id === modelData.action_id ? Colors.primary100 : "transparent")
+                            color: root.currentAction && root.currentAction.action_id === modelData.action_id ? Colors.primary50 : (itemMouse.containsMouse ? Colors.bgSecondary : "transparent")
+                            border.color: root.currentAction && root.currentAction.action_id === modelData.action_id ? Colors.primary200 : "transparent"
+                            border.width: 1
+                            opacity: modelData.enabled ? 1 : 0.65
 
-                            RowLayout {
+                            ColumnLayout {
                                 anchors.fill: parent
-                                anchors.leftMargin: Metrics.sm
-                                anchors.rightMargin: Metrics.sm
-                                spacing: Metrics.sm
+                                anchors.margins: Metrics.sm
+                                spacing: Metrics.xs
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: Metrics.xs
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: modelData.name || modelData.action_id || ""
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.bodySmall
+                                        font.weight: Typography.weightMedium
+                                        color: Colors.textPrimary
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Rectangle {
+                                        radius: Metrics.radiusFull
+                                        height: 20
+                                        width: enabledBadgeText.implicitWidth + 14
+                                        color: modelData.enabled ? Colors.success : Colors.bgTertiary
+
+                                        Text {
+                                            id: enabledBadgeText
+                                            anchors.centerIn: parent
+                                            text: modelData.enabled ? "사용 중" : "사용 안 함"
+                                            font.family: Typography.fontPrimary
+                                            font.pixelSize: 10
+                                            color: modelData.enabled ? Colors.bgPrimary : Colors.textSecondary
+                                        }
+                                    }
+                                }
 
                                 Text {
                                     Layout.fillWidth: true
-                                    text: modelData.name || modelData.action_id || ""
+                                    text: modelData.description || "설명이 없습니다."
                                     font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.bodySmall
-                                    color: Colors.textPrimary
+                                    font.pixelSize: Typography.caption
+                                    color: Colors.textSecondary
+                                    wrapMode: Text.Wrap
+                                    maximumLineCount: 2
                                     elide: Text.ElideRight
                                 }
                             }
 
                             MouseArea {
-                                id: actionMouse
+                                id: itemMouse
                                 anchors.fill: parent
                                 hoverEnabled: true
-                                onClicked: {
-                                    root.selectAction(modelData.action_id)
-                                }
+                                onClicked: root.selectAction(modelData.action_id)
                             }
                         }
 
                         ScrollBar.vertical: ScrollBar {
-                            policy: ScrollBar.AlwaysOn
+                            policy: ScrollBar.AsNeeded
                         }
                     }
                 }
             }
 
-            // Right: Action Details
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                Layout.minimumWidth: 400
                 color: Colors.bgPrimary
                 radius: Metrics.radiusMd
                 border.color: Colors.borderLight
                 border.width: 1
-                visible: root.currentAction && root.currentAction.action_id
 
-                ScrollView {
+                Item {
                     anchors.fill: parent
-                    anchors.margins: Metrics.md
-                    clip: true
 
                     ColumnLayout {
-                        width: parent.width
-                        spacing: Metrics.sm
+                        anchors.fill: parent
+                        anchors.margins: Metrics.lg
+                        spacing: Metrics.md
+                        visible: root.currentAction && root.currentAction.action_id
 
-                        // Action Header
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: Metrics.sm
@@ -339,7 +559,7 @@ Rectangle {
                                 spacing: Metrics.xs
 
                                 Text {
-                                    text: root.currentAction ? (root.currentAction.name || root.currentAction.action_id || "") : ""
+                                    text: root.currentAction ? (root.currentAction.name || "") : ""
                                     font.family: Typography.fontPrimary
                                     font.pixelSize: Typography.h6
                                     font.weight: Typography.weightSemibold
@@ -347,11 +567,12 @@ Rectangle {
                                 }
 
                                 Text {
-                                    text: root.currentAction ? (root.currentAction.description || "") : ""
+                                    Layout.fillWidth: true
+                                    text: root.currentAction ? (root.currentAction.description || "설명이 없습니다.") : ""
                                     font.family: Typography.fontPrimary
                                     font.pixelSize: Typography.bodySmall
                                     color: Colors.textSecondary
-                                    wrapMode: Text.WordWrap
+                                    wrapMode: Text.Wrap
                                 }
                             }
 
@@ -359,8 +580,8 @@ Rectangle {
                                 spacing: Metrics.xs
 
                                 Rectangle {
-                                    width: 60
-                                    height: 28
+                                    width: 72
+                                    height: 30
                                     radius: Metrics.radiusSm
                                     color: editBtnArea.containsMouse ? Colors.bgTertiary : "transparent"
                                     border.color: Colors.borderLight
@@ -369,7 +590,8 @@ Rectangle {
                                     Text {
                                         anchors.centerIn: parent
                                         text: "수정"
-                                        font.pixelSize: 12
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
                                         color: Colors.textSecondary
                                     }
 
@@ -377,27 +599,28 @@ Rectangle {
                                         id: editBtnArea
                                         anchors.fill: parent
                                         hoverEnabled: true
-                                        onClicked: root.isEditMode = true
+                                        onClicked: root.startEditAction()
                                     }
                                 }
 
                                 Rectangle {
-                                    width: 60
-                                    height: 28
+                                    width: 72
+                                    height: 30
                                     radius: Metrics.radiusSm
-                                    color: delBtnArea.containsMouse ? Colors.error50 : "transparent"
+                                    color: deleteBtnArea.containsMouse ? Colors.error50 : "transparent"
                                     border.color: Colors.error200
                                     border.width: 1
 
                                     Text {
                                         anchors.centerIn: parent
                                         text: "삭제"
-                                        font.pixelSize: 12
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
                                         color: Colors.error500
                                     }
 
                                     MouseArea {
-                                        id: delBtnArea
+                                        id: deleteBtnArea
                                         anchors.fill: parent
                                         hoverEnabled: true
                                         onClicked: root.deleteCurrentAction()
@@ -412,95 +635,136 @@ Rectangle {
                             color: Colors.borderLight
                         }
 
-                        // Connected Prompt
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: Metrics.xs
-
-                            Text {
-                                text: "연결된 프롬프트"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                font.weight: Typography.weightMedium
-                                color: Colors.textPrimary
-                            }
-
-                            ComboBox {
-                                Layout.fillWidth: true
-                                model: root.filteredPromptList.map(function(doc) { return doc.title || doc.prompt_doc_id || "" })
-                                currentIndex: {
-                                    if (!root.currentAction || !root.currentAction.binding_prompt_doc_id)
-                                        return -1
-                                    for (var i = 0; i < root.filteredPromptList.length; i++) {
-                                        if (root.filteredPromptList[i].prompt_doc_id === root.currentAction.binding_prompt_doc_id)
-                                            return i
-                                    }
-                                    return -1
-                                }
-                                onActivated: function(index) {
-                                    if (index >= 0 && index < root.filteredPromptList.length) {
-                                        var promptDocId = root.filteredPromptList[index].prompt_doc_id
-                                        var actionId = root.currentAction ? root.currentAction.action_id : ""
-                                        if (actionId && promptDocId) {
-                                            root.bindSelectedPrompt(actionId, promptDocId)
-                                            root.selectAction(actionId)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
                         Rectangle {
                             Layout.fillWidth: true
-                            height: 1
-                            color: Colors.borderLight
+                            radius: Metrics.radiusMd
+                            color: Colors.bgSecondary
+                            border.color: Colors.borderLight
+                            border.width: 1
+
+                            GridLayout {
+                                anchors.fill: parent
+                                anchors.margins: Metrics.md
+                                columns: 2
+                                columnSpacing: Metrics.md
+                                rowSpacing: Metrics.sm
+
+                                Text { text: "카테고리"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                                Text { text: root.currentAction ? (root.currentAction.category || "문서 작업") : ""; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textPrimary }
+
+                                Text { text: "입력 방식"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                                Text { text: root.getInputModeLabel(root.currentAction ? root.currentAction.input_mode : "auto"); font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textPrimary }
+
+                                Text { text: "문서 검색"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                                Text { text: root.currentAction && root.currentAction.use_rag ? "사용" : "사용 안 함"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textPrimary }
+
+                                Text { text: "응답 길이"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                                Text { text: root.getResponseLengthLabel(root.currentAction ? root.currentAction.response_length : "medium"); font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textPrimary }
+
+                                Text { text: "사용 여부"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                                Text { text: root.currentAction && root.currentAction.enabled ? "사용 중" : "사용 안 함"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textPrimary }
+                            }
                         }
 
-                        // Action Info
                         ColumnLayout {
                             Layout.fillWidth: true
-                            spacing: Metrics.xs
+                            spacing: Metrics.sm
 
                             Text {
-                                text: "기능 정보"
+                                text: "연결 프롬프트"
                                 font.family: Typography.fontPrimary
                                 font.pixelSize: Typography.bodySmall
                                 font.weight: Typography.weightMedium
                                 color: Colors.textPrimary
                             }
 
-                            GridLayout {
+                            Rectangle {
                                 Layout.fillWidth: true
-                                columns: 2
-                                columnSpacing: Metrics.md
-                                rowSpacing: Metrics.xs
+                                implicitHeight: currentPromptLayout.implicitHeight + Metrics.md * 2
+                                radius: Metrics.radiusMd
+                                color: Colors.bgSecondary
+                                border.color: Colors.borderLight
+                                border.width: 1
 
-                                Text { text: "카테고리:"; color: Colors.textSecondary; font.pixelSize: Typography.caption }
-                                Text { text: root.currentAction ? (root.currentAction.category || "user") : ""; color: Colors.textPrimary; font.pixelSize: Typography.caption }
+                                ColumnLayout {
+                                    id: currentPromptLayout
+                                    anchors.fill: parent
+                                    anchors.margins: Metrics.md
+                                    spacing: Metrics.xs
 
-                                Text { text: "입력 모드:"; color: Colors.textSecondary; font.pixelSize: Typography.caption }
-                                Text { text: root.currentAction ? (root.currentAction.input_mode || "auto") : ""; color: Colors.textPrimary; font.pixelSize: Typography.caption }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: root.promptTitle(root.currentPromptInfo())
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.bodySmall
+                                        font.weight: Typography.weightMedium
+                                        color: Colors.textPrimary
+                                        wrapMode: Text.Wrap
+                                    }
 
-                                Text { text: "RAG 사용:"; color: Colors.textSecondary; font.pixelSize: Typography.caption }
-                                Text { text: root.currentAction ? (root.currentAction.use_rag ? "예" : "아니오") : ""; color: Colors.textPrimary; font.pixelSize: Typography.caption }
+                                    Rectangle {
+                                        radius: Metrics.radiusFull
+                                        height: 22
+                                        width: promptTypeText.implicitWidth + 16
+                                        color: Colors.primary100
 
-                                Text { text: "필수 변수:"; color: Colors.textSecondary; font.pixelSize: Typography.caption }
-                                Text { 
-                                    text: root.currentAction ? (root.currentAction.required_variables && root.currentAction.required_variables.length > 0 ? root.currentAction.required_variables.join(", ") : "없음") : ""
-                                    color: Colors.textPrimary
-                                    font.pixelSize: Typography.caption
+                                        Text {
+                                            id: promptTypeText
+                                            anchors.centerIn: parent
+                                            text: root.promptTypeLabel(root.currentPromptInfo())
+                                            font.family: Typography.fontPrimary
+                                            font.pixelSize: 10
+                                            color: Colors.primary700
+                                        }
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: root.promptTypeDescription(root.currentPromptInfo())
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
+                                        color: Colors.textSecondary
+                                        wrapMode: Text.Wrap
+                                    }
                                 }
                             }
+                        }
+
+                        Item { Layout.fillHeight: true }
+                    }
+
+                    Column {
+                        anchors.centerIn: parent
+                        width: Math.min(parent.width * 0.8, 360)
+                        spacing: Metrics.sm
+                        visible: !root.currentAction || !root.currentAction.action_id
+
+                        Text {
+                            width: parent.width
+                            text: "등록된 AI 기능이 없습니다."
+                            horizontalAlignment: Text.AlignHCenter
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.bodySmall
+                            color: Colors.textSecondary
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: "업무용 AI 기능을 하나 추가하면 이 영역에서 상세 설정을 볼 수 있습니다."
+                            horizontalAlignment: Text.AlignHCenter
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.caption
+                            color: Colors.textTertiary
+                            wrapMode: Text.Wrap
                         }
                     }
                 }
             }
         }
 
-        // Status Message
         Rectangle {
             Layout.fillWidth: true
-            height: 32
+            height: 34
             radius: Metrics.radiusSm
             color: Colors.bgSecondary
             border.color: Colors.borderLight
@@ -510,7 +774,7 @@ Rectangle {
                 anchors.centerIn: parent
                 text: root.statusMessage
                 font.family: Typography.fontPrimary
-                font.pixelSize: 11
+                font.pixelSize: Typography.caption
                 color: Colors.textSecondary
             }
 
@@ -522,7 +786,6 @@ Rectangle {
         }
     }
 
-    // New Action Form
     Rectangle {
         anchors.fill: parent
         color: Colors.bgPrimary
@@ -531,12 +794,12 @@ Rectangle {
 
         ScrollView {
             anchors.fill: parent
-            anchors.margins: Metrics.md
+            anchors.margins: Metrics.lg
             clip: true
 
             ColumnLayout {
                 width: parent.width
-                spacing: Metrics.sm
+                spacing: Metrics.md
 
                 Text {
                     text: "새 AI 기능 등록"
@@ -546,30 +809,37 @@ Rectangle {
                     color: Colors.textPrimary
                 }
 
+                Text {
+                    Layout.fillWidth: true
+                    text: "일반 사용자가 이해하기 쉬운 항목만 먼저 입력하면 됩니다. 필요한 경우에만 고급 설정을 펼쳐서 확인하세요."
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.bodySmall
+                    color: Colors.textSecondary
+                    wrapMode: Text.Wrap
+                }
+
                 Rectangle { Layout.fillWidth: true; height: 1; color: Colors.borderLight }
 
                 Text { text: "기능 이름"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
                 TextField {
                     id: newActionName
                     Layout.fillWidth: true
-                    height: 32
                     font.family: Typography.fontPrimary
                     font.pixelSize: Typography.bodySmall
-                    color: Colors.textPrimary
                     selectByMouse: true
-                    placeholderText: "예: 문서 요약하기"
+                    placeholderText: "예: 회의록 요약, 문서 문장 다듬기"
                 }
 
                 Text { text: "설명"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
-                TextField {
+                TextArea {
                     id: newActionDescription
                     Layout.fillWidth: true
-                    height: 32
+                    Layout.preferredHeight: 88
+                    wrapMode: TextEdit.Wrap
                     font.family: Typography.fontPrimary
                     font.pixelSize: Typography.bodySmall
-                    color: Colors.textPrimary
                     selectByMouse: true
-                    placeholderText: "이 기능에 대한 설명을 입력하세요"
+                    placeholderText: "이 기능이 어떤 상황에서 어떤 답변을 해주면 좋은지 적어주세요."
                 }
 
                 RowLayout {
@@ -578,102 +848,269 @@ Rectangle {
 
                     ColumnLayout {
                         Layout.fillWidth: true
+                        spacing: Metrics.xs
+
                         Text { text: "카테고리"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
                         ComboBox {
                             id: newActionCategory
                             Layout.fillWidth: true
-                            height: 32
-                            model: ["user", "문서 처리", "문서 질문", "기타"]
+                            model: root.categoryOptions
+                            currentIndex: 0
                         }
                     }
 
                     ColumnLayout {
                         Layout.fillWidth: true
+                        spacing: Metrics.xs
+
                         Text { text: "입력 모드"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
                         ComboBox {
                             id: newActionInputMode
                             Layout.fillWidth: true
-                            height: 32
-                            model: ["auto", "note_required", "chat_only", "note_and_chat", "selection_required"]
+                            model: root.inputModeOptions
+                            textRole: "label"
+                            valueRole: "value"
+                            currentIndex: 0
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: root.getInputModeDescription(newActionInputMode.currentValue || "auto")
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.caption
+                            color: Colors.textTertiary
+                            wrapMode: Text.Wrap
                         }
                     }
                 }
 
-                RowLayout {
+                ColumnLayout {
                     Layout.fillWidth: true
-                    CheckBox { 
-                        id: newActionUseRag
-                        text: "RAG(문서 검색) 사용"
+                    spacing: Metrics.xs
+
+                    Text { text: "응답 길이"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                    ComboBox {
+                        id: newActionResponseLength
+                        Layout.fillWidth: true
+                        model: root.responseLengthOptions
+                        textRole: "label"
+                        valueRole: "value"
+                        currentIndex: 1
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: root.getResponseLengthDescription(root.selectedResponseLength(newActionResponseLength))
                         font.family: Typography.fontPrimary
-                        font.pixelSize: Typography.bodySmall
+                        font.pixelSize: Typography.caption
+                        color: Colors.textTertiary
+                        wrapMode: Text.Wrap
                     }
                 }
 
-                Text { text: "연결할 프롬프트"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
-                ComboBox {
-                    id: newActionPromptBinding
+                Rectangle {
                     Layout.fillWidth: true
-                    height: 32
-                    model: root.filteredPromptList.map(function(doc) { return doc.title || doc.prompt_doc_id || "" })
-                    currentIndex: -1
+                    implicitHeight: newRagLayout.implicitHeight + Metrics.md * 2
+                    radius: Metrics.radiusMd
+                    color: Colors.bgSecondary
+                    border.color: Colors.borderLight
+                    border.width: 1
+
+                    ColumnLayout {
+                        id: newRagLayout
+                        anchors.fill: parent
+                        anchors.margins: Metrics.md
+                        spacing: Metrics.xs
+
+                        CheckBox {
+                            id: newActionUseRag
+                            text: "문서 검색 사용"
+                            checked: false
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.bodySmall
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: "현재 문서나 저장된 자료를 참고하여 더 정확한 답변을 생성합니다."
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.caption
+                            color: Colors.textSecondary
+                            wrapMode: Text.Wrap
+                        }
+                    }
                 }
 
-                Text { text: "필수 변수 (JSON)"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
-                TextField {
-                    id: newActionRequiredVars
-                    Layout.fillWidth: true
-                    height: 32
-                    text: "[]"
+                CheckBox {
+                    id: newActionEnabled
+                    text: "AI 패널에서 바로 사용할 수 있게 표시"
+                    checked: true
                     font.family: Typography.fontPrimary
                     font.pixelSize: Typography.bodySmall
-                    color: Colors.textPrimary
-                    selectByMouse: true
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: Metrics.xs
+
+                    Text { text: "연결 프롬프트"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                    ComboBox {
+                        id: newActionPromptBinding
+                        Layout.fillWidth: true
+                        model: root.promptDocumentList
+                        textRole: "title"
+                        currentIndex: -1
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: newPromptLayout.implicitHeight + Metrics.sm * 2
+                        radius: Metrics.radiusMd
+                        color: Colors.bgSecondary
+                        border.color: Colors.borderLight
+                        border.width: 1
+                        visible: root.selectedPromptFromCombo(newActionPromptBinding) !== null
+
+                        ColumnLayout {
+                            id: newPromptLayout
+                            anchors.fill: parent
+                            anchors.margins: Metrics.sm
+                            spacing: Metrics.xs
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: root.promptTitle(root.selectedPromptFromCombo(newActionPromptBinding))
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodySmall
+                                font.weight: Typography.weightMedium
+                                color: Colors.textPrimary
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: root.promptTypeLabel(root.selectedPromptFromCombo(newActionPromptBinding))
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.caption
+                                color: Colors.primary700
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: newAdvancedLayout.implicitHeight + Metrics.md * 2
+                    radius: Metrics.radiusMd
+                    color: Colors.bgSecondary
+                    border.color: Colors.borderLight
+                    border.width: 1
+
+                    ColumnLayout {
+                        id: newAdvancedLayout
+                        anchors.fill: parent
+                        anchors.margins: Metrics.md
+                        spacing: Metrics.sm
+
+                        RowLayout {
+                            Layout.fillWidth: true
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: "고급 설정"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodySmall
+                                font.weight: Typography.weightMedium
+                                color: Colors.textPrimary
+                            }
+
+                            Button {
+                                text: root.showAdvancedNew ? "접기" : "펼치기"
+                                contentItem: Text {
+                                    text: parent.text
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: Typography.caption
+                                    color: Colors.textPrimary
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle {
+                                    color: Colors.bgPrimary
+                                    radius: Metrics.radiusSm
+                                    border.color: Colors.borderLight
+                                }
+                                onClicked: root.showAdvancedNew = !root.showAdvancedNew
+                            }
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: "일반적으로는 건드릴 필요 없습니다. 변수는 프롬프트 내용을 기준으로 자동 감지됩니다."
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.caption
+                            color: Colors.textSecondary
+                            wrapMode: Text.Wrap
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: Metrics.xs
+                            visible: root.showAdvancedNew
+
+                            Text { text: "필수 변수(JSON)"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                            TextField {
+                                id: newActionRequiredVars
+                                Layout.fillWidth: true
+                                text: "[]"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodySmall
+                                selectByMouse: true
+                            }
+                        }
+                    }
                 }
 
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: Metrics.sm
 
-                    Rectangle {
+                    Button {
                         Layout.fillWidth: true
-                        height: 36
-                        radius: Metrics.radiusMd
-                        color: saveNewBtn.containsMouse ? Colors.primary500 : Colors.primary400
-
-                        Text {
-                            anchors.centerIn: parent
+                        Layout.preferredHeight: 38
+                        text: "등록"
+                        contentItem: Text {
                             text: "등록"
-                            color: Colors.textInverse
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.bodySmall
                             font.weight: Typography.weightMedium
+                            color: Colors.white
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
                         }
-
-                        MouseArea {
-                            id: saveNewBtn
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            onClicked: root.saveNewAction()
+                        background: Rectangle {
+                            color: Colors.primary500
+                            radius: Metrics.radiusSm
                         }
+                        onClicked: root.saveNewAction()
                     }
 
-                    Rectangle {
+                    Button {
                         Layout.fillWidth: true
-                        height: 36
-                        radius: Metrics.radiusMd
-                        color: cancelNewBtn.containsMouse ? Colors.bgTertiary : Colors.bgSecondary
-                        border.color: Colors.borderLight
-
-                        Text {
-                            anchors.centerIn: parent
+                        Layout.preferredHeight: 38
+                        text: "취소"
+                        contentItem: Text {
                             text: "취소"
-                            color: Colors.textSecondary
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.bodySmall
+                            color: Colors.textPrimary
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
                         }
-
-                        MouseArea {
-                            id: cancelNewBtn
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            onClicked: root.cancelEdit()
+                        background: Rectangle {
+                            color: Colors.bgSecondary
+                            radius: Metrics.radiusSm
+                            border.color: Colors.borderLight
                         }
+                        onClicked: root.cancelEdit()
                     }
                 }
             }
@@ -689,12 +1126,12 @@ Rectangle {
 
         ScrollView {
             anchors.fill: parent
-            anchors.margins: Metrics.md
+            anchors.margins: Metrics.lg
             clip: true
 
             ColumnLayout {
                 width: parent.width
-                spacing: Metrics.sm
+                spacing: Metrics.md
 
                 Text {
                     text: "AI 기능 수정"
@@ -704,30 +1141,35 @@ Rectangle {
                     color: Colors.textPrimary
                 }
 
+                Text {
+                    Layout.fillWidth: true
+                    text: "업무 흐름에 맞게 설명과 입력 방식, 프롬프트 연결을 다듬어 주세요."
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.bodySmall
+                    color: Colors.textSecondary
+                    wrapMode: Text.Wrap
+                }
+
                 Rectangle { Layout.fillWidth: true; height: 1; color: Colors.borderLight }
 
                 Text { text: "기능명"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
                 TextField {
                     id: editName
                     Layout.fillWidth: true
-                    height: 32
-                    text: root.currentAction ? (root.currentAction.name || "") : ""
+                    readOnly: true
                     font.family: Typography.fontPrimary
                     font.pixelSize: Typography.bodySmall
-                    color: Colors.textPrimary
                     selectByMouse: true
-                    readOnly: true
                 }
 
                 Text { text: "설명"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
-                TextField {
+                TextArea {
                     id: editDescription
                     Layout.fillWidth: true
-                    height: 32
-                    text: root.currentAction ? (root.currentAction.description || "") : ""
+                    Layout.preferredHeight: 88
+                    wrapMode: TextEdit.Wrap
                     font.family: Typography.fontPrimary
                     font.pixelSize: Typography.bodySmall
-                    color: Colors.textPrimary
                     selectByMouse: true
                 }
 
@@ -737,128 +1179,268 @@ Rectangle {
 
                     ColumnLayout {
                         Layout.fillWidth: true
+                        spacing: Metrics.xs
+
                         Text { text: "카테고리"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
                         ComboBox {
                             id: editCategory
                             Layout.fillWidth: true
-                            height: 32
-                            model: ["user", "문서 처리", "문서 질문", "기타"]
-                            currentIndex: {
-                                var cat = root.currentAction ? root.currentAction.category : "user"
-                                var idx = model.indexOf(cat)
-                                return idx >= 0 ? idx : 0
-                            }
+                            model: root.categoryOptions
                         }
                     }
 
                     ColumnLayout {
                         Layout.fillWidth: true
-                        Text { text: "입력 모드"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                        spacing: Metrics.xs
+
+                        Text { text: "입력 방식"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
                         ComboBox {
                             id: editInputMode
                             Layout.fillWidth: true
-                            height: 32
-                            model: ["auto", "note_required", "chat_only", "note_and_chat", "selection_required"]
-                            currentIndex: {
-                                var mode = root.currentAction ? root.currentAction.input_mode : "auto"
-                                var idx = model.indexOf(mode)
-                                return idx >= 0 ? idx : 0
+                            model: root.inputModeOptions
+                            textRole: "label"
+                            valueRole: "value"
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: root.getInputModeDescription(editInputMode.currentValue || "auto")
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.caption
+                            color: Colors.textTertiary
+                            wrapMode: Text.Wrap
+                        }
+                    }
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: Metrics.xs
+
+                    Text { text: "응답 길이"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                    ComboBox {
+                        id: editResponseLength
+                        Layout.fillWidth: true
+                        model: root.responseLengthOptions
+                        textRole: "label"
+                        valueRole: "value"
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: root.getResponseLengthDescription(root.selectedResponseLength(editResponseLength))
+                        font.family: Typography.fontPrimary
+                        font.pixelSize: Typography.caption
+                        color: Colors.textTertiary
+                        wrapMode: Text.Wrap
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: editRagLayout.implicitHeight + Metrics.md * 2
+                    radius: Metrics.radiusMd
+                    color: Colors.bgSecondary
+                    border.color: Colors.borderLight
+                    border.width: 1
+
+                    ColumnLayout {
+                        id: editRagLayout
+                        anchors.fill: parent
+                        anchors.margins: Metrics.md
+                        spacing: Metrics.xs
+
+                        CheckBox {
+                            id: editUseRag
+                            text: "문서 검색 사용"
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.bodySmall
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: "현재 문서나 저장된 자료를 참고하여 더 정확한 답변을 생성합니다."
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.caption
+                            color: Colors.textSecondary
+                            wrapMode: Text.Wrap
+                        }
+                    }
+                }
+
+                CheckBox {
+                    id: editEnabled
+                    text: "AI 패널에서 바로 사용할 수 있게 표시"
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.bodySmall
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: Metrics.xs
+
+                    Text { text: "연결 프롬프트"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                    ComboBox {
+                        id: editActionPromptBinding
+                        Layout.fillWidth: true
+                        model: root.promptDocumentList
+                        textRole: "title"
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: editPromptLayout.implicitHeight + Metrics.sm * 2
+                        radius: Metrics.radiusMd
+                        color: Colors.bgSecondary
+                        border.color: Colors.borderLight
+                        border.width: 1
+                        visible: root.selectedPromptFromCombo(editActionPromptBinding) !== null
+
+                        ColumnLayout {
+                            id: editPromptLayout
+                            anchors.fill: parent
+                            anchors.margins: Metrics.sm
+                            spacing: Metrics.xs
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: root.promptTitle(root.selectedPromptFromCombo(editActionPromptBinding))
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodySmall
+                                font.weight: Typography.weightMedium
+                                color: Colors.textPrimary
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: root.promptTypeLabel(root.selectedPromptFromCombo(editActionPromptBinding))
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.caption
+                                color: Colors.primary700
                             }
                         }
                     }
                 }
 
-                RowLayout {
+                Rectangle {
                     Layout.fillWidth: true
-                    CheckBox { 
-                        id: editUseRag
-                        text: "RAG(문서 검색) 사용"
-                        checked: root.currentAction ? root.currentAction.use_rag : false
-                        font.family: Typography.fontPrimary
-                        font.pixelSize: Typography.bodySmall
-                    }
-                }
+                    implicitHeight: editAdvancedLayout.implicitHeight + Metrics.md * 2
+                    radius: Metrics.radiusMd
+                    color: Colors.bgSecondary
+                    border.color: Colors.borderLight
+                    border.width: 1
 
-                Text { text: "연결할 프롬프트"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
-                ComboBox {
-                    id: editActionPromptBinding
-                    Layout.fillWidth: true
-                    height: 32
-                    model: root.filteredPromptList.map(function(doc) { return doc.title || doc.prompt_doc_id || "" })
-                    currentIndex: {
-                        if (!root.currentAction || !root.currentAction.binding_prompt_doc_id)
-                            return -1
-                        for (var i = 0; i < root.filteredPromptList.length; i++) {
-                            if (root.filteredPromptList[i].prompt_doc_id === root.currentAction.binding_prompt_doc_id)
-                                return i
+                    ColumnLayout {
+                        id: editAdvancedLayout
+                        anchors.fill: parent
+                        anchors.margins: Metrics.md
+                        spacing: Metrics.sm
+
+                        RowLayout {
+                            Layout.fillWidth: true
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: "고급 설정"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodySmall
+                                font.weight: Typography.weightMedium
+                                color: Colors.textPrimary
+                            }
+
+                            Button {
+                                text: root.showAdvancedEdit ? "접기" : "펼치기"
+                                contentItem: Text {
+                                    text: parent.text
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: Typography.caption
+                                    color: Colors.textPrimary
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle {
+                                    color: Colors.bgPrimary
+                                    radius: Metrics.radiusSm
+                                    border.color: Colors.borderLight
+                                }
+                                onClicked: root.showAdvancedEdit = !root.showAdvancedEdit
+                            }
                         }
-                        return -1
-                    }
-                }
 
-                Text { text: "필수 변수 (JSON)"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
-                TextField {
-                    id: editRequiredVars
-                    Layout.fillWidth: true
-                    height: 32
-                    text: root.currentAction ? root.currentAction.required_variables_json || "[]" : "[]"
-                    font.family: Typography.fontPrimary
-                    font.pixelSize: Typography.bodySmall
-                    color: Colors.textPrimary
-                    selectByMouse: true
+                        Text {
+                            Layout.fillWidth: true
+                            text: "일반적으로는 수정하지 않아도 됩니다. 변수는 프롬프트 분석 결과와 함께 자동으로 활용됩니다."
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.caption
+                            color: Colors.textSecondary
+                            wrapMode: Text.Wrap
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: Metrics.xs
+                            visible: root.showAdvancedEdit
+
+                            Text { text: "필수 변수(JSON)"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                            TextField {
+                                id: editRequiredVars
+                                Layout.fillWidth: true
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodySmall
+                                selectByMouse: true
+                            }
+                        }
+                    }
                 }
 
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: Metrics.sm
 
-                    Rectangle {
+                    Button {
                         Layout.fillWidth: true
-                        height: 36
-                        radius: Metrics.radiusMd
-                        color: saveEditBtn.containsMouse ? Colors.primary500 : Colors.primary400
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: "저장"
-                            color: Colors.textInverse
+                        Layout.preferredHeight: 38
+                        text: "저장"
+                        contentItem: Text {
+                            text: parent.text
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.bodySmall
                             font.weight: Typography.weightMedium
+                            color: Colors.white
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
                         }
-
-                        MouseArea {
-                            id: saveEditBtn
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            onClicked: root.saveCurrentAction()
+                        background: Rectangle {
+                            color: Colors.primary500
+                            radius: Metrics.radiusSm
                         }
+                        onClicked: root.saveCurrentAction()
                     }
 
-                    Rectangle {
+                    Button {
                         Layout.fillWidth: true
-                        height: 36
-                        radius: Metrics.radiusMd
-                        color: cancelEditBtn.containsMouse ? Colors.bgTertiary : Colors.bgSecondary
-                        border.color: Colors.borderLight
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: "취소"
-                            color: Colors.textSecondary
+                        Layout.preferredHeight: 38
+                        text: "취소"
+                        contentItem: Text {
+                            text: parent.text
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.bodySmall
+                            color: Colors.textPrimary
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
                         }
-
-                        MouseArea {
-                            id: cancelEditBtn
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            onClicked: root.cancelEdit()
+                        background: Rectangle {
+                            color: Colors.bgSecondary
+                            radius: Metrics.radiusSm
+                            border.color: Colors.borderLight
                         }
+                        onClicked: root.cancelEdit()
                     }
                 }
             }
         }
     }
 
-    // Delete Confirmation Dialog
     Rectangle {
         anchors.fill: parent
         color: "#80000000"
@@ -867,8 +1449,8 @@ Rectangle {
 
         Rectangle {
             anchors.centerIn: parent
-            width: 300
-            height: 160
+            width: 320
+            height: 180
             radius: Metrics.radiusLg
             color: Colors.bgPrimary
             border.color: Colors.borderLight
@@ -890,7 +1472,7 @@ Rectangle {
 
                 Text {
                     Layout.fillWidth: true
-                    text: "이 AI 기능을 정말 삭제하시겠습니까?\n삭제된 기능은 목록에서 사라집니다."
+                    text: "이 AI 기능을 삭제하면 AI 패널 목록에서 사라집니다.\n기존 프롬프트 문서는 삭제되지 않습니다."
                     font.family: Typography.fontPrimary
                     font.pixelSize: Typography.bodySmall
                     color: Colors.textSecondary
@@ -902,45 +1484,41 @@ Rectangle {
                     Layout.fillWidth: true
                     spacing: Metrics.sm
 
-                    Rectangle {
+                    Button {
                         Layout.fillWidth: true
-                        height: 32
-                        radius: Metrics.radiusMd
-                        color: confirmDelBtn.containsMouse ? Colors.error500 : Colors.error400
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: "삭제"
-                            color: Colors.textInverse
+                        text: "삭제"
+                        contentItem: Text {
+                            text: parent.text
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.bodySmall
+                            color: Colors.white
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
                         }
-
-                        MouseArea {
-                            id: confirmDelBtn
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            onClicked: root.confirmDelete()
+                        background: Rectangle {
+                            color: Colors.error500
+                            radius: Metrics.radiusSm
                         }
+                        onClicked: root.confirmDelete()
                     }
 
-                    Rectangle {
+                    Button {
                         Layout.fillWidth: true
-                        height: 32
-                        radius: Metrics.radiusMd
-                        color: cancelDelBtn.containsMouse ? Colors.bgTertiary : Colors.bgSecondary
-                        border.color: Colors.borderLight
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: "취소"
-                            color: Colors.textSecondary
+                        text: "취소"
+                        contentItem: Text {
+                            text: parent.text
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.bodySmall
+                            color: Colors.textPrimary
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
                         }
-
-                        MouseArea {
-                            id: cancelDelBtn
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            onClicked: root.showDeleteConfirm = false
+                        background: Rectangle {
+                            color: Colors.bgSecondary
+                            radius: Metrics.radiusSm
+                            border.color: Colors.borderLight
                         }
+                        onClicked: root.showDeleteConfirm = false
                     }
                 }
             }

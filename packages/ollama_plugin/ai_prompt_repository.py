@@ -62,7 +62,7 @@ class PromptRepository:
             "ai_actions": {
                 "action_id", "name", "description", "category", "required_variables_json",
                 "enabled", "sort_order", "source_type", "readonly", "archived",
-                "input_mode", "use_rag", "icon", "created_at", "updated_at"
+                "input_mode", "use_rag", "response_length", "icon", "created_at", "updated_at"
             },
             "ai_action_prompt_bindings": {
                 "action_id", "prompt_doc_id", "updated_at"
@@ -101,6 +101,7 @@ class PromptRepository:
             archived INTEGER DEFAULT 0,
             input_mode TEXT DEFAULT 'auto',
             use_rag INTEGER DEFAULT 0,
+            response_length TEXT DEFAULT 'medium',
             icon TEXT DEFAULT '',
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -135,6 +136,7 @@ class PromptRepository:
                 "archived": "INTEGER DEFAULT 0",
                 "input_mode": "TEXT DEFAULT 'auto'",
                 "use_rag": "INTEGER DEFAULT 0",
+                "response_length": "TEXT DEFAULT 'medium'",
                 "icon": "TEXT DEFAULT ''",
             }
             for col_name, col_def in new_action_columns.items():
@@ -184,7 +186,8 @@ class PromptRepository:
                 "readonly = 1",
                 "archived = 0",
                 "input_mode = 'auto'",
-                f"use_rag = {use_rag}"
+                f"use_rag = {use_rag}",
+                "response_length = 'medium'",
             ]
             
             # Only add updated_at if column exists
@@ -215,7 +218,7 @@ class PromptRepository:
             cols = self._table_columns(conn, "ai_actions")
             select_cols = ["action_id", "name", "description", "category", "required_variables_json",
                           "enabled", "sort_order"]
-            for col in ["source_type", "readonly", "archived", "input_mode", "use_rag", "icon", "created_at", "updated_at"]:
+            for col in ["source_type", "readonly", "archived", "input_mode", "use_rag", "response_length", "icon", "created_at", "updated_at"]:
                 if col in cols:
                     select_cols.append(col)
             
@@ -235,7 +238,7 @@ class PromptRepository:
             cols = self._table_columns(conn, "ai_actions")
             select_cols = ["action_id", "name", "description", "category", "required_variables_json",
                           "enabled", "sort_order"]
-            for col in ["source_type", "readonly", "archived", "input_mode", "use_rag", "icon", "created_at", "updated_at"]:
+            for col in ["source_type", "readonly", "archived", "input_mode", "use_rag", "response_length", "icon", "created_at", "updated_at"]:
                 if col in cols:
                     select_cols.append(col)
             
@@ -261,8 +264,8 @@ class PromptRepository:
                     """
                     INSERT INTO ai_actions (
                         action_id, name, description, category, required_variables_json,
-                        enabled, sort_order, source_type, readonly, archived, input_mode, use_rag, icon
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        enabled, sort_order, source_type, readonly, archived, input_mode, use_rag, response_length, icon
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         record.get("action_id", ""),
@@ -277,6 +280,7 @@ class PromptRepository:
                         int(record.get("archived", 0)),
                         record.get("input_mode", "auto"),
                         int(record.get("use_rag", 0)),
+                        record.get("response_length", "medium"),
                         record.get("icon", ""),
                     ),
                 )
@@ -302,12 +306,13 @@ class PromptRepository:
                         archived = excluded.archived,
                         input_mode = excluded.input_mode,
                         use_rag = excluded.use_rag,
+                        response_length = excluded.response_length,
                         icon = excluded.icon,
                         updated_at = CURRENT_TIMESTAMP
                     FROM (SELECT ? AS action_id, ? AS name, ? AS description, ? AS category,
                                  ? AS required_variables_json, ? AS enabled, ? AS sort_order,
                                  ? AS source_type, ? AS readonly, ? AS archived,
-                                 ? AS input_mode, ? AS use_rag, ? AS icon) AS excluded
+                                 ? AS input_mode, ? AS use_rag, ? AS response_length, ? AS icon) AS excluded
                     WHERE ai_actions.action_id = excluded.action_id
                     """,
                     (
@@ -323,6 +328,7 @@ class PromptRepository:
                         int(record.get("archived", 0)),
                         record.get("input_mode", "auto"),
                         int(record.get("use_rag", 0)),
+                        record.get("response_length", "medium"),
                         record.get("icon", ""),
                     ),
                 )
@@ -408,7 +414,7 @@ class PromptRepository:
     def upsert_action(self, record: dict[str, Any]) -> None:
         with self._connect() as conn:
             existing = conn.execute(
-                "SELECT source_type, readonly, archived, input_mode, use_rag, icon FROM ai_actions WHERE action_id = ?",
+                "SELECT source_type, readonly, archived, input_mode, use_rag, response_length, icon FROM ai_actions WHERE action_id = ?",
                 (record.get("action_id", ""),)
             ).fetchone()
 
@@ -417,14 +423,15 @@ class PromptRepository:
             archived = record.get("archived") if record.get("archived") is not None else (existing["archived"] if existing else 0)
             input_mode = record.get("input_mode") or (existing["input_mode"] if existing else "auto")
             use_rag = record.get("use_rag") if record.get("use_rag") is not None else (existing["use_rag"] if existing else 0)
+            response_length = record.get("response_length") or (existing["response_length"] if existing else "medium")
             icon = record.get("icon") or (existing["icon"] if existing else "")
 
             conn.execute(
                 """
                 INSERT INTO ai_actions (
                     action_id, name, description, category, required_variables_json,
-                    enabled, sort_order, source_type, readonly, archived, input_mode, use_rag, icon
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    enabled, sort_order, source_type, readonly, archived, input_mode, use_rag, response_length, icon
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(action_id) DO UPDATE SET
                     name = excluded.name,
                     description = excluded.description,
@@ -437,6 +444,7 @@ class PromptRepository:
                     archived = COALESCE(excluded.archived, ai_actions.archived),
                     input_mode = COALESCE(NULLIF(excluded.input_mode, ''), ai_actions.input_mode),
                     use_rag = COALESCE(excluded.use_rag, ai_actions.use_rag),
+                    response_length = COALESCE(NULLIF(excluded.response_length, ''), ai_actions.response_length),
                     icon = COALESCE(NULLIF(excluded.icon, ''), ai_actions.icon)
                 """,
                 (
@@ -452,6 +460,7 @@ class PromptRepository:
                     int(archived),
                     input_mode,
                     int(use_rag),
+                    response_length,
                     icon,
                 ),
             )

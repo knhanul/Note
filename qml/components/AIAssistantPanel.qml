@@ -39,20 +39,27 @@ Rectangle {
     }
 
     function getInputModeText(mode) {
-        if (!mode || mode === "auto") return "자동"
-        if (mode === "note_required") return "노트 필요"
-        if (mode === "chat_only") return "채팅만"
-        if (mode === "note_and_chat") return "노트+채팅"
-        if (mode === "selection_required") return "선택문장 필요"
-        return "자동"
+        if (!mode || mode === "auto") return "자동 감지"
+        if (mode === "note_required") return "현재 문서 기반"
+        if (mode === "chat_only") return "채팅만 사용"
+        if (mode === "note_and_chat") return "문서 + 질문"
+        if (mode === "selection_required") return "선택 문장 기반"
+        return "자동 감지"
+    }
+
+    function getResponseLengthText(value) {
+        if (!value || value === "medium") return "보통"
+        if (value === "short") return "짧게"
+        if (value === "long") return "자세히"
+        return "보통"
     }
 
     function getInputModePlaceholder(mode) {
         if (!mode || mode === "auto") return "선택한 AI 기능을 실행할 내용을 입력하세요."
-        if (mode === "note_required") return "현재 노트를 기준으로 실행합니다. 필요한 요청이 있으면 입력하세요."
+        if (mode === "note_required") return "현재 열려 있는 문서를 기준으로 실행합니다. 필요한 요청이 있으면 입력하세요."
         if (mode === "chat_only") return "AI에게 물어볼 내용을 입력하세요."
-        if (mode === "note_and_chat") return "현재 노트와 함께 AI에게 요청할 내용을 입력하세요."
-        if (mode === "selection_required") return "에디터에서 문장을 선택한 뒤 실행하세요."
+        if (mode === "note_and_chat") return "현재 문서를 참고하고, 추가 질문도 함께 전달합니다."
+        if (mode === "selection_required") return "문서에서 문장을 선택한 뒤 실행하세요."
         return "선택한 AI 기능을 실행할 내용을 입력하세요."
     }
 
@@ -404,8 +411,48 @@ Rectangle {
                                     wrapMode: Text.Wrap
                                 }
 
+                                RowLayout {
+                                    spacing: Metrics.xs
+
+                                    Rectangle {
+                                        height: 20
+                                        radius: Metrics.radiusFull
+                                        color: Colors.bgPrimary
+                                        border.color: Colors.borderLight
+                                        border.width: 1
+                                        width: responseLengthBadge.implicitWidth + 16
+
+                                        Text {
+                                            id: responseLengthBadge
+                                            anchors.centerIn: parent
+                                            text: "응답 " + getResponseLengthText(root.selectedAction ? root.selectedAction.response_length : "medium")
+                                            font.family: Typography.fontPrimary
+                                            font.pixelSize: 10
+                                            color: Colors.textSecondary
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        height: 20
+                                        radius: Metrics.radiusFull
+                                        color: Colors.bgPrimary
+                                        border.color: Colors.borderLight
+                                        border.width: 1
+                                        width: ragBadge.implicitWidth + 16
+
+                                        Text {
+                                            id: ragBadge
+                                            anchors.centerIn: parent
+                                            text: root.selectedAction && root.selectedAction.use_rag ? "문서 검색 사용" : "문서 검색 안 함"
+                                            font.family: Typography.fontPrimary
+                                            font.pixelSize: 10
+                                            color: Colors.textSecondary
+                                        }
+                                    }
+                                }
+
                                 Text {
-                                    text: "연결 프롬프트: " + (root.selectedAction && root.selectedAction.binding_prompt_doc_id ? root.selectedAction.binding_prompt_doc_id : "기본")
+                                    text: "연결 프롬프트: " + (root.selectedAction && root.selectedAction.current_prompt && root.selectedAction.current_prompt.title ? root.selectedAction.current_prompt.title : "기본 프롬프트")
                                     font.family: Typography.fontPrimary
                                     font.pixelSize: 10
                                     color: Colors.textTertiary

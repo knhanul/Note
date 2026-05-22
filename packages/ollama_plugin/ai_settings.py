@@ -45,17 +45,17 @@ class AISettingsManager:
         timeout=300,
         first_token_timeout=180,
         idle_timeout=60,
-        num_predict=256,
-        num_ctx=2048,
+        num_predict=512,
+        num_ctx=4096,
         temperature=0.2,
         keep_alive="10m"
     )
 
     LOW_PERFORMANCE_DEFAULTS = {
-        "num_predict": 256,
-        "num_ctx": 2048,
+        "num_predict": 512,
+        "num_ctx": 4096,
         "temperature": 0.2,
-        "keep_alive": "5m",
+        "keep_alive": "10m",
         "timeout": 300,
     }
 
@@ -151,8 +151,8 @@ class AISettingsManager:
         elif mode == "normal":
             self.settings.top_k = 5
             self.settings.streaming = True
-            self.settings.num_predict = 256
-            self.settings.num_ctx = 2048
+            self.settings.num_predict = 512
+            self.settings.num_ctx = 4096
             self.settings.temperature = 0.2
             self.settings.keep_alive = "10m"
             self.settings.timeout = 300
