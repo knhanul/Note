@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from services.folder_service import FolderService
+from services.markdown_asset_resolver import extract_markdown_assets
 from services.note_service import NoteService
 
 
@@ -279,30 +280,42 @@ class FolderImportService:
         return folder_id if ok else None
 
     def _read_note(self, fpath: Path, import_mode: str = DEFAULT_IMPORT_MODE) -> Tuple[str, str, List[str]]:
+        from packages.import_export.markdown_import_service import load_markdown_document_from_text
+        from packages.import_export.hwp_import_service import convert_hwp_to_markdown_text
+        from packages.import_export.hwpx_import_service import convert_hwpx_to_markdown_text
+
         ext = fpath.suffix.lower()
         title = fpath.stem
         filename_line = f"# {fpath.stem}\n\n"
         tags = []
         if ext in (".md", ".markdown"):
             text = self._read_text(fpath)
-            # Parse metadata from markdown
-            metadata, markdown_body = self._parse_markdown_metadata(text)
-            # Use metadata title if available
-            if metadata and "title" in metadata:
-                title = metadata["title"]
-                filename_line = ""
-            # Extract tags from metadata
-            if metadata and "tags" in metadata:
-                tags = metadata["tags"] if isinstance(metadata["tags"], list) else [str(metadata["tags"])]
-            return title, filename_line + self._inline_md_images(markdown_body, fpath.parent), tags
+            doc, asset_warnings = load_markdown_document_from_text(text, source_path=str(fpath))
+            if doc.warnings:
+                for w in doc.warnings:
+                    print(f"[FolderImport] Warning: {w}")
+            for w in asset_warnings:
+                print(f"[FolderImport] Warning: {w}")
+            title = doc.metadata.title if doc.metadata.title else fpath.stem
+            filename_line = "" if doc.metadata.title else f"# {fpath.stem}\n\n"
+            tags = doc.metadata.tags if doc.metadata.tags else []
+            return title, filename_line + self._inline_md_images(doc.body_markdown, fpath.parent), tags
         if ext == ".txt":
             return title, filename_line + self._read_text(fpath), tags
         if ext in (".html", ".htm"):
             return title, filename_line + self._html_to_markdown(self._read_text(fpath)), tags
         if ext == ".docx":
             return title, filename_line + self._docx_to_markdown(fpath), tags
-        if ext in (".hwp", ".hwpx"):
-            return title, filename_line + self._hwp_to_markdown(fpath, import_mode=import_mode), tags
+        if ext == ".hwp":
+            markdown, warnings = convert_hwp_to_markdown_text(str(fpath))
+            for w in warnings:
+                print(f"[FolderImport] HWP Warning: {w}")
+            return title, filename_line + markdown, tags
+        if ext == ".hwpx":
+            markdown, warnings = convert_hwpx_to_markdown_text(str(fpath))
+            for w in warnings:
+                print(f"[FolderImport] HWPX Warning: {w}")
+            return title, filename_line + markdown, tags
         return title, filename_line, tags
 
     @staticmethod

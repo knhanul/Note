@@ -7,9 +7,21 @@ from .image_service import ImageService
 from .library_service import LibraryService
 from .settings_service import SettingsService
 from .template_service import TemplateService
-from .folder_import_service import FolderImportService
-from .folder_export_service import FolderExportService
-from .current_note_export_service import CurrentNoteExportService
+
+try:
+    from .folder_import_service import FolderImportService
+except Exception:  # pragma: no cover - guard for circular import during module bootstrap
+    FolderImportService = None
+
+try:
+    from .folder_export_service import FolderExportService
+except Exception:  # pragma: no cover - guard for circular import during module bootstrap
+    FolderExportService = None
+
+try:
+    from .current_note_export_service import CurrentNoteExportService
+except Exception:  # pragma: no cover - guard for circular import during module bootstrap
+    CurrentNoteExportService = None
 
 __all__ = [
     'Database',

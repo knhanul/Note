@@ -10,6 +10,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from packages.import_export.markdown_export_service import (
+    make_safe_markdown_filename,
+    resolve_unique_filename,
+)
 from services.current_note_export_service import CurrentNoteExportService
 from services.folder_service import FolderService
 from services.note_service import NoteService
@@ -164,8 +168,12 @@ class FolderExportService:
         fmt: str,
         used_names: Dict[Path, set],
     ) -> Optional[str]:
-        base_name = self._exporter.safe_filename(note.get("title") or "무제")
-        unique_name = self._dedupe_name(used_names, sub_dir, base_name, fmt)
+        base_name = make_safe_markdown_filename(note.get("title") or "무제")
+        existing = used_names.get(sub_dir, set())
+        unique_name = resolve_unique_filename(base_name, existing)
+        if sub_dir not in used_names:
+            used_names[sub_dir] = set()
+        used_names[sub_dir].add(unique_name.lower())
 
         try:
             output_path = self._exporter.export(
@@ -174,6 +182,9 @@ class FolderExportService:
                 content_json=note.get("content_json") or "",
                 fmt=fmt,
                 out_dir=str(sub_dir),
+                tags=note.get("tags"),
+                created_at=note.get("created_at"),
+                updated_at=note.get("updated_at"),
             )
         except Exception:
             return None
@@ -216,19 +227,6 @@ class FolderExportService:
             chain.reverse()
             rel[fid] = Path(*chain) if chain else Path("")
         return rel
-
-    @staticmethod
-    def _dedupe_name(
-        used: Dict[Path, set], sub_dir: Path, base_name: str, fmt: str
-    ) -> str:
-        bucket = used.setdefault(sub_dir, set())
-        candidate = base_name
-        n = 2
-        while candidate.lower() in bucket or (sub_dir / f"{candidate}.{fmt}").exists():
-            candidate = f"{base_name}_{n}"
-            n += 1
-        bucket.add(candidate.lower())
-        return candidate
 
     @staticmethod
     def _safe_dir_name(name: str) -> str:

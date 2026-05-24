@@ -7,7 +7,12 @@ import re
 import tempfile
 from io import BytesIO
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
+
+from packages.import_export.markdown_export_service import (
+    build_markdown_export_content,
+    make_safe_markdown_filename,
+)
 
 
 _DATA_URL_PATTERN = re.compile(
@@ -45,6 +50,9 @@ class CurrentNoteExportService:
         content_json: str,
         fmt: str,
         out_dir: str,
+        tags: Optional[List[str]] = None,
+        created_at: Optional[str] = None,
+        updated_at: Optional[str] = None,
     ) -> str:
         fmt = (fmt or "").lower().strip()
         if fmt not in self.SUPPORTED_FORMATS:
@@ -53,10 +61,13 @@ class CurrentNoteExportService:
         target_dir = Path(out_dir)
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        base_name = self.safe_filename(title or "무제")
+        base_name = make_safe_markdown_filename(title or "무제")
         normalized_markdown = self._normalize_markdown_for_text_exports(markdown or "")
         if fmt == "md":
-            return self._export_markdown(target_dir, base_name, normalized_markdown)
+            return self._export_markdown(
+                target_dir, base_name, normalized_markdown,
+                tags=tags, created_at=created_at, updated_at=updated_at
+            )
         if fmt == "txt":
             return self._export_txt(target_dir, base_name, title or "", normalized_markdown)
         if fmt == "docx":
@@ -66,7 +77,15 @@ class CurrentNoteExportService:
         # pdf is handled in QML WebEngine print path for best WYSIWYG quality.
         raise ValueError("PDF export is handled by WebEngine path")
 
-    def _export_markdown(self, target_dir: Path, base_name: str, markdown: str) -> str:
+    def _export_markdown(
+        self,
+        target_dir: Path,
+        base_name: str,
+        markdown: str,
+        tags: Optional[List[str]] = None,
+        created_at: Optional[str] = None,
+        updated_at: Optional[str] = None,
+    ) -> str:
         counter = {"n": 0}
 
         def _replace(match: re.Match) -> str:
@@ -93,8 +112,17 @@ class CurrentNoteExportService:
             return f"![{alt}]({img_name})"
 
         rewritten = _MD_IMG_PATTERN.sub(_replace, markdown)
+
+        full_content = build_markdown_export_content(
+            rewritten,
+            title=base_name if base_name != "무제" else None,
+            tags=tags,
+            created_at=created_at,
+            updated_at=updated_at,
+        )
+
         out_path = target_dir / f"{base_name}.md"
-        out_path.write_text(rewritten, encoding="utf-8")
+        out_path.write_text(full_content, encoding="utf-8")
         return str(out_path)
 
     def _export_txt(self, target_dir: Path, base_name: str, title: str, markdown: str) -> str:

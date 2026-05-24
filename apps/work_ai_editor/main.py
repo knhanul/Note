@@ -19,6 +19,8 @@ from app_bootstrap import bootstrap_app
 from app_config import create_app_config
 from packages.ollama_plugin import AIAssistantController, AssistantController, OllamaAssistantPlugin, PromptController, AIPromptDocumentController, AIActionController
 from packages.plugin_api import PluginRegistry, PluginContext
+from controllers.ai_rag_controller import AiRagController
+from services.ai_rag_application_service import AiRagApplicationService
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -65,6 +67,23 @@ def plugin_setup(engine, services, config):
         engine._ai_action_controller = None
 
     logger.info("[work_ai_editor] AI Assistant Controller initialized")
+
+    # Setup AiRagController for multi-document RAG
+    try:
+        logger.info("[work_ai_editor] Initializing AiRagController...")
+        ai_db_path = config.app_data_dir / "ai" / "ai_index.db"
+        ai_db_path.parent.mkdir(parents=True, exist_ok=True)
+        app_service = AiRagApplicationService(db_path=str(ai_db_path))
+        ai_rag_controller = AiRagController(app_service=app_service)
+        engine.rootContext().setContextProperty("aiRagController", ai_rag_controller)
+        engine._ai_rag_controller = ai_rag_controller
+        logger.info("[work_ai_editor] AiRagController initialized successfully")
+    except Exception as e:
+        import traceback
+        logger.error(f"[work_ai_editor] Failed to initialize AiRagController: {e}")
+        logger.error(f"[work_ai_editor] Traceback: {traceback.format_exc()}")
+        engine.rootContext().setContextProperty("aiRagController", None)
+        engine._ai_rag_controller = None
 
     registry = PluginRegistry()
     plugin = OllamaAssistantPlugin()

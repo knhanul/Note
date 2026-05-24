@@ -7,7 +7,7 @@ Developer flow:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import html as html_mod
 import logging
 from pathlib import Path
@@ -35,6 +35,19 @@ class ParagraphBlock:
 
 
 @dataclass
+class HeadingBlock:
+    text: str
+    level: int = 2
+
+
+@dataclass
+class ListItemBlock:
+    text: str
+    ordered: bool = False
+    level: int = 0
+
+
+@dataclass
 class ImageBlock:
     image_path: str
     alt_text: str = ""
@@ -56,9 +69,11 @@ class UnknownBlock:
 class HWPXDocument:
     blocks: list["Block"]
     extracted_images: list[str]
+    footnotes: list[str] = field(default_factory=list)
+    endnotes: list[str] = field(default_factory=list)
 
 
-Block = ParagraphBlock | ImageBlock | TableBlock | UnknownBlock
+Block = ParagraphBlock | HeadingBlock | ListItemBlock | ImageBlock | TableBlock | UnknownBlock
 
 
 def hwpx_to_markdown(hwpx_path: str, assets_dir: str | None = None) -> str:
@@ -80,6 +95,8 @@ def hwpx_to_markdown(hwpx_path: str, assets_dir: str | None = None) -> str:
         base_dir = hwpx_file.parent.resolve()
         target_assets_dir = _resolve_assets_dir(hwpx_file, assets_dir)
         image_map, extracted_images = _extract_images_from_zip(zf, target_assets_dir, base_dir)
+
+        _detect_header_footer(zf)
 
         document = _parse_hwpx_document(zf, hwpx_path, image_map, extracted_images)
         return _render_document_to_markdown(document)
@@ -111,11 +128,34 @@ def _parse_hwpx_document(
             continue
         blocks.extend(_parse_section_xml(xml_text, image_map))
 
-    return HWPXDocument(blocks=blocks, extracted_images=extracted_images)
+    footnotes, endnotes = _extract_notes_from_zip(zf)
+
+    return HWPXDocument(
+        blocks=blocks,
+        extracted_images=extracted_images,
+        footnotes=footnotes,
+        endnotes=endnotes,
+    )
 
 
 def _render_document_to_markdown(document: HWPXDocument) -> str:
-    return _render_blocks_to_markdown(document.blocks, document.extracted_images)
+    body = _render_blocks_to_markdown(document.blocks, document.extracted_images)
+
+    out_lines = [body] if body else []
+
+    if document.footnotes:
+        out_lines.append("## 각주")
+        for i, footnote in enumerate(document.footnotes, 1):
+            if footnote.strip():
+                out_lines.append(f"{i}. {footnote}")
+
+    if document.endnotes:
+        out_lines.append("## 미주")
+        for i, endnote in enumerate(document.endnotes, 1):
+            if endnote.strip():
+                out_lines.append(f"{i}. {endnote}")
+
+    return "\n\n".join(out_lines).strip()
 
 
 def _open_hwpx_zip(hwpx_path: str) -> zipfile.ZipFile | None:
@@ -153,6 +193,60 @@ def _find_section_files(zf: zipfile.ZipFile) -> list[str]:
 
     section_files.sort()
     return section_files
+
+
+def _extract_notes_from_zip(zf: zipfile.ZipFile) -> tuple[list[str], list[str]]:
+    footnotes: list[str] = []
+    endnotes: list[str] = []
+
+    footnote_tags = {"footnote", "footNote", "fn", "각주"}
+    endnote_tags = {"endnote", "endNote", "en", "미주"}
+
+    try:
+        for name in zf.namelist():
+            if not name.lower().endswith(".xml"):
+                continue
+            if "footnote" in name.lower() or "endnote" in name.lower():
+                try:
+                    xml_text = zf.read(name).decode("utf-8")
+                    root = ET.fromstring(xml_text)
+                    for elem in root.iter():
+                        local = elem.tag.split("}", 1)[-1].lower() if "}" in elem.tag else elem.tag.lower()
+                        if local in footnote_tags:
+                            text = _extract_text_from_paragraph(elem)
+                            if text:
+                                footnotes.append(_clean_text(text))
+                        elif local in endnote_tags:
+                            text = _extract_text_from_paragraph(elem)
+                            if text:
+                                endnotes.append(_clean_text(text))
+                except Exception:
+                    logger.debug("Failed to parse note file: %s", name)
+    except Exception:
+        logger.exception("Failed to extract notes from HWPX")
+
+    return footnotes, endnotes
+
+
+def _detect_header_footer(zf: zipfile.ZipFile) -> bool:
+    """Detect if HWPX contains header/footer content.
+
+    Returns True if header/footer files or tags are detected.
+    Does not convert them to markdown, only logs a warning.
+    """
+    header_footer_patterns = {"header", "footer", "head", "ftr", "hdr", "머리말", "꼬리말"}
+
+    try:
+        for name in zf.namelist():
+            name_lower = name.lower()
+            if any(pattern in name_lower for pattern in header_footer_patterns):
+                if name_lower.endswith(".xml"):
+                    logger.warning("HEADER_FOOTER_IGNORED: Header/footer content detected but not imported: %s", name)
+                    return True
+    except Exception:
+        logger.debug("Failed to detect header/footer in HWPX")
+
+    return False
 
 
 def _resolve_assets_dir(hwpx_path: Path, assets_dir: str | None) -> Path:
@@ -275,7 +369,22 @@ def _parse_section_xml(xml_text: str, image_map: dict[str, str]) -> list[Block]:
         if local == "p":
             if _is_under_tag(elem, parent_map, _TABLE_TAGS):
                 continue
-            blocks.extend(_extract_blocks_from_paragraph(elem, image_map))
+            heading_level = _detect_heading_level(elem)
+            if heading_level is not None:
+                text = _extract_text_from_paragraph(elem)
+                text = _clean_text(text)
+                if text:
+                    blocks.append(HeadingBlock(text=text, level=heading_level))
+            else:
+                list_info = _detect_list_info(elem)
+                if list_info is not None:
+                    ordered, level = list_info
+                    text = _extract_text_from_paragraph(elem)
+                    text = _clean_text(text)
+                    if text:
+                        blocks.append(ListItemBlock(text=text, ordered=ordered, level=level))
+                else:
+                    blocks.extend(_extract_blocks_from_paragraph(elem, image_map))
         elif local in _TABLE_TAGS:
             blocks.append(_parse_table(elem))
 
@@ -300,6 +409,98 @@ def _local_name(tag: object) -> str:
     if not isinstance(tag, str):
         return ""
     return tag.split("}", 1)[-1] if "}" in tag else tag
+
+
+def _is_heading_style(value: str) -> bool:
+    if not value:
+        return False
+    value_lower = value.lower()
+    heading_keywords = {"heading", "head", "title", "표제", "제목", "소제목", "제1장", "제1편"}
+    return any(kw in value_lower for kw in heading_keywords)
+
+
+def _detect_heading_level(elem: ET.Element) -> int | None:
+    style = elem.attrib.get("style") or elem.attrib.get("styleId") or ""
+    if _is_heading_style(style):
+        style_lower = style.lower()
+        if "1" in style_lower and "heading" in style_lower:
+            return 1
+        if "2" in style_lower and "heading" in style_lower:
+            return 2
+        if "3" in style_lower and "heading" in style_lower:
+            return 3
+        if "제1" in style or "제1장" in style or "제1편" in style:
+            return 1
+        if "제2" in style or "제2장" in style or "제2편" in style:
+            return 2
+        if "제3" in style or "제3장" in style or "제3편" in style:
+            return 3
+        if "제4" in style:
+            return 4
+        if "제5" in style:
+            return 5
+        if "제6" in style:
+            return 6
+        if "title" in style_lower or "표제" in style or "제목" in style:
+            return 1
+        if "소제목" in style:
+            return 2
+        return 2
+    outline_level = elem.attrib.get("outlineLevel") or elem.attrib.get("outline") or ""
+    if outline_level:
+        try:
+            level = int(outline_level)
+            if 1 <= level <= 6:
+                return level
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
+def _is_bullet_list_style(value: str) -> bool:
+    if not value:
+        return False
+    value_lower = value.lower()
+    bullet_keywords = {"bullet", "list", "ul", "unordered", "불릿", "글머리표", "글머리"}
+    return any(kw in value_lower for kw in bullet_keywords)
+
+
+def _is_ordered_list_style(value: str) -> bool:
+    if not value:
+        return False
+    value_lower = value.lower()
+    ordered_keywords = {"number", "numbered", "ordered", "ol", "번호", "번호목록", "순서"}
+    return any(kw in value_lower for kw in ordered_keywords)
+
+
+def _detect_list_info(elem: ET.Element) -> tuple[bool, int] | None:
+    style = elem.attrib.get("style") or elem.attrib.get("styleId") or ""
+    if _is_bullet_list_style(style):
+        level_str = elem.attrib.get("level") or elem.attrib.get("listLevel") or "0"
+        try:
+            level = int(level_str)
+            level = max(0, min(6, level))
+        except (ValueError, TypeError):
+            level = 0
+        return (False, level)
+    if _is_ordered_list_style(style):
+        level_str = elem.attrib.get("level") or elem.attrib.get("listLevel") or "0"
+        try:
+            level = int(level_str)
+            level = max(0, min(6, level))
+        except (ValueError, TypeError):
+            level = 0
+        return (True, level)
+    num_id = elem.attrib.get("numId") or elem.attrib.get("numberingId") or ""
+    if num_id and num_id != "0":
+        level_str = elem.attrib.get("level") or "0"
+        try:
+            level = int(level_str)
+            level = max(0, min(6, level))
+        except (ValueError, TypeError):
+            level = 0
+        return (True, level)
+    return None
 
 
 def _parse_table(table_elem: ET.Element) -> Block:
@@ -364,6 +565,10 @@ def _is_simple_table(table_elem: ET.Element) -> bool:
     return True
 
 
+def _escape_table_cell(text: str) -> str:
+    return text.replace("|", "\\|")
+
+
 def _render_simple_table_to_markdown(table: TableBlock) -> str:
     if not table.rows:
         return ""
@@ -372,8 +577,8 @@ def _render_simple_table_to_markdown(table: TableBlock) -> str:
     col_count = max(len(r) for r in rows)
     rows = [r + [""] * (col_count - len(r)) for r in rows]
 
-    header = rows[0]
-    body = rows[1:]
+    header = [_escape_table_cell(c) for c in rows[0]]
+    body = [[_escape_table_cell(c) for c in r] for r in rows[1:]]
 
     lines = [
         "| " + " | ".join(header) + " |",
@@ -537,7 +742,7 @@ def _resolve_image_ref(node: ET.Element, image_map: dict[str, str]) -> str | Non
         value = (raw_value or "").strip()
         if not value:
             continue
-        if any(token in key for token in ("id", "ref", "href", "bin")):
+        if any(token in key for token in ("id", "ref", "href", "bin", "src", "embed", "item")):
             candidates.append(value)
 
     for candidate in candidates:
@@ -547,6 +752,9 @@ def _resolve_image_ref(node: ET.Element, image_map: dict[str, str]) -> str | Non
         for key in (normalized, name, stem):
             if key in image_map:
                 return image_map[key]
+
+    if candidates:
+        logger.warning("Unresolved image reference: %s (available: %s)", candidates, list(image_map.keys()))
 
     return None
 
@@ -616,7 +824,18 @@ def _render_blocks_to_markdown(blocks: list[Block], extracted_images: list[str] 
     used_images: set[str] = set()
 
     for block in blocks:
-        if isinstance(block, ParagraphBlock):
+        if isinstance(block, HeadingBlock):
+            if block.text:
+                level = max(1, min(6, block.level))
+                out.append(f"{'#' * level} {block.text}")
+        elif isinstance(block, ListItemBlock):
+            if block.text:
+                indent = "  " * max(0, min(6, block.level))
+                if block.ordered:
+                    out.append(f"{indent}1. {block.text}")
+                else:
+                    out.append(f"{indent}- {block.text}")
+        elif isinstance(block, ParagraphBlock):
             if block.text:
                 out.append(block.text)
         elif isinstance(block, TableBlock):

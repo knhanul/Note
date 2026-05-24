@@ -4825,6 +4825,11 @@ Window {
                     aiSettingsDialog.settingsMenuIndex = 0
                     aiSettingsDialog.visible = true
                 }
+
+                onOpenReferenceDocsSettings: {
+                    aiSettingsDialog.settingsMenuIndex = 2
+                    aiSettingsDialog.visible = true
+                }
             }
         }
 

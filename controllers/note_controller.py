@@ -7,6 +7,7 @@ from datetime import datetime, date
 import uuid
 import re
 import hashlib
+import json
 
 from services.database import Database
 from services.note_service import NoteService
@@ -1146,10 +1147,56 @@ class NoteController(QObject):
         """Convert local image file to data URL for DB storage and return it."""
         if not note_id or not file_path:
             return ""
-        
+
         try:
             return self._image_service.load_image_file_as_data_url(file_path)
         except Exception as e:
             print(f"[NoteController] Save local image error: {e}")
-        
+
         return ""
+
+    @pyqtSlot(result=str)
+    def getAllNotesForRagJson(self) -> str:
+        """Get all notes as JSON for RAG indexing."""
+        try:
+            notes = self._note_service.get_all(include_deleted=False)
+            rag_notes = []
+            for note in notes:
+                rag_notes.append({
+                    "note_id": note.get("id", ""),
+                    "title": note.get("title", ""),
+                    "content": note.get("content", "") or "",
+                    "tags": note.get("tags", []),
+                    "created_at": note.get("created_at"),
+                    "updated_at": note.get("updated_at"),
+                    "folder_id": note.get("folder_id"),
+                })
+            return json.dumps(rag_notes, ensure_ascii=False)
+        except Exception as e:
+            print(f"[NoteController] getAllNotesForRagJson error: {e}")
+            return "[]"
+
+    @pyqtSlot(str, result=str)
+    def getNotesForRagByFolderIdsJson(self, folder_ids_json: str) -> str:
+        """Get notes by folder IDs as JSON for RAG indexing."""
+        try:
+            folder_ids = json.loads(folder_ids_json) if folder_ids_json else []
+            if not folder_ids:
+                return "[]"
+
+            notes = self._note_service.get_all_by_folder_ids(folder_ids, include_deleted=False)
+            rag_notes = []
+            for note in notes:
+                rag_notes.append({
+                    "note_id": note.get("id", ""),
+                    "title": note.get("title", ""),
+                    "content": note.get("content", "") or "",
+                    "tags": note.get("tags", []),
+                    "created_at": note.get("created_at"),
+                    "updated_at": note.get("updated_at"),
+                    "folder_id": note.get("folder_id"),
+                })
+            return json.dumps(rag_notes, ensure_ascii=False)
+        except Exception as e:
+            print(f"[NoteController] getNotesForRagByFolderIdsJson error: {e}")
+            return "[]"

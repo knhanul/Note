@@ -315,6 +315,10 @@ class AssistantController(QObject):
         if explicit_input_mode and explicit_input_mode != "auto":
             inferred_input_mode = explicit_input_mode
 
+        if action_id == "current_note_qa" and inferred_input_mode == "chat_only":
+            logger.info("[AssistantController] current_note_qa: forcing input_mode to note_and_chat")
+            inferred_input_mode = "note_and_chat"
+
         preconditions = ActionExecutionContextBuilder.validate_execution_preconditions(
             action, inferred_input_mode, current_note, user_input, selection
         )
@@ -345,9 +349,12 @@ class AssistantController(QObject):
             f"[AssistantController] runCustomAction: action_id={action_id}, "
             f"prompt_doc_id={prompt_doc.get('prompt_doc_id')}, "
             f"input_mode={inferred_input_mode}, "
+            f"use_rag={use_rag}, "
             f"variables={validation.get('variables', [])}, "
             f"content_len={len(context.get('CONTENT', ''))}, "
             f"user_input_len={len(context.get('USER_INPUT', ''))}, "
+            f"question_len={len(context.get('QUESTION', ''))}, "
+            f"context_len={len(context.get('CONTEXT', ''))}, "
             f"selection_len={len(context.get('SELECTION', ''))}, "
             f"prompt_len={len(rendered_prompt)}"
         )

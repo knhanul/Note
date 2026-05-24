@@ -5,6 +5,7 @@ from packages.import_export.current_note_exporter import CurrentNoteExporter, Cu
 from packages.import_export.folder_exporter import FolderExporter, FolderExportService
 from packages.import_export.folder_importer import FolderImporter, FolderImportService
 from packages.import_export.hwp_converter import convert_hwp_to_hwpx_via_com
+from packages.import_export.hwpx_import_service import convert_hwpx_to_markdown_text
 from packages.import_export.hwpx_importer import HWPXDocument, hwpx_to_markdown
 from services.current_note_export_service import CurrentNoteExportService as ServiceCurrentNoteExportService
 from services.folder_export_service import FolderExportService as ServiceFolderExportService
@@ -19,6 +20,7 @@ class ImportExportWrappersTest(unittest.TestCase):
             "packages.import_export.folder_importer",
             "packages.import_export.hwp_converter",
             "packages.import_export.hwpx_importer",
+            "packages.import_export.hwpx_import_service",
         ]
 
         for module_name in module_names:
@@ -36,6 +38,7 @@ class ImportExportWrappersTest(unittest.TestCase):
     def test_conversion_symbols_import_without_running_conversion(self):
         self.assertTrue(callable(convert_hwp_to_hwpx_via_com))
         self.assertTrue(callable(hwpx_to_markdown))
+        self.assertTrue(callable(convert_hwpx_to_markdown_text))
         self.assertIsNotNone(HWPXDocument)
 
 

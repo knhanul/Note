@@ -46,6 +46,10 @@ Rectangle {
         return getPromptController() !== null
     }
 
+    function canUseAI() {
+        return root.aiConnected && root.aiChatModel !== ""
+    }
+
     function safeGet(prop, defaultVal) {
         var c = getController()
         return c && c[prop] !== undefined ? c[prop] : defaultVal
@@ -194,6 +198,33 @@ Rectangle {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 onClicked: root.settingsMenuIndex = 1
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 40
+                            radius: Metrics.radiusMd
+                            color: root.settingsMenuIndex === 2 ? Colors.primary50 : (refDocsMenuMA.containsMouse ? Colors.bgPrimary : "transparent")
+                            border.width: 1
+                            border.color: root.settingsMenuIndex === 2 ? Colors.primary200 : Colors.borderLight
+
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.left: parent.left
+                                anchors.leftMargin: Metrics.md
+                                text: "참고문서 관리"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodySmall
+                                font.weight: root.settingsMenuIndex === 2 ? Typography.weightSemibold : Typography.weightRegular
+                                color: root.settingsMenuIndex === 2 ? Colors.primary700 : Colors.textSecondary
+                            }
+
+                            MouseArea {
+                                id: refDocsMenuMA
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: root.settingsMenuIndex = 2
                             }
                         }
 
@@ -568,6 +599,257 @@ Rectangle {
                             font.pixelSize: Typography.caption
                             color: Colors.textTertiary
                             horizontalAlignment: Text.AlignHCenter
+                        }
+                    }
+
+                    // 참고문서 관리 tab
+                    ScrollView {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        ScrollBar.vertical.policy: ScrollBar.AsNeeded
+
+                        ColumnLayout {
+                            width: parent.width
+                            spacing: Metrics.md
+                            anchors.margins: Metrics.sm
+
+                            Text {
+                                text: "참고문서 관리"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.h5
+                                font.weight: Typography.weightSemibold
+                                color: Colors.textPrimary
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: "AI가 여러 문서를 찾아보고 답변하려면 참고문서를 등록해야 합니다.\n등록된 문서는 \"등록된 문서 질문\" 기능에서 활용됩니다.\n※ 등록은 문서를 AI 검색용으로 준비하는 과정입니다."
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodySmall
+                                color: Colors.textSecondary
+                                wrapMode: Text.Wrap
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                height: 1
+                                color: Colors.borderLight
+                            }
+
+                            // 참고문서 등록 section
+                            Text {
+                                text: "참고문서 등록"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodyRegular
+                                font.weight: Typography.weightSemibold
+                                color: Colors.textPrimary
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: Metrics.sm
+
+                                Button {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 36
+                                    text: "현재 문서 등록"
+                                    enabled: canUseAI
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.bodySmall
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                        color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
+                                    }
+                                    background: Rectangle {
+                                        color: parent.enabled ? Colors.surface : Colors.bgTertiary
+                                        border.color: Colors.borderLight
+                                        radius: Metrics.radiusSm
+                                    }
+                                    onClicked: {
+                                        var ragCtrl = typeof aiRagController !== "undefined" ? aiRagController : null
+                                        if (!ragCtrl) return
+                                        var note = window.currentNote
+                                        if (!note || !note.id) return
+                                        var tagsJson = note.tags && Array.isArray(note.tags) ? JSON.stringify(note.tags) : "[]"
+                                        ragCtrl.indexCurrentNote(note.id, note.title || "", note.content || "", tagsJson)
+                                    }
+                                }
+
+                                Button {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 36
+                                    text: "현재 폴더 등록"
+                                    enabled: canUseAI
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.bodySmall
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                        color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
+                                    }
+                                    background: Rectangle {
+                                        color: parent.enabled ? Colors.surface : Colors.bgTertiary
+                                        border.color: Colors.borderLight
+                                        radius: Metrics.radiusSm
+                                    }
+                                    onClicked: {
+                                        var ragCtrl = typeof aiRagController !== "undefined" ? aiRagController : null
+                                        var folderCtrl = typeof folderController !== "undefined" ? folderController : null
+                                        if (!ragCtrl || !folderCtrl) return
+                                        var currentFolderId = folderCtrl.currentFolderId
+                                        if (!currentFolderId) return
+                                        try {
+                                            var descendantIds = folderCtrl.getDescendantIds(currentFolderId)
+                                            var folderIds = [currentFolderId].concat(descendantIds || [])
+                                            var notesJson = noteController.getNotesForRagByFolderIdsJson(JSON.stringify(folderIds))
+                                            ragCtrl.indexCurrentFolderNotes(notesJson, currentFolderId)
+                                        } catch (e) {
+                                            console.log("[AISettingsDialog] 폴더 등록 실패: " + e)
+                                        }
+                                    }
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: Metrics.sm
+
+                                Button {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 36
+                                    text: "전체 노트 등록"
+                                    enabled: canUseAI
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.bodySmall
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                        color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
+                                    }
+                                    background: Rectangle {
+                                        color: parent.enabled ? Colors.surface : Colors.bgTertiary
+                                        border.color: Colors.borderLight
+                                        radius: Metrics.radiusSm
+                                    }
+                                    onClicked: {
+                                        var ragCtrl = typeof aiRagController !== "undefined" ? aiRagController : null
+                                        if (!ragCtrl) return
+                                        try {
+                                            var notesJson = noteController.getAllNotesForRagJson()
+                                            ragCtrl.indexAllNotesJson(notesJson)
+                                        } catch (e) {
+                                            console.log("[AISettingsDialog] 전체 노트 등록 실패: " + e)
+                                        }
+                                    }
+                                }
+
+                                Button {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 36
+                                    text: "외부 파일 등록"
+                                    enabled: canUseAI
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.bodySmall
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                        color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
+                                    }
+                                    background: Rectangle {
+                                        color: parent.enabled ? Colors.surface : Colors.bgTertiary
+                                        border.color: Colors.borderLight
+                                        radius: Metrics.radiusSm
+                                    }
+                                    onClicked: {
+                                        // Trigger external file dialog via main window
+                                        if (typeof window !== "undefined" && window.openExternalFileDialogForRag) {
+                                            window.openExternalFileDialogForRag()
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                height: 1
+                                color: Colors.borderLight
+                            }
+
+                            // 등록 상태 section
+                            Text {
+                                text: "등록 상태"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodyRegular
+                                font.weight: Typography.weightSemibold
+                                color: Colors.textPrimary
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: "등록 상태 상세 정보는 다음 단계에서 표시됩니다."
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodySmall
+                                color: Colors.textTertiary
+                                wrapMode: Text.Wrap
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                height: 1
+                                color: Colors.borderLight
+                            }
+
+                            // 관리 section
+                            Text {
+                                text: "관리"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodyRegular
+                                font.weight: Typography.weightSemibold
+                                color: Colors.textPrimary
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: Metrics.sm
+
+                                Button {
+                                    Layout.preferredWidth: 120
+                                    Layout.preferredHeight: 36
+                                    text: "새로고침"
+                                    enabled: canUseAI
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.bodySmall
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                        color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
+                                    }
+                                    background: Rectangle {
+                                        color: parent.enabled ? Colors.surface : Colors.bgTertiary
+                                        border.color: Colors.borderLight
+                                        radius: Metrics.radiusSm
+                                    }
+                                    onClicked: {
+                                        // Refresh status - trigger a status check
+                                        var ragCtrl = typeof aiRagController !== "undefined" ? aiRagController : null
+                                        if (ragCtrl && ragCtrl.indexStatusChanged) {
+                                            ragCtrl.indexStatusChanged.emit("ready")
+                                        }
+                                    }
+                                }
+                            }
+
+                            Item {
+                                Layout.fillHeight: true
+                                Layout.minimumHeight: Metrics.md
+                            }
                         }
                     }
                 }

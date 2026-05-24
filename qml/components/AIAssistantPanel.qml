@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Dialogs
 import theme
 
 Rectangle {
@@ -15,6 +16,7 @@ Rectangle {
     clip: true
 
     signal openSettingsDialog()
+    signal openReferenceDocsSettings()
     property string responseText: ""
     property bool aiConnected: typeof aiAssistantController !== "undefined" && aiAssistantController !== null ? aiAssistantController.isConnected : false
     property string aiChatModel: typeof aiAssistantController !== "undefined" && aiAssistantController !== null ? aiAssistantController.chatModel : ""
@@ -31,8 +33,17 @@ Rectangle {
     property var actionOrderMap: ({})
     property var favoriteActions: []
     property string favoriteCategoryName: "즐겨찾기"
+    property int favoriteVersion: 0
     property var categoryList: buildCategoryList()
     property var filteredActionList: orderedActionsByCategory(selectedCategory)
+
+    // RAG citation and warning properties
+    property var ragCitations: []
+    property var ragWarnings: []
+    property bool hasRagCitations: ragCitations && ragCitations.length > 0
+    property bool hasRagWarnings: ragWarnings && ragWarnings.length > 0
+    property bool ragRequestRunning: false
+    property bool ragIndexingRunning: false
 
     function getActionController() {
         return aiActionControllerObj
@@ -212,10 +223,12 @@ Rectangle {
             var data = JSON.parse(raw || "{}")
             root.categoryOrder = data.categories || []
             root.actionOrderMap = data.actions || ({})
+            root.favoriteActions = data.favorites || []  // 이 줄 추가
             root.categoryList = root.buildCategoryList()
         } catch (e) {
             root.categoryOrder = []
             root.actionOrderMap = ({})
+            root.favoriteActions = []  // 이 줄 추가
         }
     }
 
@@ -231,26 +244,17 @@ Rectangle {
         ss.set_value("ai_panel_action_selection_order", JSON.stringify(data))
     }
 
-    function loadFavoriteActions() {
-        var ss = root.getSettingsService()
-        if (!ss || !ss.get_value)
-            return
-        var raw = ss.get_value("ai_panel_action_selection_order", "{}")
-        try {
-            var data = JSON.parse(raw || "{}")
-            root.favoriteActions = data.favorites || []
-        } catch (e) {
-            root.favoriteActions = []
-        }
-    }
 
     function toggleFavorite(actionId) {
-        var idx = root.favoriteActions.indexOf(actionId)
+        var arr = root.favoriteActions.slice()
+        var idx = arr.indexOf(actionId)
         if (idx >= 0) {
-            root.favoriteActions.splice(idx, 1)
+            arr.splice(idx, 1)
         } else {
-            root.favoriteActions.push(actionId)
+            arr.push(actionId)
         }
+        root.favoriteActions = arr
+        root.favoriteVersion++
         root.saveActionSelectionOrder()
     }
 
@@ -304,7 +308,7 @@ Rectangle {
 
         if (window.currentNote) {
             currentNoteJson = JSON.stringify({
-                note_id: window.currentNote.note_id || "",
+                note_id: window.currentNote.id || "",
                 title: window.currentNote.title || "",
                 content: window.currentNote.content || "",
                 tags: window.currentNote.tags || ""
@@ -315,14 +319,28 @@ Rectangle {
 
         if (action.action_id === "current_note_qa") {
             if (!window.currentNote || !window.currentNote.content) {
-                console.log("[AIAssistantPanel] current_note_qa requires a note to be open")
+                root.responseText = "현재 노트를 선택한 뒤 실행해주세요."
+                console.log("[AIAssistantPanel] current_note_qa: no note selected")
                 return
             }
             if (!userInput) {
-                console.log("[AIAssistantPanel] current_note_qa requires a question input")
+                root.responseText = "질문 내용을 입력해주세요."
+                console.log("[AIAssistantPanel] current_note_qa: no question input")
                 return
             }
-            ac.askQuestion(window.currentNote.content, userInput)
+
+            console.log(
+                "[AIAssistantPanel] current_note_qa: executing via runCustomAction, " +
+                "userInput_len=" + userInput.length + ", content_len=" + (window.currentNote.content ? window.currentNote.content.length : 0)
+            )
+
+            try {
+                ac.runCustomAction(action.action_id, userInput, currentNoteJson, selection, "[]")
+            } catch (e) {
+                console.log("[AIAssistantPanel] current_note_qa runCustomAction failed: " + e)
+                console.log("[AIAssistantPanel] current_note_qa fallback to askQuestion")
+                ac.askQuestion(window.currentNote.content, userInput)
+            }
         } else if (isDefaultAction(action.action_id)) {
             var content = ""
             if (window.currentNote && window.currentNote.content) {
@@ -356,6 +374,337 @@ Rectangle {
         return safeGet("isConnected", false) && safeGet("chatModel", "") !== ""
     }
 
+    function getAiRagController() {
+        return typeof aiRagController !== "undefined" && aiRagController !== null ? aiRagController : null
+    }
+
+    function parseJsonArraySafe(jsonText, fallback) {
+        if (!jsonText || jsonText === "") return fallback
+        try {
+            var parsed = JSON.parse(jsonText)
+            if (Array.isArray(parsed)) return parsed
+            return fallback
+        } catch (e) {
+            console.warn("[AIAssistantPanel] JSON parse failed: " + e)
+            return fallback
+        }
+    }
+
+    function updateRagCitationsFromController() {
+        var ragCtrl = getAiRagController()
+        if (!ragCtrl) return
+        var json = ragCtrl.getLastCitationsJson()
+        root.ragCitations = parseJsonArraySafe(json, [])
+    }
+
+    function updateRagWarningsFromController() {
+        var ragCtrl = getAiRagController()
+        if (!ragCtrl) return
+        var json = ragCtrl.getLastWarningsJson()
+        var warnings = parseJsonArraySafe(json, [])
+
+        var indexResultJson = ragCtrl.getLastIndexResultJson()
+        try {
+            var indexResult = JSON.parse(indexResultJson)
+            if (indexResult && indexResult.warnings && indexResult.warnings.length > 0) {
+                for (var i = 0; i < indexResult.warnings.length; i++) {
+                    var w = indexResult.warnings[i]
+                    if (!w.startsWith("[등록]")) {
+                        warnings.push("[등록] " + w)
+                    } else {
+                        warnings.push(w)
+                    }
+                }
+            }
+        } catch (e) {
+        }
+
+        root.ragWarnings = warnings
+    }
+
+    function clearRagState() {
+        root.ragCitations = []
+        root.ragWarnings = []
+    }
+
+    function formatHeadingPath(headingPath) {
+        if (!headingPath || !Array.isArray(headingPath) || headingPath.length === 0) return ""
+        return headingPath.join(" > ")
+    }
+
+    function indexCurrentNoteForRag() {
+        var ragCtrl = getAiRagController()
+        if (!ragCtrl) {
+            root.responseText = "[오류] RAG 컨트롤러를 사용할 수 없습니다"
+            return
+        }
+
+        if (!window.currentNote || !window.currentNote.id) {
+            root.responseText = "현재 노트가 없습니다"
+            return
+        }
+
+        var note = window.currentNote
+        var tagsJson = "[]"
+        if (note.tags && Array.isArray(note.tags)) {
+            tagsJson = JSON.stringify(note.tags)
+        }
+
+        clearRagState()
+        root.ragIndexingRunning = true
+        root.responseText = "참고문서를 등록하는 중..."
+
+        console.log("[AIAssistantPanel] Indexing current note: id=" + note.id)
+        ragCtrl.indexCurrentNote(note.id, note.title || "", note.content || "", tagsJson)
+    }
+
+    function askIndexedDocuments() {
+        var ragCtrl = getAiRagController()
+        if (!ragCtrl) {
+            root.responseText = "[오류] RAG 컨트롤러를 사용할 수 없습니다"
+            return
+        }
+
+        var question = actionInput.text || ""
+        if (!question) {
+            root.responseText = "질문 내용을 입력해주세요."
+            return
+        }
+
+        clearRagState()
+        root.ragRequestRunning = true
+        root.responseText = "답변 생성 중..."
+
+        console.log("[AIAssistantPanel] Asking indexed documents: question=" + question)
+        ragCtrl.askIndexedDocuments(question)
+    }
+
+    function getNoteController() {
+        return typeof noteController !== "undefined" && noteController !== null ? noteController : null
+    }
+
+    function getFolderController() {
+        return typeof folderController !== "undefined" && folderController !== null ? folderController : null
+    }
+
+    function indexCurrentFolderForRag() {
+        var ragCtrl = getAiRagController()
+        if (!ragCtrl) {
+            root.responseText = "[오류] RAG 컨트롤러를 사용할 수 없습니다"
+            return
+        }
+
+        var folderCtrl = getFolderController()
+        if (!folderCtrl) {
+            root.responseText = "[오류] 폴더 컨트롤러를 사용할 수 없습니다"
+            return
+        }
+
+        var currentFolderId = folderCtrl.currentFolderId
+        if (!currentFolderId) {
+            root.responseText = "현재 폴더가 선택되지 않았습니다"
+            return
+        }
+
+        clearRagState()
+        root.ragIndexingRunning = true
+        root.responseText = "참고문서를 등록하는 중..."
+
+        try {
+            var descendantIds = folderCtrl.getDescendantIds(currentFolderId)
+            var folderIds = [currentFolderId].concat(descendantIds || [])
+            var notesJson = noteController.getNotesForRagByFolderIdsJson(JSON.stringify(folderIds))
+
+            console.log("[AIAssistantPanel] Indexing folder: " + currentFolderId + ", notes count: " + (JSON.parse(notesJson).length || 0))
+            ragCtrl.indexCurrentFolderNotes(notesJson, currentFolderId)
+        } catch (e) {
+            root.ragIndexingRunning = false
+            root.responseText = "[오류] 참고문서 등록 실패: " + e
+        }
+    }
+
+    function indexAllNotesForRag() {
+        var ragCtrl = getAiRagController()
+        if (!ragCtrl) {
+            root.responseText = "[오류] RAG 컨트롤러를 사용할 수 없습니다"
+            return
+        }
+
+        var noteCtrl = getNoteController()
+        if (!noteCtrl) {
+            root.responseText = "[오류] 노트 컨트롤러를 사용할 수 없습니다"
+            return
+        }
+
+        clearRagState()
+        root.ragIndexingRunning = true
+        root.responseText = "참고문서를 등록하는 중..."
+
+        try {
+            var notesJson = noteCtrl.getAllNotesForRagJson()
+            console.log("[AIAssistantPanel] Indexing all notes, count: " + (JSON.parse(notesJson).length || 0))
+            ragCtrl.indexAllNotesJson(notesJson)
+        } catch (e) {
+            root.ragIndexingRunning = false
+            root.responseText = "[오류] 참고문서 등록 실패: " + e
+        }
+    }
+
+    function updateLastIndexResultFromController() {
+        var ragCtrl = getAiRagController()
+        if (!ragCtrl) return null
+        try {
+            return JSON.parse(ragCtrl.getLastIndexResultJson())
+        } catch (e) {
+            return null
+        }
+    }
+
+    function formatIndexResultMessage(result, label) {
+        if (!result) return label + " 등록 결과"
+        var msg = label + " 등록 완료: " + result.indexed_count + "개 성공"
+        if (result.failed_count > 0) {
+            msg += ", " + result.failed_count + "개 실패"
+        }
+        return msg
+    }
+
+    function openCitation(citation) {
+        var noteCtrl = getNoteController()
+        if (!noteCtrl) {
+            root.responseText += "\n[RAG 오류] 노트 컨트롤러를 사용할 수 없습니다"
+            return
+        }
+
+        if (citation.note_id) {
+            console.log("[AIAssistantPanel] Opening citation note: " + citation.note_id)
+            var success = noteCtrl.selectNote(citation.note_id)
+            if (success) {
+                root.responseText += "\n[안내] 근거 노트를 열었습니다"
+            } else {
+                root.responseText += "\n[RAG 오류] 근거 노트를 찾을 수 없습니다"
+            }
+        } else if (citation.source_path) {
+            var copied = copyCitationPath(citation)
+            if (copied) {
+                root.responseText += "\n[안내] 파일 경로를 복사했습니다"
+            } else {
+                root.responseText += "\n[안내] 파일 경로: " + citation.source_path
+            }
+        } else {
+            root.responseText += "\n[안내] 열 수 있는 원문 정보가 없습니다"
+        }
+    }
+
+    function formatCitationActionLabel(citation) {
+        if (citation.note_id) return "노트 열기"
+        if (citation.source_path) return "경로 복사"
+        return ""
+    }
+
+    function copyTextToClipboard(text) {
+        if (!text) return false
+        try {
+            if (typeof Qt !== "undefined" && Qt.application && Qt.application.clipboard) {
+                Qt.application.clipboard.setText(text)
+                return true
+            }
+        } catch (e) {
+            console.warn("[AIAssistantPanel] Clipboard copy failed: " + e)
+        }
+        return false
+    }
+
+    function copyCitationPath(citation) {
+        if (!citation || !citation.source_path) return false
+        return copyTextToClipboard(citation.source_path)
+    }
+
+    function formatSourcePath(path) {
+        if (!path) return ""
+        if (path.length <= 50) return path
+        var parts = path.split(/[/\\]/)
+        if (parts.length <= 3) return path
+        return parts[0] + "/.../" + parts.slice(-2).join("/")
+    }
+
+    function formatRagWarningMessage(warningText) {
+        if (!warningText) return ""
+        if (warningText.startsWith("[등록]")) return warningText
+
+        if (warningText.startsWith("[OLLAMA_CONNECTION_FAILED]")) {
+            return "Ollama 연결 실패: Ollama 실행 상태와 모델 설치 여부를 확인해 주세요. (" + warningText + ")"
+        }
+        if (warningText.startsWith("[OLLAMA_TIMEOUT]")) {
+            return "Ollama 응답 시간 초과: 더 작은 모델을 사용하거나 다시 시도해 주세요. (" + warningText + ")"
+        }
+        if (warningText.startsWith("[OLLAMA_EMPTY_RESPONSE]")) {
+            return "Ollama가 빈 응답을 반환했습니다. 모델 상태를 확인해 주세요. (" + warningText + ")"
+        }
+        if (warningText.startsWith("[OLLAMA_INVALID_JSON]")) {
+            return "Ollama 응답을 해석하지 못했습니다. (" + warningText + ")"
+        }
+        if (warningText.startsWith("[OLLAMA_GENERATE_FAILED]")) {
+            return "Ollama 답변 생성 중 오류가 발생했습니다. (" + warningText + ")"
+        }
+        if (warningText.startsWith("[OLLAMA_HTTP_ERROR]")) {
+            return "Ollama HTTP 오류가 발생했습니다. (" + warningText + ")"
+        }
+        if (warningText.startsWith("[HWPX_FILE_NOT_FOUND]")) {
+            return "HWPX 파일을 찾을 수 없습니다. (" + warningText + ")"
+        }
+        if (warningText.startsWith("[HWPX_BROKEN_ZIP]")) {
+            return "HWPX 파일이 손상되었습니다. (" + warningText + ")"
+        }
+        if (warningText.startsWith("[HWPX_CONVERSION_EMPTY]")) {
+            return "HWPX 변환 결과가 비어 있습니다. (" + warningText + ")"
+        }
+        return warningText
+    }
+
+    function fileUrlToLocalPath(fileUrl) {
+        if (!fileUrl) return ""
+        var path = fileUrl
+        if (path.startsWith("file:///")) {
+            path = path.substring(8)
+        } else if (path.startsWith("file://")) {
+            path = path.substring(7)
+        } else if (path.startsWith("file:/")) {
+            path = path.substring(5)
+        }
+        try {
+            path = decodeURIComponent(path)
+        } catch (e) {
+        }
+        return path
+    }
+
+    function indexExternalFilesForRag(paths) {
+        var ragCtrl = getAiRagController()
+        if (!ragCtrl) {
+            root.responseText = "[오류] RAG 컨트롤러를 사용할 수 없습니다"
+            return
+        }
+
+        if (!paths || paths.length === 0) {
+            root.responseText = "선택된 파일이 없습니다"
+            return
+        }
+
+        clearRagState()
+        root.ragIndexingRunning = true
+        root.responseText = "참고문서를 등록하는 중..."
+
+        try {
+            var pathsJson = JSON.stringify(paths)
+            console.log("[AIAssistantPanel] Indexing external files: " + paths.length + " files")
+            ragCtrl.indexExternalFilesJson(pathsJson)
+        } catch (e) {
+            root.ragIndexingRunning = false
+            root.responseText = "[오류] 참고문서 등록 실패: " + e
+        }
+    }
+
     Component.onCompleted: {
         var ac = getAssistantController()
         if (!ac)
@@ -387,9 +736,69 @@ Rectangle {
         })
 
         root.loadActionSelectionOrder()
-        root.loadFavoriteActions()
         root.refreshActionList()
         root.ensureActionSelection()
+
+        // Connect aiRagController signals
+        var ragCtrl = getAiRagController()
+        if (ragCtrl) {
+            ragCtrl.ragAnswerReady.connect(function(answerText) {
+                console.log("[AIAssistantPanel] RAG answer received: len=" + answerText.length)
+                root.ragRequestRunning = false
+                root.responseText = "[등록된 문서 답변]\n" + answerText
+                updateRagCitationsFromController()
+                updateRagWarningsFromController()
+            })
+
+            ragCtrl.ragCitationsChanged.connect(function() {
+                updateRagCitationsFromController()
+                var ragCtrl2 = getAiRagController()
+                if (ragCtrl2) {
+                    var citationsJson = ragCtrl2.getLastCitationsJson()
+                    console.log("[AIAssistantPanel] RAG citations: " + citationsJson)
+                }
+            })
+
+            ragCtrl.ragWarningsChanged.connect(function() {
+                updateRagWarningsFromController()
+                var ragCtrl2 = getAiRagController()
+                if (ragCtrl2) {
+                    var warningsJson = ragCtrl2.getLastWarningsJson()
+                    console.log("[AIAssistantPanel] RAG warnings: " + warningsJson)
+                }
+            })
+
+            ragCtrl.indexStatusChanged.connect(function(status) {
+                console.log("[AIAssistantPanel] RAG index status: " + status)
+                root.ragIndexingRunning = false
+                if (status === "indexed_current_note") {
+                    root.responseText = "현재 문서가 등록되었습니다. '등록된 문서 질문' 버튼을 눌러 질문하세요."
+                } else if (status === "indexed_folder") {
+                    var result = updateLastIndexResultFromController()
+                    root.responseText = formatIndexResultMessage(result, "현재 폴더")
+                } else if (status === "indexed_all_notes") {
+                    var result = updateLastIndexResultFromController()
+                    root.responseText = formatIndexResultMessage(result, "전체 노트")
+                } else if (status === "indexed_notes") {
+                    var result = updateLastIndexResultFromController()
+                    root.responseText = formatIndexResultMessage(result, "노트")
+                } else if (status === "indexed_external_files") {
+                    var result = updateLastIndexResultFromController()
+                    root.responseText = formatIndexResultMessage(result, "외부 문서")
+                } else if (status === "indexed_empty") {
+                    root.responseText = "등록할 노트가 없습니다."
+                } else if (status === "cleared") {
+                    root.responseText = "참고문서 등록이 초기화되었습니다."
+                    clearRagState()
+                }
+            })
+
+            ragCtrl.errorOccurred.connect(function(error) {
+                root.ragRequestRunning = false
+                root.ragIndexingRunning = false
+                root.responseText += "\n[RAG 오류] " + error
+            })
+        }
     }
 
     Connections {
@@ -619,10 +1028,11 @@ Rectangle {
                                                 verticalAlignment: Text.AlignVCenter
                                             }
 
-                                            Text {
-                                                text: root.selectedCategory === categoryDelegate.categoryName ? "📂" : "📁"
-                                                font.pixelSize: 14
-                                                verticalAlignment: Text.AlignVCenter
+                                            Image {
+                                                source: "../assets/icons/AIfolder.png"
+                                                Layout.preferredWidth: 16
+                                                Layout.preferredHeight: 16
+                                                fillMode: Image.PreserveAspectFit
                                             }
 
                                             Text {
@@ -636,7 +1046,10 @@ Rectangle {
                                             }
 
                                             Text {
-                                                text: root.filterActionsByCategory(categoryDelegate.categoryName).length
+                                                text: {
+                                                    root.favoriteVersion
+                                                    return root.filterActionsByCategory(categoryDelegate.categoryName).length
+                                                }
                                                 font.family: Typography.fontPrimary
                                                 font.pixelSize: Typography.caption
                                                 color: root.selectedCategory === categoryDelegate.categoryName ? Colors.primary500 : Colors.textTertiary
@@ -686,7 +1099,10 @@ Rectangle {
                                         spacing: 0
 
                                         Repeater {
-                                            model: root.orderedActionsByCategory(categoryDelegate.categoryName)
+                                            model: {
+                                                root.favoriteVersion
+                                                return root.orderedActionsByCategory(categoryDelegate.categoryName)
+                                            }
 
                                             Rectangle {
                                                 width: parent.width
@@ -700,10 +1116,11 @@ Rectangle {
                                                     anchors.rightMargin: Metrics.sm
                                                     spacing: Metrics.xs
 
-                                                    Text {
-                                                        text: "⚡"
-                                                        font.pixelSize: 11
-                                                        verticalAlignment: Text.AlignVCenter
+                                                    Image {
+                                                        source: "../assets/icons/AIfeatures.png"
+                                                        Layout.preferredWidth: 14
+                                                        Layout.preferredHeight: 14
+                                                        fillMode: Image.PreserveAspectFit
                                                     }
 
                                                     Text {
@@ -717,9 +1134,9 @@ Rectangle {
                                                     }
 
                                                     Text {
-                                                        text: root.isFavorite(modelData.action_id) ? "★" : "☆"
+                                                        text: (root.favoriteActions.indexOf(modelData.action_id) >= 0) ? "★" : "☆"
                                                         font.pixelSize: 14
-                                                        color: root.isFavorite(modelData.action_id) ? Colors.warning : Colors.textTertiary
+                                                        color: (root.favoriteActions.indexOf(modelData.action_id) >= 0) ? Colors.warning : Colors.textTertiary
                                                         verticalAlignment: Text.AlignVCenter
                                                         MouseArea {
                                                             width: 24
@@ -777,7 +1194,7 @@ Rectangle {
                                     width: parent.width
                                     text: root.selectedAction ? (root.selectedAction.name || root.selectedAction.action_id) : ""
                                     font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.bodyMedium
+                                    font.pixelSize: Typography.bodyRegular
                                     font.weight: Font.Bold
                                     color: Colors.textPrimary
                                 }
@@ -840,6 +1257,143 @@ Rectangle {
                             }
                         }
 
+                        // AI 참고문서 card - consolidated RAG UI
+                        Rectangle {
+                            width: parent.width
+                            radius: Metrics.radiusLg
+                            color: Colors.surface
+                            border.color: Colors.borderLight
+                            implicitHeight: referenceDocsCardColumn.implicitHeight + (Metrics.md * 2)
+
+                            Column {
+                                id: referenceDocsCardColumn
+                                width: parent.width - (Metrics.md * 2)
+                                spacing: Metrics.sm
+                                anchors.centerIn: parent
+
+                                Text {
+                                    text: "AI 참고문서"
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: Typography.bodyRegular
+                                    font.weight: Typography.weightSemibold
+                                    color: Colors.textPrimary
+                                }
+
+                                Text {
+                                    width: parent.width
+                                    text: "등록한 문서는 AI가 여러 문서에서 찾아 답변할 때 참고합니다."
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: Typography.caption
+                                    color: Colors.textSecondary
+                                    wrapMode: Text.WordWrap
+                                }
+
+                                Rectangle {
+                                    width: parent.width
+                                    height: 1
+                                    color: Colors.borderLight
+                                }
+
+                                Column {
+                                    width: parent.width
+                                    spacing: Metrics.xs
+
+                                    Text {
+                                        text: "현재 문서 질문: 지금 열려 있는 문서 하나만 참고합니다."
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
+                                        color: Colors.textTertiary
+                                    }
+
+                                    Text {
+                                        text: "등록된 문서 질문: 등록된 여러 문서에서 관련 내용을 찾아 답변합니다."
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
+                                        color: Colors.textTertiary
+                                    }
+                                }
+
+                                Rectangle {
+                                    width: parent.width
+                                    height: 1
+                                    color: Colors.borderLight
+                                }
+
+                                RowLayout {
+                                    width: parent.width
+                                    spacing: Metrics.sm
+
+                                    Button {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 32
+                                        text: "현재 문서 등록"
+                                        enabled: canUseAI() && !root.ragIndexingRunning && !root.ragRequestRunning
+                                        contentItem: Text {
+                                            text: parent.text
+                                            font.family: Typography.fontPrimary
+                                            font.pixelSize: Typography.caption
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
+                                        }
+                                        background: Rectangle {
+                                            color: parent.enabled ? Colors.surface : Colors.bgTertiary
+                                            border.color: Colors.borderLight
+                                            radius: Metrics.radiusSm
+                                        }
+                                        onClicked: {
+                                            indexCurrentNoteForRag()
+                                        }
+                                    }
+
+                                    Button {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 32
+                                        text: "등록된 문서 질문"
+                                        enabled: canUseAI() && !root.ragIndexingRunning && !root.ragRequestRunning
+                                        contentItem: Text {
+                                            text: parent.text
+                                            font.family: Typography.fontPrimary
+                                            font.pixelSize: Typography.caption
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
+                                        }
+                                        background: Rectangle {
+                                            color: parent.enabled ? Colors.surface : Colors.bgTertiary
+                                            border.color: Colors.borderLight
+                                            radius: Metrics.radiusSm
+                                        }
+                                        onClicked: {
+                                            askIndexedDocuments()
+                                        }
+                                    }
+
+                                    Button {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 32
+                                        text: "관리"
+                                        enabled: canUseAI()
+                                        contentItem: Text {
+                                            text: parent.text
+                                            font.family: Typography.fontPrimary
+                                            font.pixelSize: Typography.caption
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
+                                        }
+                                        background: Rectangle {
+                                            color: parent.enabled ? Colors.surface : Colors.bgTertiary
+                                            border.color: Colors.borderLight
+                                            radius: Metrics.radiusSm
+                                        }
+                                        onClicked: {
+                                            root.openReferenceDocsSettings()
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -970,6 +1524,134 @@ Rectangle {
                                     font.pixelSize: Typography.bodySmall
                                     color: Colors.textPrimary
                                     background: null
+                                }
+                            }
+
+                            // RAG citations section
+                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: ragCitationsColumn.implicitHeight + Metrics.sm
+                                color: Colors.surface
+                                border.color: Colors.borderLight
+                                radius: Metrics.radiusSm
+                                visible: root.hasRagCitations
+
+                                Column {
+                                    id: ragCitationsColumn
+                                    width: parent.width - (Metrics.sm * 2)
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    spacing: Metrics.xs
+
+                                    Text {
+                                        text: "근거 문서 (" + root.ragCitations.length + ")"
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
+                                        font.weight: Typography.weightMedium
+                                        color: Colors.textSecondary
+                                    }
+
+                                    Repeater {
+                                        model: root.ragCitations
+                                        delegate: Column {
+                                            width: parent.width
+                                            spacing: 2
+
+                                            Row {
+                                                spacing: Metrics.xs
+                                                Text {
+                                                    text: modelData.source_id + " · " + (modelData.title || "제목 없음")
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.caption
+                                                    color: Colors.textPrimary
+                                                    elide: Text.ElideRight
+                                                    Layout.maximumWidth: root.width - 100
+                                                }
+                                                Text {
+                                                    text: "답변에 인용됨"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: 10
+                                                    color: Colors.primary500
+                                                    visible: modelData.cited_in_answer
+                                                }
+                                            }
+
+                                            Text {
+                                                text: formatHeadingPath(modelData.heading_path)
+                                                font.family: Typography.fontPrimary
+                                                font.pixelSize: 10
+                                                color: Colors.textTertiary
+                                                visible: modelData.heading_path && modelData.heading_path.length > 0
+                                            }
+
+                                            Text {
+                                                text: modelData.source_type + (modelData.note_id ? " · note_id: " + modelData.note_id : (modelData.source_path ? " · " + formatSourcePath(modelData.source_path) : ""))
+                                                font.family: Typography.fontPrimary
+                                                font.pixelSize: 10
+                                                color: Colors.textTertiary
+                                                elide: Text.ElideRight
+                                                Layout.maximumWidth: root.width - 60
+                                            }
+
+                                            Row {
+                                                spacing: Metrics.xs
+                                                visible: modelData.note_id || modelData.source_path
+
+                                                Button {
+                                                    implicitWidth: 60
+                                                    implicitHeight: 20
+                                                    padding: 0
+                                                    text: formatCitationActionLabel(modelData)
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: 9
+                                                    onClicked: {
+                                                        openCitation(modelData)
+                                                    }
+                                                    background: Rectangle {
+                                                        color: Colors.bgSecondary
+                                                        border.color: Colors.borderLight
+                                                        radius: 3
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // RAG warnings section
+                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: ragWarningsColumn.implicitHeight + Metrics.sm
+                                color: Colors.surface
+                                border.color: Colors.warning
+                                radius: Metrics.radiusSm
+                                visible: root.hasRagWarnings
+
+                                Column {
+                                    id: ragWarningsColumn
+                                    width: parent.width - (Metrics.sm * 2)
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    spacing: Metrics.xs
+
+                                    Text {
+                                        text: "알림"
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
+                                        font.weight: Typography.weightMedium
+                                        color: Colors.warning
+                                    }
+
+                                    Repeater {
+                                        model: root.ragWarnings
+                                        delegate: Text {
+                                            text: "- " + formatRagWarningMessage(modelData)
+                                            font.family: Typography.fontPrimary
+                                            font.pixelSize: 10
+                                            color: Colors.textSecondary
+                                            wrapMode: Text.Wrap
+                                            width: parent.width
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1132,6 +1814,20 @@ Rectangle {
                     if (ac) ac.cancel()
                 }
             }
+        }
+    }
+
+    FileDialog {
+        id: externalFileDialog
+        title: "외부 문서 선택"
+        nameFilters: ["Markdown (*.md *.markdown)", "HWPX (*.hwpx)", "HWP (*.hwp)", "All files (*)"]
+        fileMode: FileDialog.OpenFiles
+        onAccepted: {
+            var paths = []
+            for (var i = 0; i < selectedFiles.length; i++) {
+                paths.push(fileUrlToLocalPath(selectedFiles[i]))
+            }
+            indexExternalFilesForRag(paths)
         }
     }
 }

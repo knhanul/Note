@@ -564,6 +564,7 @@ class FolderController(QObject):
         """Get database instance (for NoteController)."""
         return self._db
 
+    @pyqtSlot(str, result=QVariant)
     def getDescendantIds(self, folder_id: str) -> list:
         """Get all descendant folder IDs for a given folder."""
         if not folder_id or self._is_smart_folder_id(folder_id):
