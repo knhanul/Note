@@ -26,9 +26,20 @@ Rectangle {
     property var aiActionControllerObj: typeof aiActionController !== "undefined" && aiActionController !== null ? aiActionController : null
     property var enabledActionList: aiActionControllerObj ? aiActionControllerObj.enabledActionList : []
     property var selectedAction: ({})
+    property string selectedCategory: ""
+    property var categoryOrder: []
+    property var actionOrderMap: ({})
+    property var favoriteActions: []
+    property string favoriteCategoryName: "즐겨찾기"
+    property var categoryList: buildCategoryList()
+    property var filteredActionList: orderedActionsByCategory(selectedCategory)
 
     function getActionController() {
         return aiActionControllerObj
+    }
+
+    function getSettingsService() {
+        return typeof settingsService !== "undefined" && settingsService !== null ? settingsService : null
     }
 
     function refreshActionList() {
@@ -36,6 +47,215 @@ Rectangle {
         if (aac && aac.refresh) {
             aac.refresh()
         }
+    }
+
+    function normalizeCategory(category) {
+        return category && category !== "" ? category : "기타"
+    }
+
+    function buildCategoryList() {
+        var categories = []
+        for (var i = 0; i < root.enabledActionList.length; i++) {
+            var category = normalizeCategory(root.enabledActionList[i].category)
+            if (categories.indexOf(category) < 0) {
+                categories.push(category)
+            }
+        }
+
+        var ordered = []
+        // Add favorite category first if there are favorites
+        if (root.favoriteActions && root.favoriteActions.length > 0) {
+            ordered.push(root.favoriteCategoryName)
+        }
+        // Add ordered categories from saved order
+        for (var j = 0; j < root.categoryOrder.length; j++) {
+            if (categories.indexOf(root.categoryOrder[j]) >= 0) {
+                ordered.push(root.categoryOrder[j])
+            }
+        }
+        // Add remaining categories
+        for (var k = 0; k < categories.length; k++) {
+            if (ordered.indexOf(categories[k]) < 0) {
+                ordered.push(categories[k])
+            }
+        }
+        return ordered
+    }
+
+    function filterActionsByCategory(category) {
+        // Handle favorite category
+        if (category === root.favoriteCategoryName) {
+            var favorites = []
+            for (var f = 0; f < root.favoriteActions.length; f++) {
+                var favId = root.favoriteActions[f]
+                for (var a = 0; a < root.enabledActionList.length; a++) {
+                    if (root.enabledActionList[a].action_id === favId) {
+                        favorites.push(root.enabledActionList[a])
+                        break
+                    }
+                }
+            }
+            return favorites
+        }
+        // Handle normal category
+        var filtered = []
+        var selected = normalizeCategory(category)
+        for (var i = 0; i < root.enabledActionList.length; i++) {
+            var action = root.enabledActionList[i]
+            if (normalizeCategory(action.category) === selected) {
+                filtered.push(action)
+            }
+        }
+        return filtered
+    }
+
+    function orderedActionsByCategory(category) {
+        // Handle favorite category
+        if (category === root.favoriteCategoryName) {
+            var favorites = []
+            for (var f = 0; f < root.favoriteActions.length; f++) {
+                var favId = root.favoriteActions[f]
+                for (var a = 0; a < root.enabledActionList.length; a++) {
+                    if (root.enabledActionList[a].action_id === favId) {
+                        favorites.push(root.enabledActionList[a])
+                        break
+                    }
+                }
+            }
+            return favorites
+        }
+        // Handle normal category
+        var actions = filterActionsByCategory(category)
+        var order = root.actionOrderMap[category] || []
+        var ordered = []
+        for (var i = 0; i < order.length; i++) {
+            for (var j = 0; j < actions.length; j++) {
+                if (actions[j].action_id === order[i] && ordered.indexOf(actions[j]) < 0) {
+                    ordered.push(actions[j])
+                    break
+                }
+            }
+        }
+        for (var k = 0; k < actions.length; k++) {
+            if (ordered.indexOf(actions[k]) < 0) {
+                ordered.push(actions[k])
+            }
+        }
+        return ordered
+    }
+
+    function selectFirstActionInCategory() {
+        if (root.filteredActionList.length > 0) {
+            root.selectedAction = root.filteredActionList[0]
+        } else {
+            root.selectedAction = ({})
+        }
+    }
+
+    function ensureActionSelection() {
+        if (root.categoryList.length === 0) {
+            root.selectedCategory = ""
+            root.selectedAction = ({})
+            return
+        }
+
+        if (!root.selectedCategory || root.categoryList.indexOf(root.selectedCategory) < 0) {
+            root.selectedCategory = root.categoryList[0]
+        }
+
+        if (!root.selectedAction || !root.selectedAction.action_id) {
+            root.selectFirstActionInCategory()
+        }
+    }
+
+    function moveCategory(fromIndex, toIndex) {
+        if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex)
+            return
+        var list = root.categoryList.slice()
+        if (fromIndex >= list.length || toIndex >= list.length)
+            return
+        var item = list.splice(fromIndex, 1)[0]
+        list.splice(toIndex, 0, item)
+        root.categoryOrder = list
+        root.categoryList = root.buildCategoryList()
+        root.saveActionSelectionOrder()
+    }
+
+    function moveActionInCategory(category, fromIndex, toIndex) {
+        if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex)
+            return
+        var actions = root.orderedActionsByCategory(category)
+        if (fromIndex >= actions.length || toIndex >= actions.length)
+            return
+        var item = actions.splice(fromIndex, 1)[0]
+        actions.splice(toIndex, 0, item)
+
+        var map = {}
+        for (var key in root.actionOrderMap) {
+            map[key] = root.actionOrderMap[key]
+        }
+        var order = []
+        for (var i = 0; i < actions.length; i++) {
+            order.push(actions[i].action_id)
+        }
+        map[category] = order
+        root.actionOrderMap = map
+        root.saveActionSelectionOrder()
+    }
+
+    function loadActionSelectionOrder() {
+        var ss = root.getSettingsService()
+        if (!ss || !ss.get_value)
+            return
+        var raw = ss.get_value("ai_panel_action_selection_order", "{}")
+        try {
+            var data = JSON.parse(raw || "{}")
+            root.categoryOrder = data.categories || []
+            root.actionOrderMap = data.actions || ({})
+            root.categoryList = root.buildCategoryList()
+        } catch (e) {
+            root.categoryOrder = []
+            root.actionOrderMap = ({})
+        }
+    }
+
+    function saveActionSelectionOrder() {
+        var ss = root.getSettingsService()
+        if (!ss || !ss.set_value)
+            return
+        var data = {
+            categories: root.categoryOrder,
+            actions: root.actionOrderMap,
+            favorites: root.favoriteActions
+        }
+        ss.set_value("ai_panel_action_selection_order", JSON.stringify(data))
+    }
+
+    function loadFavoriteActions() {
+        var ss = root.getSettingsService()
+        if (!ss || !ss.get_value)
+            return
+        var raw = ss.get_value("ai_panel_action_selection_order", "{}")
+        try {
+            var data = JSON.parse(raw || "{}")
+            root.favoriteActions = data.favorites || []
+        } catch (e) {
+            root.favoriteActions = []
+        }
+    }
+
+    function toggleFavorite(actionId) {
+        var idx = root.favoriteActions.indexOf(actionId)
+        if (idx >= 0) {
+            root.favoriteActions.splice(idx, 1)
+        } else {
+            root.favoriteActions.push(actionId)
+        }
+        root.saveActionSelectionOrder()
+    }
+
+    function isFavorite(actionId) {
+        return root.favoriteActions.indexOf(actionId) >= 0
     }
 
     function getInputModeText(mode) {
@@ -58,6 +278,7 @@ Rectangle {
         if (!mode || mode === "auto") return "선택한 AI 기능을 실행할 내용을 입력하세요."
         if (mode === "note_required") return "현재 열려 있는 문서를 기준으로 실행합니다. 필요한 요청이 있으면 입력하세요."
         if (mode === "chat_only") return "AI에게 물어볼 내용을 입력하세요."
+        if (mode === "current_note_qa") return "현재 문서에 대해 질문하세요."
         if (mode === "note_and_chat") return "현재 문서를 참고하고, 추가 질문도 함께 전달합니다."
         if (mode === "selection_required") return "문서에서 문장을 선택한 뒤 실행하세요."
         return "선택한 AI 기능을 실행할 내용을 입력하세요."
@@ -92,7 +313,17 @@ Rectangle {
 
         root.responseText = ""
 
-        if (isDefaultAction(action.action_id)) {
+        if (action.action_id === "current_note_qa") {
+            if (!window.currentNote || !window.currentNote.content) {
+                console.log("[AIAssistantPanel] current_note_qa requires a note to be open")
+                return
+            }
+            if (!userInput) {
+                console.log("[AIAssistantPanel] current_note_qa requires a question input")
+                return
+            }
+            ac.askQuestion(window.currentNote.content, userInput)
+        } else if (isDefaultAction(action.action_id)) {
             var content = ""
             if (window.currentNote && window.currentNote.content) {
                 content = window.currentNote.content
@@ -155,14 +386,17 @@ Rectangle {
             root.responseText += "\n[오류] " + error
         })
 
+        root.loadActionSelectionOrder()
+        root.loadFavoriteActions()
         root.refreshActionList()
+        root.ensureActionSelection()
     }
 
     Connections {
         target: aiActionControllerObj
         function onActionsChanged() {
-            // Avoid recursion by not calling refreshActionList here
-            // The actionList property will auto-update via signals
+            root.categoryList = root.buildCategoryList()
+            root.ensureActionSelection()
         }
     }
 
@@ -342,120 +576,221 @@ Rectangle {
                             color: Colors.textPrimary
                         }
 
-                        ComboBox {
-                            id: actionSelector
+                        ListView {
+                            id: categoryFolderView
                             width: parent.width
-                            height: 36
-                            model: root.enabledActionList.map(function(a) { return a.name || a.action_id })
-                            currentIndex: 0
-                            onCurrentIndexChanged: {
-                                if (currentIndex >= 0 && currentIndex < root.enabledActionList.length) {
-                                    root.selectedAction = root.enabledActionList[currentIndex]
+                            height: 180
+                            clip: true
+                            spacing: Metrics.xs
+                            model: root.categoryList
+                            boundsBehavior: Flickable.StopAtBounds
+
+                            delegate: Item {
+                                id: categoryDelegate
+                                width: categoryFolderView.width
+                                height: dragArea.drag.active ? 36 : categoryContent.implicitHeight
+                                z: dragArea.drag.active ? 10 : 0
+
+                                property string categoryName: modelData
+                                property int visualIndex: index !== undefined ? index : 0
+                                property bool wasDragged: false
+
+                                Column {
+                                    id: categoryContent
+                                    width: parent.width
+                                    spacing: 0
+
+                                    Rectangle {
+                                        width: parent.width
+                                        height: 36
+                                        color: dragArea.drag.active ? Colors.primary50 : "transparent"
+                                        radius: Metrics.radiusSm
+
+                                        RowLayout {
+                                            anchors.fill: parent
+                                            anchors.leftMargin: Metrics.xs
+                                            anchors.rightMargin: Metrics.xs
+                                            spacing: Metrics.xs
+
+                                            Text {
+                                                text: "☰"
+                                                font.pixelSize: 12
+                                                color: Colors.textTertiary
+                                                verticalAlignment: Text.AlignVCenter
+                                            }
+
+                                            Text {
+                                                text: root.selectedCategory === categoryDelegate.categoryName ? "📂" : "📁"
+                                                font.pixelSize: 14
+                                                verticalAlignment: Text.AlignVCenter
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: categoryDelegate.categoryName
+                                                font.family: Typography.fontPrimary
+                                                font.pixelSize: Typography.bodySmall
+                                                font.weight: root.selectedCategory === categoryDelegate.categoryName ? Font.Bold : Font.Normal
+                                                color: root.selectedCategory === categoryDelegate.categoryName ? Colors.primary700 : Colors.textPrimary
+                                                verticalAlignment: Text.AlignVCenter
+                                            }
+
+                                            Text {
+                                                text: root.filterActionsByCategory(categoryDelegate.categoryName).length
+                                                font.family: Typography.fontPrimary
+                                                font.pixelSize: Typography.caption
+                                                color: root.selectedCategory === categoryDelegate.categoryName ? Colors.primary500 : Colors.textTertiary
+                                                verticalAlignment: Text.AlignVCenter
+                                            }
+                                        }
+
+                                        MouseArea {
+                                            id: dragArea
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            drag.target: categoryDelegate
+                                            drag.axis: Drag.YAxis
+                                            drag.threshold: 6
+                                            onPositionChanged: {
+                                                if (drag.active) {
+                                                    categoryDelegate.wasDragged = true
+                                                }
+                                            }
+                                            onClicked: {
+                                                if (categoryDelegate.wasDragged) {
+                                                    categoryDelegate.wasDragged = false
+                                                    return
+                                                }
+                                                if (root.selectedCategory === categoryDelegate.categoryName) {
+                                                    root.selectedCategory = ""
+                                                    root.selectedAction = ({})
+                                                } else {
+                                                    root.selectedCategory = categoryDelegate.categoryName
+                                                    root.selectFirstActionInCategory()
+                                                }
+                                            }
+                                            onReleased: {
+                                                var targetIndex = categoryFolderView.indexAt(categoryDelegate.width / 2, categoryDelegate.y + categoryDelegate.height / 2)
+                                                if (targetIndex < 0)
+                                                    targetIndex = Math.max(0, Math.min(root.categoryList.length - 1, categoryDelegate.visualIndex))
+                                                root.moveCategory(categoryDelegate.visualIndex, targetIndex)
+                                                categoryDelegate.y = 0
+                                                categoryDelegate.wasDragged = false
+                                            }
+                                        }
+                                    }
+
+                                    Column {
+                                        width: parent.width
+                                        visible: root.selectedCategory === categoryDelegate.categoryName && !dragArea.drag.active
+                                        spacing: 0
+
+                                        Repeater {
+                                            model: root.orderedActionsByCategory(categoryDelegate.categoryName)
+
+                                            Rectangle {
+                                                width: parent.width
+                                                height: 34
+                                                color: root.selectedAction && root.selectedAction.action_id === modelData.action_id ? Colors.primary50 : "transparent"
+                                                radius: Metrics.radiusSm
+
+                                                RowLayout {
+                                                    anchors.fill: parent
+                                                    anchors.leftMargin: 24
+                                                    anchors.rightMargin: Metrics.sm
+                                                    spacing: Metrics.xs
+
+                                                    Text {
+                                                        text: "⚡"
+                                                        font.pixelSize: 11
+                                                        verticalAlignment: Text.AlignVCenter
+                                                    }
+
+                                                    Text {
+                                                        Layout.fillWidth: true
+                                                        text: modelData.name || modelData.action_id
+                                                        font.family: Typography.fontPrimary
+                                                        font.pixelSize: Typography.bodySmall
+                                                        color: root.selectedAction && root.selectedAction.action_id === modelData.action_id ? Colors.primary700 : Colors.textSecondary
+                                                        verticalAlignment: Text.AlignVCenter
+                                                        elide: Text.ElideRight
+                                                    }
+
+                                                    Text {
+                                                        text: root.isFavorite(modelData.action_id) ? "★" : "☆"
+                                                        font.pixelSize: 14
+                                                        color: root.isFavorite(modelData.action_id) ? Colors.warning : Colors.textTertiary
+                                                        verticalAlignment: Text.AlignVCenter
+                                                        MouseArea {
+                                                            width: 24
+                                                            height: 24
+                                                            anchors.centerIn: parent
+                                                            onClicked: {
+                                                                root.toggleFavorite(modelData.action_id)
+                                                                root.categoryList = root.buildCategoryList()
+                                                            }
+                                                        }
+                                                    }
+                                                }
+
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    anchors.rightMargin: 24
+                                                    hoverEnabled: true
+                                                    onClicked: root.selectedAction = modelData
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
-                            Component.onCompleted: {
-                                if (root.enabledActionList.length > 0) {
-                                    root.selectedAction = root.enabledActionList[0]
-                                }
+
+                            Text {
+                                visible: root.categoryList.length === 0
+                                width: categoryFolderView.width
+                                text: "사용 가능한 AI 기능이 없습니다."
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.caption
+                                color: Colors.textSecondary
+                                horizontalAlignment: Text.AlignHCenter
                             }
                         }
 
                         Rectangle {
                             width: parent.width
+                            implicitHeight: selectedActionTitle.implicitHeight + (selectedActionDescription.visible ? selectedActionDescription.implicitHeight + Metrics.xs : 0) + Metrics.md * 2
                             radius: Metrics.radiusMd
                             color: Colors.bgSecondary
                             border.color: Colors.borderLight
-                            visible: root.selectedAction && root.selectedAction.action_id
+                            border.width: 1
+                            visible: !!(root.selectedAction && root.selectedAction.action_id)
 
-                            ColumnLayout {
+                            Column {
                                 width: parent.width - (Metrics.md * 2)
                                 anchors.horizontalCenter: parent.horizontalCenter
-                                anchors.margins: Metrics.sm
+                                anchors.topMargin: Metrics.sm
+                                anchors.bottomMargin: Metrics.sm
                                 spacing: Metrics.xs
 
-                                RowLayout {
-                                    Layout.fillWidth: true
-
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: root.selectedAction ? (root.selectedAction.name || "") : ""
-                                        font.family: Typography.fontPrimary
-                                        font.pixelSize: Typography.bodySmall
-                                        font.weight: Typography.weightMedium
-                                        color: Colors.textPrimary
-                                    }
-
-                                    Rectangle {
-                                        height: 20
-                                        radius: Metrics.radiusFull
-                                        color: Colors.primary100
-                                        width: modeBadgeText.implicitWidth + 16
-
-                                        Text {
-                                            id: modeBadgeText
-                                            anchors.centerIn: parent
-                                            text: root.selectedAction ? getInputModeText(root.selectedAction.input_mode) : ""
-                                            font.family: Typography.fontPrimary
-                                            font.pixelSize: 10
-                                            color: Colors.primary700
-                                        }
-                                    }
+                                Text {
+                                    id: selectedActionTitle
+                                    width: parent.width
+                                    text: root.selectedAction ? (root.selectedAction.name || root.selectedAction.action_id) : ""
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: Typography.bodyMedium
+                                    font.weight: Font.Bold
+                                    color: Colors.textPrimary
                                 }
 
                                 Text {
+                                    id: selectedActionDescription
                                     width: parent.width
-                                    text: root.selectedAction ? (root.selectedAction.description || "") : ""
+                                    visible: root.selectedAction && root.selectedAction.description && root.selectedAction.description !== ""
+                                    text: root.selectedAction ? root.selectedAction.description : ""
                                     font.family: Typography.fontPrimary
                                     font.pixelSize: Typography.caption
                                     color: Colors.textSecondary
                                     wrapMode: Text.Wrap
-                                }
-
-                                RowLayout {
-                                    spacing: Metrics.xs
-
-                                    Rectangle {
-                                        height: 20
-                                        radius: Metrics.radiusFull
-                                        color: Colors.bgPrimary
-                                        border.color: Colors.borderLight
-                                        border.width: 1
-                                        width: responseLengthBadge.implicitWidth + 16
-
-                                        Text {
-                                            id: responseLengthBadge
-                                            anchors.centerIn: parent
-                                            text: "응답 " + getResponseLengthText(root.selectedAction ? root.selectedAction.response_length : "medium")
-                                            font.family: Typography.fontPrimary
-                                            font.pixelSize: 10
-                                            color: Colors.textSecondary
-                                        }
-                                    }
-
-                                    Rectangle {
-                                        height: 20
-                                        radius: Metrics.radiusFull
-                                        color: Colors.bgPrimary
-                                        border.color: Colors.borderLight
-                                        border.width: 1
-                                        width: ragBadge.implicitWidth + 16
-
-                                        Text {
-                                            id: ragBadge
-                                            anchors.centerIn: parent
-                                            text: root.selectedAction && root.selectedAction.use_rag ? "문서 검색 사용" : "문서 검색 안 함"
-                                            font.family: Typography.fontPrimary
-                                            font.pixelSize: 10
-                                            color: Colors.textSecondary
-                                        }
-                                    }
-                                }
-
-                                Text {
-                                    text: "연결 프롬프트: " + (root.selectedAction && root.selectedAction.current_prompt && root.selectedAction.current_prompt.title ? root.selectedAction.current_prompt.title : "기본 프롬프트")
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: 10
-                                    color: Colors.textTertiary
                                 }
                             }
                         }
@@ -463,7 +798,7 @@ Rectangle {
                         TextField {
                             id: actionInput
                             width: parent.width
-                            placeholderText: root.selectedAction ? getInputModePlaceholder(root.selectedAction.input_mode) : "AI 기능을 선택하세요"
+                            placeholderText: root.selectedAction ? (root.selectedAction.action_id === "current_note_qa" ? "현재 문서에 대해 질문하세요." : getInputModePlaceholder(root.selectedAction.input_mode)) : "AI 기능을 선택하세요"
                             font.family: Typography.fontPrimary
                             font.pixelSize: Typography.bodySmall
                             enabled: canUseAI() && !root.aiRunning
@@ -505,154 +840,6 @@ Rectangle {
                             }
                         }
 
-                        Rectangle {
-                            width: parent.width
-                            height: 1
-                            color: Colors.borderLight
-                        }
-
-                        Text {
-                            text: "빠른 실행"
-                            font.family: Typography.fontPrimary
-                            font.pixelSize: Typography.bodySmall
-                            font.weight: Typography.weightMedium
-                            color: Colors.textPrimary
-                        }
-
-                        Text {
-                            text: "현재 문서를 기반으로 바로 실행할 수 있는 도구입니다."
-                            font.family: Typography.fontPrimary
-                            font.pixelSize: Typography.caption
-                            color: Colors.textSecondary
-                        }
-
-                        GridLayout {
-                            columns: 2
-                            columnSpacing: Metrics.sm
-                            rowSpacing: Metrics.sm
-                            width: parent.width
-
-                            Button {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 40
-                                text: "현재 문서 요약"
-                                enabled: canUseAI() && !root.aiRunning && typeof window !== "undefined" && window.currentNote && window.currentNote.content
-                                contentItem: Text {
-                                    text: parent.text
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.bodySmall
-                                    font.weight: Typography.weightMedium
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                    color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
-                                }
-                                background: Rectangle {
-                                    color: Colors.bgSecondary
-                                    radius: Metrics.radiusSm
-                                    border.color: Colors.borderLight
-                                    opacity: parent.enabled ? 1 : 0.5
-                                }
-                                onClicked: {
-                                    root.responseText = ""
-                                    var ac = getAssistantController()
-                                    if (ac && window.currentNote && window.currentNote.content) {
-                                        ac.runTask("summarize_note", window.currentNote.content)
-                                    }
-                                }
-                            }
-
-                            Button {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 40
-                                text: root.aiRunning ? "중지" : "선택 문장 다듬기"
-                                enabled: canUseAI() && typeof window !== "undefined" && window.currentNote && window.currentNote.content
-                                contentItem: Text {
-                                    text: parent.text
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.bodySmall
-                                    font.weight: Typography.weightMedium
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                    color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
-                                }
-                                background: Rectangle {
-                                    color: Colors.bgSecondary
-                                    radius: Metrics.radiusSm
-                                    border.color: Colors.borderLight
-                                    opacity: parent.enabled ? 1 : 0.5
-                                }
-                                onClicked: {
-                                    var ac = getAssistantController()
-                                    if (!ac) return
-                                    if (root.aiRunning) {
-                                        ac.cancel()
-                                        return
-                                    }
-                                    root.responseText = ""
-                                    if (window.currentNote && window.currentNote.content) {
-                                        ac.runTask("polish_selection", window.currentNote.content)
-                                    }
-                                }
-                            }
-
-                            Button {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 40
-                                text: "할 일 추출"
-                                enabled: canUseAI() && !root.aiRunning && typeof window !== "undefined" && window.currentNote && window.currentNote.content
-                                contentItem: Text {
-                                    text: parent.text
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.bodySmall
-                                    font.weight: Typography.weightMedium
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                    color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
-                                }
-                                background: Rectangle {
-                                    color: Colors.bgSecondary
-                                    radius: Metrics.radiusSm
-                                    border.color: Colors.borderLight
-                                    opacity: parent.enabled ? 1 : 0.5
-                                }
-                                onClicked: {
-                                    root.responseText = ""
-                                    var ac = getAssistantController()
-                                    if (ac && window.currentNote && window.currentNote.content) {
-                                        ac.runTask("extract_todo", window.currentNote.content)
-                                    }
-                                }
-                            }
-
-                            Button {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 40
-                                text: "제목/태그 추천"
-                                enabled: canUseAI() && !root.aiRunning && typeof window !== "undefined" && window.currentNote && window.currentNote.content
-                                contentItem: Text {
-                                    text: parent.text
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.bodySmall
-                                    font.weight: Typography.weightMedium
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                    color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
-                                }
-                                background: Rectangle {
-                                    color: Colors.bgSecondary
-                                    radius: Metrics.radiusSm
-                                    border.color: Colors.borderLight
-                                    opacity: parent.enabled ? 1 : 0.5
-                                }
-                                onClicked: {
-                                    root.responseText = ""
-                                    var ac = getAssistantController()
-                                    if (ac && window.currentNote && window.currentNote.content) {
-                                        ac.runTask("suggest_title_tags", window.currentNote.content)
-                                    }
-                                }
-                            }
-                        }
                     }
                 }
 
@@ -662,6 +849,7 @@ Rectangle {
                     color: Colors.surface
                     border.color: Colors.borderLight
                     implicitHeight: questionColumn.implicitHeight + (Metrics.md * 2)
+                    visible: false
 
                     Column {
                         id: questionColumn

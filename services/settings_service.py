@@ -36,6 +36,20 @@ class SettingsService(QObject):
         self._data[key] = value
         self._save()
 
+    @pyqtSlot(str, str, result=str)
+    def get_value(self, key: str, default: str = "") -> str:
+        value = self._data.get(key, default)
+        if isinstance(value, str):
+            return value
+        try:
+            return json.dumps(value, ensure_ascii=False)
+        except TypeError:
+            return default
+
+    @pyqtSlot(str, str)
+    def set_value(self, key: str, value: str):
+        self.set(key, value)
+
     def get_last_library_id(self) -> Optional[str]:
         return self._data.get("last_library_id")
 

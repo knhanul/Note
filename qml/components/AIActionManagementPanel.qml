@@ -188,7 +188,6 @@ Rectangle {
         newActionResponseLength.currentIndex = 1
         newActionEnabled.checked = true
         newActionPromptBinding.currentIndex = -1
-        newActionRequiredVars.text = "[]"
     }
 
     function cancelEdit() {
@@ -242,7 +241,7 @@ Rectangle {
         var useRag = newActionUseRag.checked
         var responseLength = root.selectedResponseLength(newActionResponseLength)
         var enabled = newActionEnabled.checked
-        var requiredVars = newActionRequiredVars.text.trim() || "[]"
+        var requiredVars = "[]"
 
         var result = c.create_action(name, actionId, description, category, inputMode, useRag, requiredVars, enabled, responseLength)
         if (result && result.action_id) {
@@ -280,7 +279,6 @@ Rectangle {
         editResponseLength.currentIndex = root.responseLengthIndex(root.currentAction.response_length || "medium")
         editEnabled.checked = root.currentAction.enabled === undefined ? true : !!root.currentAction.enabled
         editActionPromptBinding.currentIndex = root.indexOfPromptDocId(root.currentAction.binding_prompt_doc_id || "")
-        editRequiredVars.text = root.currentAction.required_variables_json || "[]"
     }
 
     function saveCurrentAction() {
@@ -300,7 +298,7 @@ Rectangle {
         var useRag = editUseRag.checked
         var responseLength = root.selectedResponseLength(editResponseLength)
         var enabled = editEnabled.checked
-        var requiredVars = editRequiredVars.text.trim() || "[]"
+        var requiredVars = root.currentAction.required_variables_json || "[]"
 
         var result = c.update_action(action.action_id, name, description, category, inputMode, useRag, requiredVars, enabled, responseLength)
         if (result && result.action_id) {
@@ -842,7 +840,7 @@ Rectangle {
                 TextArea {
                     id: newActionDescription
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 88
+                    Layout.preferredHeight: 40
                     wrapMode: TextEdit.Wrap
                     font.family: Typography.fontPrimary
                     font.pixelSize: Typography.bodySmall
@@ -854,6 +852,21 @@ Rectangle {
                         border.color: Colors.borderLight
                         border.width: 1
                     }
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: Metrics.xs
+
+                    Text { text: "연결 프롬프트"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                    ComboBox {
+                        id: newActionPromptBinding
+                        Layout.fillWidth: true
+                        model: root.promptDocumentList
+                        textRole: "title"
+                        currentIndex: -1
+                    }
+
                 }
 
                 RowLayout {
@@ -963,125 +976,6 @@ Rectangle {
                     font.pixelSize: Typography.bodySmall
                 }
 
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: Metrics.xs
-
-                    Text { text: "연결 프롬프트"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
-                    ComboBox {
-                        id: newActionPromptBinding
-                        Layout.fillWidth: true
-                        model: root.promptDocumentList
-                        textRole: "title"
-                        currentIndex: -1
-                    }
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        implicitHeight: newPromptLayout.implicitHeight + Metrics.sm * 2
-                        radius: Metrics.radiusMd
-                        color: Colors.bgSecondary
-                        border.color: Colors.borderLight
-                        border.width: 1
-                        visible: root.selectedPromptFromCombo(newActionPromptBinding) !== null
-
-                        ColumnLayout {
-                            id: newPromptLayout
-                            anchors.fill: parent
-                            anchors.margins: Metrics.sm
-                            spacing: Metrics.xs
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: root.promptTitle(root.selectedPromptFromCombo(newActionPromptBinding))
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                font.weight: Typography.weightMedium
-                                color: Colors.textPrimary
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: root.promptTypeLabel(root.selectedPromptFromCombo(newActionPromptBinding))
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.caption
-                                color: Colors.primary700
-                            }
-                        }
-                    }
-                }
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    implicitHeight: newAdvancedLayout.implicitHeight + Metrics.md * 2
-                    radius: Metrics.radiusMd
-                    color: Colors.bgSecondary
-                    border.color: Colors.borderLight
-                    border.width: 1
-
-                    ColumnLayout {
-                        id: newAdvancedLayout
-                        anchors.fill: parent
-                        anchors.margins: Metrics.md
-                        spacing: Metrics.sm
-
-                        RowLayout {
-                            Layout.fillWidth: true
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: "고급 설정"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                font.weight: Typography.weightMedium
-                                color: Colors.textPrimary
-                            }
-
-                            Button {
-                                text: root.showAdvancedNew ? "접기" : "펼치기"
-                                contentItem: Text {
-                                    text: parent.text
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.caption
-                                    color: Colors.textPrimary
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                }
-                                background: Rectangle {
-                                    color: Colors.bgPrimary
-                                    radius: Metrics.radiusSm
-                                    border.color: Colors.borderLight
-                                }
-                                onClicked: root.showAdvancedNew = !root.showAdvancedNew
-                            }
-                        }
-
-                        Text {
-                            Layout.fillWidth: true
-                            text: "일반적으로는 건드릴 필요 없습니다. 변수는 프롬프트 내용을 기준으로 자동 감지됩니다."
-                            font.family: Typography.fontPrimary
-                            font.pixelSize: Typography.caption
-                            color: Colors.textSecondary
-                            wrapMode: Text.Wrap
-                        }
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: Metrics.xs
-                            visible: root.showAdvancedNew
-
-                            Text { text: "필수 변수(JSON)"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
-                            TextField {
-                                id: newActionRequiredVars
-                                Layout.fillWidth: true
-                                text: "[]"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                selectByMouse: true
-                            }
-                        }
-                    }
-                }
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -1180,7 +1074,7 @@ Rectangle {
                 TextArea {
                     id: editDescription
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 88
+                    Layout.preferredHeight: 40
                     wrapMode: TextEdit.Wrap
                     font.family: Typography.fontPrimary
                     font.pixelSize: Typography.bodySmall
@@ -1191,6 +1085,20 @@ Rectangle {
                         border.color: Colors.borderLight
                         border.width: 1
                     }
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: Metrics.xs
+
+                    Text { text: "연결 프롬프트"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                    ComboBox {
+                        id: editActionPromptBinding
+                        Layout.fillWidth: true
+                        model: root.promptDocumentList
+                        textRole: "title"
+                    }
+
                 }
 
                 RowLayout {
@@ -1295,123 +1203,6 @@ Rectangle {
                     font.pixelSize: Typography.bodySmall
                 }
 
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: Metrics.xs
-
-                    Text { text: "연결 프롬프트"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
-                    ComboBox {
-                        id: editActionPromptBinding
-                        Layout.fillWidth: true
-                        model: root.promptDocumentList
-                        textRole: "title"
-                    }
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        implicitHeight: editPromptLayout.implicitHeight + Metrics.sm * 2
-                        radius: Metrics.radiusMd
-                        color: Colors.bgSecondary
-                        border.color: Colors.borderLight
-                        border.width: 1
-                        visible: root.selectedPromptFromCombo(editActionPromptBinding) !== null
-
-                        ColumnLayout {
-                            id: editPromptLayout
-                            anchors.fill: parent
-                            anchors.margins: Metrics.sm
-                            spacing: Metrics.xs
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: root.promptTitle(root.selectedPromptFromCombo(editActionPromptBinding))
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                font.weight: Typography.weightMedium
-                                color: Colors.textPrimary
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: root.promptTypeLabel(root.selectedPromptFromCombo(editActionPromptBinding))
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.caption
-                                color: Colors.primary700
-                            }
-                        }
-                    }
-                }
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    implicitHeight: editAdvancedLayout.implicitHeight + Metrics.md * 2
-                    radius: Metrics.radiusMd
-                    color: Colors.bgSecondary
-                    border.color: Colors.borderLight
-                    border.width: 1
-
-                    ColumnLayout {
-                        id: editAdvancedLayout
-                        anchors.fill: parent
-                        anchors.margins: Metrics.md
-                        spacing: Metrics.sm
-
-                        RowLayout {
-                            Layout.fillWidth: true
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: "고급 설정"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                font.weight: Typography.weightMedium
-                                color: Colors.textPrimary
-                            }
-
-                            Button {
-                                text: root.showAdvancedEdit ? "접기" : "펼치기"
-                                contentItem: Text {
-                                    text: parent.text
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.caption
-                                    color: Colors.textPrimary
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                }
-                                background: Rectangle {
-                                    color: Colors.bgPrimary
-                                    radius: Metrics.radiusSm
-                                    border.color: Colors.borderLight
-                                }
-                                onClicked: root.showAdvancedEdit = !root.showAdvancedEdit
-                            }
-                        }
-
-                        Text {
-                            Layout.fillWidth: true
-                            text: "일반적으로는 수정하지 않아도 됩니다. 변수는 프롬프트 분석 결과와 함께 자동으로 활용됩니다."
-                            font.family: Typography.fontPrimary
-                            font.pixelSize: Typography.caption
-                            color: Colors.textSecondary
-                            wrapMode: Text.Wrap
-                        }
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: Metrics.xs
-                            visible: root.showAdvancedEdit
-
-                            Text { text: "필수 변수(JSON)"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
-                            TextField {
-                                id: editRequiredVars
-                                Layout.fillWidth: true
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                selectByMouse: true
-                            }
-                        }
-                    }
-                }
 
                 RowLayout {
                     Layout.fillWidth: true

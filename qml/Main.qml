@@ -165,8 +165,25 @@ Window {
     function insertPromptSnippet(text) {
         if (window.activeContentMode !== "ai_prompts") return
         if (window.currentPromptReadonly()) return
-        if (!noteEditor || !text) return
-        noteEditor.insertMarkdownAtCursor(text)
+        if (!text) return
+
+        // Try insertMarkdownAtCursor first if noteEditor is available
+        if (noteEditor && noteEditor.webView) {
+            noteEditor.insertMarkdownAtCursor(text)
+        }
+
+        // Fallback: append to content_md end if editor is not available
+        // This handles cases where editor is not ready or webView is unavailable
+        if (!noteEditor || !noteEditor.webView) {
+            if (window.currentAIPromptDocument) {
+                var currentContent = window.currentAIPromptDocument.content_md || ""
+                if (!currentContent.endsWith("\n") && text.length > 0) {
+                    text = "\n" + text
+                }
+                window.currentAIPromptDocument.content_md = currentContent + text
+                console.log("[Main] insertPromptSnippet: appended to content_md end (fallback)")
+            }
+        }
     }
 
     function forcePromptListRefresh() {
@@ -4097,7 +4114,7 @@ Window {
                         // AI Prompt Mode Status Bar (shown above editor in ai_prompts mode)
                         Rectangle {
                             Layout.fillWidth: true
-                            visible: window.activeContentMode === "ai_prompts" && window.selectedAIPromptDocId !== ""
+                            visible: typeof appVariant !== "undefined" && appVariant === "work_ai_editor" && window.activeContentMode === "ai_prompts" && window.selectedAIPromptDocId !== ""
                             implicitHeight: promptEditorToolsLayout.implicitHeight + Metrics.md * 2
                             color: Colors.bgSecondary
                             border.color: Colors.borderLight
