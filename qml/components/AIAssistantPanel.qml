@@ -44,6 +44,21 @@ Rectangle {
     property bool hasRagWarnings: ragWarnings && ragWarnings.length > 0
     property bool ragRequestRunning: false
     property bool ragIndexingRunning: false
+    property int aiModeIndex: 0  // 0 = 현재 문서 AI, 1 = 참고문서 AI
+
+    onAiModeIndexChanged: {
+        console.log("[AIAssistantPanel][DIAG] aiModeIndex changed:", aiModeIndex)
+    }
+
+    function setAiMode(index, source) {
+        console.log("[AIAssistantPanel][DIAG] setAiMode request:", index, "source:", source || "unknown")
+        if (root.aiModeIndex === index)
+            return
+        root.aiModeIndex = index
+        if (tabScroll && tabScroll.contentItem) {
+            tabScroll.contentItem.contentY = 0
+        }
+    }
 
     function getActionController() {
         return aiActionControllerObj
@@ -458,14 +473,14 @@ Rectangle {
         ragCtrl.indexCurrentNote(note.id, note.title || "", note.content || "", tagsJson)
     }
 
-    function askIndexedDocuments() {
+    function askIndexedDocuments(questionText) {
         var ragCtrl = getAiRagController()
         if (!ragCtrl) {
             root.responseText = "[오류] RAG 컨트롤러를 사용할 수 없습니다"
             return
         }
 
-        var question = actionInput.text || ""
+        var question = questionText || actionInput.text || ""
         if (!question) {
             root.responseText = "질문 내용을 입력해주세요."
             return
@@ -706,6 +721,8 @@ Rectangle {
     }
 
     Component.onCompleted: {
+        console.log("[AIAssistantPanel][DIAG] loaded qml/components/AIAssistantPanel.qml")
+        console.log("[AIAssistantPanel][DIAG] aiModeIndex =", root.aiModeIndex)
         var ac = getAssistantController()
         if (!ac)
             return
@@ -814,347 +831,404 @@ Rectangle {
         anchors.margins: Metrics.lg
         spacing: Metrics.md
 
+        Column {
+            id: headerArea
+            Layout.fillWidth: true
+            spacing: Metrics.xs
+
+            RowLayout {
+                width: parent.width
+                spacing: Metrics.md
+
+                Text {
+                    text: "AI 업무비서"
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.bodyLarge
+                    font.bold: true
+                    color: Colors.textPrimary
+                }
+
+                Item {
+                    Layout.fillWidth: true
+                }
+
+                RowLayout {
+                    spacing: Metrics.md
+
+                    Rectangle {
+                        Layout.preferredWidth: 80
+                        height: 24
+                        radius: Metrics.radiusFull
+                        color: Colors.bgSecondary
+                        border.color: safeGet("isConnected", false) ? Colors.success : Colors.borderLight
+                        border.width: 1
+                        Row {
+                            anchors.centerIn: parent
+                            spacing: Metrics.xs
+
+                            Rectangle {
+                                width: 6
+                                height: 6
+                                radius: Metrics.radiusFull
+                                color: safeGet("isConnected", false) ? Colors.success : Colors.textTertiary
+                            }
+
+                            Text {
+                                text: safeGet("isConnected", false) ? "연결됨" : "연결 안 됨"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.caption
+                                color: safeGet("isConnected", false) ? Colors.textPrimary : Colors.textSecondary
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.preferredWidth: 32
+                        Layout.preferredHeight: 32
+                        radius: Metrics.radiusSm
+                        color: settingsMA.containsMouse ? Colors.bgTertiary : Colors.bgSecondary
+                        border.color: Colors.borderLight
+                        border.width: 1
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "⚙"
+                            font.pixelSize: Typography.bodyLarge
+                            color: Colors.textSecondary
+                        }
+
+                        MouseArea {
+                            id: settingsMA
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: root.openSettingsDialog()
+                        }
+                    }
+                }
+            }
+
+            Flow {
+                width: parent.width
+                spacing: Metrics.xs
+
+                Rectangle {
+                    height: 28
+                    radius: Metrics.radiusFull
+                    color: Colors.bgSecondary
+                    border.color: Colors.borderLight
+                    border.width: 1
+                    Row {
+                        anchors.centerIn: parent
+                        spacing: Metrics.xs
+                        Text {
+                            text: safeGet("chatModel", "") !== "" ? safeGet("chatModel", "") : "모델 미선택"
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.caption
+                            color: Colors.textSecondary
+                        }
+                    }
+                }
+
+                Rectangle {
+                    height: 28
+                    radius: Metrics.radiusFull
+                    color: Colors.bgSecondary
+                    border.color: Colors.borderLight
+                    border.width: 1
+                    Row {
+                        anchors.centerIn: parent
+                        spacing: Metrics.xs
+                        Text {
+                            text: "성능 " + safeGet("performanceMode", "low")
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.caption
+                            color: Colors.textSecondary
+                        }
+                    }
+                }
+            }
+
+            RowLayout {
+                width: parent.width
+                spacing: Metrics.xs
+
+                Button {
+                    id: currentDocTabButton
+                    Layout.fillWidth: true
+                    height: 32
+                    focusPolicy: Qt.NoFocus
+                    onClicked: setAiMode(0, "currentTab")
+                    background: Rectangle {
+                        radius: Metrics.radiusSm
+                        color: root.aiModeIndex === 0 ? Colors.primary500 : Colors.bgSecondary
+                        border.color: root.aiModeIndex === 0 ? Colors.primary500 : Colors.borderLight
+                        border.width: 1
+                    }
+                    contentItem: Text {
+                        anchors.centerIn: parent
+                        text: "현재 문서 AI"
+                        font.family: Typography.fontPrimary
+                        font.pixelSize: Typography.caption
+                        font.weight: root.aiModeIndex === 0 ? Typography.weightMedium : Typography.weightRegular
+                        color: root.aiModeIndex === 0 ? Colors.white : Colors.textSecondary
+                    }
+                }
+
+                Button {
+                    id: referenceDocTabButton
+                    Layout.fillWidth: true
+                    height: 32
+                    focusPolicy: Qt.NoFocus
+                    onClicked: setAiMode(1, "referenceTab")
+                    background: Rectangle {
+                        radius: Metrics.radiusSm
+                        color: root.aiModeIndex === 1 ? Colors.primary500 : Colors.bgSecondary
+                        border.color: root.aiModeIndex === 1 ? Colors.primary500 : Colors.borderLight
+                        border.width: 1
+                    }
+                    contentItem: Text {
+                        anchors.centerIn: parent
+                        text: "참고문서 AI"
+                        font.family: Typography.fontPrimary
+                        font.pixelSize: Typography.caption
+                        font.weight: root.aiModeIndex === 1 ? Typography.weightMedium : Typography.weightRegular
+                        color: root.aiModeIndex === 1 ? Colors.white : Colors.textSecondary
+                    }
+                }
+            }
+
+            Rectangle {
+                visible: !canUseAI()
+                width: parent.width
+                radius: Metrics.radiusMd
+                color: Colors.primary50
+                border.color: Colors.primary200
+                border.width: 1
+                anchors.margins: 0
+
+                Text {
+                    anchors.fill: parent
+                    anchors.margins: Metrics.md
+                    text: "Ollama 연결 후 사용할 수 있습니다. 모델을 선택하고 연결을 확인해주세요."
+                    wrapMode: Text.WordWrap
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.caption
+                    color: Colors.primary700
+                }
+            }
+        }
+
         ScrollView {
-            id: panelScroll
+            id: tabScroll
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
             ScrollBar.vertical.policy: ScrollBar.AsNeeded
 
             Column {
-                id: sidebarContent
-                width: root.width - (Metrics.lg * 2)
+                width: tabScroll.width
                 spacing: Metrics.lg
 
                 Column {
+                    id: tabContentColumn
                     width: parent.width
-                    spacing: Metrics.xs
-
-                    RowLayout {
-                        width: parent.width
-                        spacing: Metrics.md
-
-                        Text {
-                            text: "AI 업무비서"
-                            font.family: Typography.fontPrimary
-                            font.pixelSize: Typography.bodyLarge
-                            font.bold: true
-                            color: Colors.textPrimary
-                        }
-
-                        Item {
-                            Layout.fillWidth: true
-                        }
-
-                        RowLayout {
-                            spacing: Metrics.md
-
-                            Rectangle {
-                                Layout.preferredWidth: 80
-                                height: 24
-                                radius: Metrics.radiusFull
-                                color: Colors.bgSecondary
-                                border.color: safeGet("isConnected", false) ? Colors.success : Colors.borderLight
-                                border.width: 1
-                                Row {
-                                    anchors.centerIn: parent
-                                    spacing: Metrics.xs
-
-                                    Rectangle {
-                                        width: 6
-                                        height: 6
-                                        radius: Metrics.radiusFull
-                                        color: safeGet("isConnected", false) ? Colors.success : Colors.textTertiary
-                                    }
-
-                                    Text {
-                                        text: safeGet("isConnected", false) ? "연결됨" : "연결 안 됨"
-                                        font.family: Typography.fontPrimary
-                                        font.pixelSize: Typography.caption
-                                        color: safeGet("isConnected", false) ? Colors.textPrimary : Colors.textSecondary
-                                    }
-                                }
-                            }
-
-                            Rectangle {
-                                Layout.preferredWidth: 32
-                                Layout.preferredHeight: 32
-                                radius: Metrics.radiusSm
-                                color: settingsMA.containsMouse ? Colors.bgTertiary : Colors.bgSecondary
-                                border.color: Colors.borderLight
-                                border.width: 1
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: "⚙"
-                                    font.pixelSize: Typography.bodyLarge
-                                    color: Colors.textSecondary
-                                }
-
-                                MouseArea {
-                                    id: settingsMA
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    onClicked: root.openSettingsDialog()
-                                }
-                            }
-                        }
-                    }
-
-                    Flow {
-                        width: parent.width
-                        spacing: Metrics.xs
-
-                        Rectangle {
-                            height: 28
-                            radius: Metrics.radiusFull
-                            color: Colors.bgSecondary
-                            border.color: Colors.borderLight
-                            border.width: 1
-                            Row {
-                                anchors.centerIn: parent
-                                spacing: Metrics.xs
-                                Text {
-                                    text: safeGet("chatModel", "") !== "" ? safeGet("chatModel", "") : "모델 미선택"
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.caption
-                                    color: Colors.textSecondary
-                                }
-                            }
-                        }
-
-                        Rectangle {
-                            height: 28
-                            radius: Metrics.radiusFull
-                            color: Colors.bgSecondary
-                            border.color: Colors.borderLight
-                            border.width: 1
-                            Row {
-                                anchors.centerIn: parent
-                                spacing: Metrics.xs
-                                Text {
-                                    text: "성능 " + safeGet("performanceMode", "low")
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.caption
-                                    color: Colors.textSecondary
-                                }
-                            }
-                        }
-                    }
+                    spacing: Metrics.lg
 
                     Rectangle {
-                        visible: !canUseAI()
                         width: parent.width
-                        radius: Metrics.radiusMd
-                        color: Colors.primary50
-                        border.color: Colors.primary200
-                        border.width: 1
-                        anchors.margins: 0
+                        radius: Metrics.radiusLg
+                        color: Colors.surface
+                        border.color: Colors.borderLight
+                        implicitHeight: quickActionsColumn.implicitHeight + (Metrics.md * 2)
+                        visible: root.aiModeIndex === 0
 
-                        Text {
-                            anchors.fill: parent
-                            anchors.margins: Metrics.md
-                            text: "Ollama 연결 후 사용할 수 있습니다. 모델을 선택하고 연결을 확인해주세요."
-                            wrapMode: Text.WordWrap
-                            font.family: Typography.fontPrimary
-                            font.pixelSize: Typography.caption
-                            color: Colors.primary700
-                        }
-                    }
-                }
+                        Column {
+                            id: quickActionsColumn
+                            width: parent.width - (Metrics.md * 2)
+                            spacing: Metrics.sm
+                            anchors.top: parent.top
+                            anchors.topMargin: Metrics.md
+                            anchors.horizontalCenter: parent.horizontalCenter
 
+                            Text {
+                                text: "AI 기능 선택"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodySmall
+                                font.weight: Typography.weightMedium
+                                color: Colors.textPrimary
+                            }
 
-                Rectangle {
-                    width: parent.width
-                    radius: Metrics.radiusLg
-                    color: Colors.surface
-                    border.color: Colors.borderLight
-                    implicitHeight: quickActionsColumn.implicitHeight + (Metrics.md * 2)
+                            ListView {
+                                id: categoryFolderView
+                                width: parent.width
+                                height: 180
+                                clip: true
+                                spacing: Metrics.xs
+                                model: root.categoryList
+                                boundsBehavior: Flickable.StopAtBounds
 
-                    Column {
-                        id: quickActionsColumn
-                        width: parent.width - (Metrics.md * 2)
-                        spacing: Metrics.sm
-                        anchors.centerIn: parent
+                                delegate: Item {
+                                    id: categoryDelegate
+                                    width: categoryFolderView.width
+                                    height: dragArea.drag.active ? 36 : categoryContent.implicitHeight
+                                    z: dragArea.drag.active ? 10 : 0
 
-                        Text {
-                            text: "AI 기능 선택"
-                            font.family: Typography.fontPrimary
-                            font.pixelSize: Typography.bodySmall
-                            font.weight: Typography.weightMedium
-                            color: Colors.textPrimary
-                        }
-
-                        ListView {
-                            id: categoryFolderView
-                            width: parent.width
-                            height: 180
-                            clip: true
-                            spacing: Metrics.xs
-                            model: root.categoryList
-                            boundsBehavior: Flickable.StopAtBounds
-
-                            delegate: Item {
-                                id: categoryDelegate
-                                width: categoryFolderView.width
-                                height: dragArea.drag.active ? 36 : categoryContent.implicitHeight
-                                z: dragArea.drag.active ? 10 : 0
-
-                                property string categoryName: modelData
-                                property int visualIndex: index !== undefined ? index : 0
-                                property bool wasDragged: false
-
-                                Column {
-                                    id: categoryContent
-                                    width: parent.width
-                                    spacing: 0
-
-                                    Rectangle {
-                                        width: parent.width
-                                        height: 36
-                                        color: dragArea.drag.active ? Colors.primary50 : "transparent"
-                                        radius: Metrics.radiusSm
-
-                                        RowLayout {
-                                            anchors.fill: parent
-                                            anchors.leftMargin: Metrics.xs
-                                            anchors.rightMargin: Metrics.xs
-                                            spacing: Metrics.xs
-
-                                            Text {
-                                                text: "☰"
-                                                font.pixelSize: 12
-                                                color: Colors.textTertiary
-                                                verticalAlignment: Text.AlignVCenter
-                                            }
-
-                                            Image {
-                                                source: "../assets/icons/AIfolder.png"
-                                                Layout.preferredWidth: 16
-                                                Layout.preferredHeight: 16
-                                                fillMode: Image.PreserveAspectFit
-                                            }
-
-                                            Text {
-                                                Layout.fillWidth: true
-                                                text: categoryDelegate.categoryName
-                                                font.family: Typography.fontPrimary
-                                                font.pixelSize: Typography.bodySmall
-                                                font.weight: root.selectedCategory === categoryDelegate.categoryName ? Font.Bold : Font.Normal
-                                                color: root.selectedCategory === categoryDelegate.categoryName ? Colors.primary700 : Colors.textPrimary
-                                                verticalAlignment: Text.AlignVCenter
-                                            }
-
-                                            Text {
-                                                text: {
-                                                    root.favoriteVersion
-                                                    return root.filterActionsByCategory(categoryDelegate.categoryName).length
-                                                }
-                                                font.family: Typography.fontPrimary
-                                                font.pixelSize: Typography.caption
-                                                color: root.selectedCategory === categoryDelegate.categoryName ? Colors.primary500 : Colors.textTertiary
-                                                verticalAlignment: Text.AlignVCenter
-                                            }
-                                        }
-
-                                        MouseArea {
-                                            id: dragArea
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            drag.target: categoryDelegate
-                                            drag.axis: Drag.YAxis
-                                            drag.threshold: 6
-                                            onPositionChanged: {
-                                                if (drag.active) {
-                                                    categoryDelegate.wasDragged = true
-                                                }
-                                            }
-                                            onClicked: {
-                                                if (categoryDelegate.wasDragged) {
-                                                    categoryDelegate.wasDragged = false
-                                                    return
-                                                }
-                                                if (root.selectedCategory === categoryDelegate.categoryName) {
-                                                    root.selectedCategory = ""
-                                                    root.selectedAction = ({})
-                                                } else {
-                                                    root.selectedCategory = categoryDelegate.categoryName
-                                                    root.selectFirstActionInCategory()
-                                                }
-                                            }
-                                            onReleased: {
-                                                var targetIndex = categoryFolderView.indexAt(categoryDelegate.width / 2, categoryDelegate.y + categoryDelegate.height / 2)
-                                                if (targetIndex < 0)
-                                                    targetIndex = Math.max(0, Math.min(root.categoryList.length - 1, categoryDelegate.visualIndex))
-                                                root.moveCategory(categoryDelegate.visualIndex, targetIndex)
-                                                categoryDelegate.y = 0
-                                                categoryDelegate.wasDragged = false
-                                            }
-                                        }
-                                    }
+                                    property string categoryName: modelData
+                                    property int visualIndex: index !== undefined ? index : 0
+                                    property bool wasDragged: false
 
                                     Column {
+                                        id: categoryContent
                                         width: parent.width
-                                        visible: root.selectedCategory === categoryDelegate.categoryName && !dragArea.drag.active
                                         spacing: 0
 
-                                        Repeater {
-                                            model: {
-                                                root.favoriteVersion
-                                                return root.orderedActionsByCategory(categoryDelegate.categoryName)
+                                        Rectangle {
+                                            width: parent.width
+                                            height: 36
+                                            color: dragArea.drag.active ? Colors.primary50 : "transparent"
+                                            radius: Metrics.radiusSm
+
+                                            RowLayout {
+                                                anchors.fill: parent
+                                                anchors.leftMargin: Metrics.xs
+                                                anchors.rightMargin: Metrics.xs
+                                                spacing: Metrics.xs
+
+                                                Text {
+                                                    text: "☰"
+                                                    font.pixelSize: 12
+                                                    color: Colors.textTertiary
+                                                    verticalAlignment: Text.AlignVCenter
+                                                }
+
+                                                Image {
+                                                    source: "../assets/icons/AIfolder.png"
+                                                    Layout.preferredWidth: 16
+                                                    Layout.preferredHeight: 16
+                                                    fillMode: Image.PreserveAspectFit
+                                                }
+
+                                                Text {
+                                                    Layout.fillWidth: true
+                                                    text: categoryDelegate.categoryName
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.bodySmall
+                                                    font.weight: root.selectedCategory === categoryDelegate.categoryName ? Font.Bold : Font.Normal
+                                                    color: root.selectedCategory === categoryDelegate.categoryName ? Colors.primary700 : Colors.textPrimary
+                                                    verticalAlignment: Text.AlignVCenter
+                                                }
+
+                                                Text {
+                                                    text: {
+                                                        root.favoriteVersion
+                                                        return root.filterActionsByCategory(categoryDelegate.categoryName).length
+                                                    }
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.caption
+                                                    color: root.selectedCategory === categoryDelegate.categoryName ? Colors.primary500 : Colors.textTertiary
+                                                    verticalAlignment: Text.AlignVCenter
+                                                }
                                             }
 
-                                            Rectangle {
-                                                width: parent.width
-                                                height: 34
-                                                color: root.selectedAction && root.selectedAction.action_id === modelData.action_id ? Colors.primary50 : "transparent"
-                                                radius: Metrics.radiusSm
-
-                                                RowLayout {
-                                                    anchors.fill: parent
-                                                    anchors.leftMargin: 24
-                                                    anchors.rightMargin: Metrics.sm
-                                                    spacing: Metrics.xs
-
-                                                    Image {
-                                                        source: "../assets/icons/AIfeatures.png"
-                                                        Layout.preferredWidth: 14
-                                                        Layout.preferredHeight: 14
-                                                        fillMode: Image.PreserveAspectFit
+                                            MouseArea {
+                                                id: dragArea
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                drag.target: categoryDelegate
+                                                drag.axis: Drag.YAxis
+                                                drag.threshold: 6
+                                                onPositionChanged: {
+                                                    if (drag.active) {
+                                                        categoryDelegate.wasDragged = true
                                                     }
-
-                                                    Text {
-                                                        Layout.fillWidth: true
-                                                        text: modelData.name || modelData.action_id
-                                                        font.family: Typography.fontPrimary
-                                                        font.pixelSize: Typography.bodySmall
-                                                        color: root.selectedAction && root.selectedAction.action_id === modelData.action_id ? Colors.primary700 : Colors.textSecondary
-                                                        verticalAlignment: Text.AlignVCenter
-                                                        elide: Text.ElideRight
+                                                }
+                                                onClicked: {
+                                                    if (categoryDelegate.wasDragged) {
+                                                        categoryDelegate.wasDragged = false
+                                                        return
                                                     }
+                                                    if (root.selectedCategory === categoryDelegate.categoryName) {
+                                                        root.selectedCategory = ""
+                                                        root.selectedAction = ({})
+                                                    } else {
+                                                        root.selectedCategory = categoryDelegate.categoryName
+                                                        root.selectFirstActionInCategory()
+                                                    }
+                                                }
+                                                onReleased: {
+                                                    var targetIndex = categoryFolderView.indexAt(categoryDelegate.width / 2, categoryDelegate.y + categoryDelegate.height / 2)
+                                                    if (targetIndex < 0)
+                                                        targetIndex = Math.max(0, Math.min(root.categoryList.length - 1, categoryDelegate.visualIndex))
+                                                    root.moveCategory(categoryDelegate.visualIndex, targetIndex)
+                                                    categoryDelegate.y = 0
+                                                    categoryDelegate.wasDragged = false
+                                                }
+                                            }
+                                        }
 
-                                                    Text {
-                                                        text: (root.favoriteActions.indexOf(modelData.action_id) >= 0) ? "★" : "☆"
-                                                        font.pixelSize: 14
-                                                        color: (root.favoriteActions.indexOf(modelData.action_id) >= 0) ? Colors.warning : Colors.textTertiary
-                                                        verticalAlignment: Text.AlignVCenter
-                                                        MouseArea {
-                                                            width: 24
-                                                            height: 24
-                                                            anchors.centerIn: parent
-                                                            onClicked: {
-                                                                root.toggleFavorite(modelData.action_id)
-                                                                root.categoryList = root.buildCategoryList()
+                                        Column {
+                                            width: parent.width
+                                            visible: root.selectedCategory === categoryDelegate.categoryName && !dragArea.drag.active
+                                            spacing: 0
+
+                                            Repeater {
+                                                model: {
+                                                    root.favoriteVersion
+                                                    return root.orderedActionsByCategory(categoryDelegate.categoryName)
+                                                }
+
+                                                Rectangle {
+                                                    width: parent.width
+                                                    height: 34
+                                                    color: root.selectedAction && root.selectedAction.action_id === modelData.action_id ? Colors.primary50 : "transparent"
+                                                    radius: Metrics.radiusSm
+
+                                                    RowLayout {
+                                                        anchors.fill: parent
+                                                        anchors.leftMargin: 24
+                                                        anchors.rightMargin: Metrics.sm
+                                                        spacing: Metrics.xs
+
+                                                        Image {
+                                                            source: "../assets/icons/AIfeatures.png"
+                                                            Layout.preferredWidth: 14
+                                                            Layout.preferredHeight: 14
+                                                            fillMode: Image.PreserveAspectFit
+                                                        }
+
+                                                        Text {
+                                                            Layout.fillWidth: true
+                                                            text: modelData.name || modelData.action_id
+                                                            font.family: Typography.fontPrimary
+                                                            font.pixelSize: Typography.bodySmall
+                                                            color: root.selectedAction && root.selectedAction.action_id === modelData.action_id ? Colors.primary700 : Colors.textSecondary
+                                                            verticalAlignment: Text.AlignVCenter
+                                                            elide: Text.ElideRight
+                                                        }
+
+                                                        Text {
+                                                            text: (root.favoriteActions.indexOf(modelData.action_id) >= 0) ? "★" : "☆"
+                                                            font.pixelSize: 14
+                                                            color: (root.favoriteActions.indexOf(modelData.action_id) >= 0) ? Colors.warning : Colors.textTertiary
+                                                            verticalAlignment: Text.AlignVCenter
+                                                            MouseArea {
+                                                                width: 24
+                                                                height: 24
+                                                                anchors.centerIn: parent
+                                                                onClicked: {
+                                                                    root.toggleFavorite(modelData.action_id)
+                                                                    root.categoryList = root.buildCategoryList()
+                                                                }
                                                             }
                                                         }
                                                     }
-                                                }
 
-                                                MouseArea {
-                                                    anchors.fill: parent
-                                                    anchors.rightMargin: 24
-                                                    hoverEnabled: true
-                                                    onClicked: root.selectedAction = modelData
+                                                    MouseArea {
+                                                        anchors.fill: parent
+                                                        anchors.rightMargin: 24
+                                                        hoverEnabled: true
+                                                        onClicked: root.selectedAction = modelData
+                                                    }
                                                 }
                                             }
                                         }
@@ -1164,72 +1238,306 @@ Rectangle {
 
                             Text {
                                 visible: root.categoryList.length === 0
-                                width: categoryFolderView.width
+                                width: parent.width
                                 text: "사용 가능한 AI 기능이 없습니다."
                                 font.family: Typography.fontPrimary
                                 font.pixelSize: Typography.caption
                                 color: Colors.textSecondary
                                 horizontalAlignment: Text.AlignHCenter
                             }
-                        }
 
-                        Rectangle {
-                            width: parent.width
-                            implicitHeight: selectedActionTitle.implicitHeight + (selectedActionDescription.visible ? selectedActionDescription.implicitHeight + Metrics.xs : 0) + Metrics.md * 2
-                            radius: Metrics.radiusMd
-                            color: Colors.bgSecondary
-                            border.color: Colors.borderLight
-                            border.width: 1
-                            visible: !!(root.selectedAction && root.selectedAction.action_id)
+                            Rectangle {
+                                width: parent.width
+                                implicitHeight: selectedActionTitle.implicitHeight + (selectedActionDescription.visible ? selectedActionDescription.implicitHeight + Metrics.xs : 0) + Metrics.md * 2
+                                radius: Metrics.radiusMd
+                                color: Colors.bgSecondary
+                                border.color: Colors.borderLight
+                                border.width: 1
+                                visible: !!(root.selectedAction && root.selectedAction.action_id)
 
-                            Column {
-                                width: parent.width - (Metrics.md * 2)
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                anchors.topMargin: Metrics.sm
-                                anchors.bottomMargin: Metrics.sm
-                                spacing: Metrics.xs
+                                Column {
+                                    width: parent.width - (Metrics.md * 2)
+                                    anchors.top: parent.top
+                                    anchors.topMargin: Metrics.sm
+                                    anchors.bottom: parent.bottom
+                                    anchors.bottomMargin: Metrics.sm
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    spacing: Metrics.xs
 
-                                Text {
-                                    id: selectedActionTitle
-                                    width: parent.width
-                                    text: root.selectedAction ? (root.selectedAction.name || root.selectedAction.action_id) : ""
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.bodyRegular
-                                    font.weight: Font.Bold
-                                    color: Colors.textPrimary
+                                    Text {
+                                        id: selectedActionTitle
+                                        width: parent.width
+                                        text: root.selectedAction ? (root.selectedAction.name || root.selectedAction.action_id) : ""
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.bodyRegular
+                                        font.weight: Font.Bold
+                                        color: Colors.textPrimary
+                                    }
+
+                                    Text {
+                                        id: selectedActionDescription
+                                        width: parent.width
+                                        visible: root.selectedAction && root.selectedAction.description && root.selectedAction.description !== ""
+                                        text: root.selectedAction ? root.selectedAction.description : ""
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
+                                        color: Colors.textSecondary
+                                        wrapMode: Text.Wrap
+                                    }
                                 }
+                            }
 
-                                Text {
-                                    id: selectedActionDescription
-                                    width: parent.width
-                                    visible: root.selectedAction && root.selectedAction.description && root.selectedAction.description !== ""
-                                    text: root.selectedAction ? root.selectedAction.description : ""
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.caption
-                                    color: Colors.textSecondary
-                                    wrapMode: Text.Wrap
+                            TextField {
+                                id: actionInput
+                                width: parent.width
+                                height: 36
+                                placeholderText: root.selectedAction ? (root.selectedAction.action_id === "current_note_qa" ? "현재 문서에 대해 질문하세요." : getInputModePlaceholder(root.selectedAction.input_mode)) : "AI 기능을 선택하세요"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodySmall
+                                enabled: canUseAI() && !root.aiRunning
+                            }
+
+                            RowLayout {
+                                width: parent.width
+                                height: 36
+                                spacing: Metrics.sm
+
+                                Button {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 36
+                                    text: root.aiRunning ? "중지" : "실행"
+                                    enabled: canUseAI() && root.selectedAction && root.selectedAction.action_id
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.bodySmall
+                                        font.weight: Typography.weightMedium
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                        color: parent.enabled ? Colors.white : Colors.textTertiary
+                                    }
+                                    background: Rectangle {
+                                        color: parent.enabled ? Colors.primary500 : Colors.bgTertiary
+                                        radius: Metrics.radiusSm
+                                    }
+                                    onClicked: {
+                                        if (root.aiRunning) {
+                                            var ac = getAssistantController()
+                                            if (ac) {
+                                                ac.cancel()
+                                                root.responseText += "\n[안내] 작업을 취소했습니다."
+                                            }
+                                        } else {
+                                            runSelectedAction()
+                                        }
+                                    }
                                 }
                             }
                         }
+                    }
 
-                        TextField {
-                            id: actionInput
-                            width: parent.width
-                            placeholderText: root.selectedAction ? (root.selectedAction.action_id === "current_note_qa" ? "현재 문서에 대해 질문하세요." : getInputModePlaceholder(root.selectedAction.input_mode)) : "AI 기능을 선택하세요"
-                            font.family: Typography.fontPrimary
-                            font.pixelSize: Typography.bodySmall
-                            enabled: canUseAI() && !root.aiRunning
-                        }
+                    Rectangle {
+                        id: referenceDocsTab
+                        objectName: "referenceDocsTab"
+                        width: parent.width
+                        radius: Metrics.radiusLg
+                        color: Colors.surface
+                        border.color: Colors.borderLight
+                        implicitHeight: referenceDocsCardColumn.implicitHeight + (Metrics.md * 2)
+                        visible: root.aiModeIndex === 1
 
-                        RowLayout {
-                            width: parent.width
+                        Column {
+                            id: referenceDocsCardColumn
+                            width: parent.width - (Metrics.md * 2)
                             spacing: Metrics.sm
+                            anchors.centerIn: parent
+
+                            Text {
+                                text: "참고문서 AI"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodyRegular
+                                font.weight: Typography.weightSemibold
+                                color: Colors.textPrimary
+                            }
+
+                            Text {
+                                width: parent.width
+                                text: "등록한 문서는 AI가 여러 문서에서 찾아 답변할 때 참고합니다."
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.caption
+                                color: Colors.textSecondary
+                                wrapMode: Text.WordWrap
+                            }
+
+                            Rectangle {
+                                width: parent.width
+                                height: 1
+                                color: Colors.borderLight
+                            }
+
+                            Column {
+                                width: parent.width
+                                spacing: Metrics.xs
+
+                                Text {
+                                    text: "현재 문서 질문: 지금 열려 있는 문서 하나만 참고합니다."
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: Typography.caption
+                                    color: Colors.textTertiary
+                                }
+
+                                Text {
+                                    text: "등록된 문서 질문: 등록된 여러 문서에서 관련 내용을 찾아 답변합니다."
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: Typography.caption
+                                    color: Colors.textTertiary
+                                }
+                            }
+
+                            Rectangle {
+                                width: parent.width
+                                height: 1
+                                color: Colors.borderLight
+                            }
+
+                            Text {
+                                text: "참고문서 등록"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodySmall
+                                font.weight: Typography.weightMedium
+                                color: Colors.textPrimary
+                            }
+
+                            RowLayout {
+                                width: parent.width
+                                spacing: Metrics.sm
+
+                                Button {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 32
+                                    text: "현재 문서 등록"
+                                    enabled: canUseAI() && !root.ragIndexingRunning && !root.ragRequestRunning
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                        color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
+                                    }
+                                    background: Rectangle {
+                                        color: parent.enabled ? Colors.surface : Colors.bgTertiary
+                                        border.color: Colors.borderLight
+                                        radius: Metrics.radiusSm
+                                    }
+                                    onClicked: {
+                                        indexCurrentNoteForRag()
+                                    }
+                                }
+
+                                Button {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 32
+                                    text: "현재 폴더 등록"
+                                    enabled: canUseAI() && !root.ragIndexingRunning && !root.ragRequestRunning
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                        color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
+                                    }
+                                    background: Rectangle {
+                                        color: parent.enabled ? Colors.surface : Colors.bgTertiary
+                                        border.color: Colors.borderLight
+                                        radius: Metrics.radiusSm
+                                    }
+                                    onClicked: {
+                                        indexCurrentFolderForRag()
+                                    }
+                                }
+                            }
+
+                            RowLayout {
+                                width: parent.width
+                                spacing: Metrics.sm
+
+                                Button {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 32
+                                    text: "전체 노트 등록"
+                                    enabled: canUseAI() && !root.ragIndexingRunning && !root.ragRequestRunning
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                        color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
+                                    }
+                                    background: Rectangle {
+                                        color: parent.enabled ? Colors.surface : Colors.bgTertiary
+                                        border.color: Colors.borderLight
+                                        radius: Metrics.radiusSm
+                                    }
+                                    onClicked: {
+                                        indexAllNotesForRag()
+                                    }
+                                }
+
+                                Button {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 32
+                                    text: "외부 파일 등록"
+                                    enabled: canUseAI() && !root.ragIndexingRunning && !root.ragRequestRunning
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                        color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
+                                    }
+                                    background: Rectangle {
+                                        color: parent.enabled ? Colors.surface : Colors.bgTertiary
+                                        border.color: Colors.borderLight
+                                        radius: Metrics.radiusSm
+                                    }
+                                    onClicked: {
+                                        externalFileDialog.open()
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                width: parent.width
+                                height: 1
+                                color: Colors.borderLight
+                            }
+
+                            Text {
+                                text: "등록된 문서 질문"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodySmall
+                                font.weight: Typography.weightMedium
+                                color: Colors.textPrimary
+                            }
+
+                            TextField {
+                                id: ragQuestionInput
+                                width: parent.width
+                                placeholderText: "등록된 문서에 대해 질문하세요."
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodySmall
+                                enabled: canUseAI() && !root.ragIndexingRunning && !root.ragRequestRunning && !root.aiRunning
+                            }
 
                             Button {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 36
-                                text: root.aiRunning ? "중지" : "실행"
-                                enabled: canUseAI() && root.selectedAction && root.selectedAction.action_id
+                                width: parent.width
+                                Layout.preferredHeight: 40
+                                text: "질문하기"
+                                enabled: canUseAI() && !root.ragIndexingRunning && !root.ragRequestRunning && !root.aiRunning && ragQuestionInput.text !== ""
                                 contentItem: Text {
                                     text: parent.text
                                     font.family: Typography.fontPrimary
@@ -1237,160 +1545,46 @@ Rectangle {
                                     font.weight: Typography.weightMedium
                                     horizontalAlignment: Text.AlignHCenter
                                     verticalAlignment: Text.AlignVCenter
-                                    color: parent.enabled ? Colors.white : Colors.textTertiary
+                                    color: Colors.white
                                 }
                                 background: Rectangle {
-                                    color: parent.enabled ? Colors.primary500 : Colors.bgTertiary
+                                    color: Colors.primary500
+                                    radius: Metrics.radiusSm
+                                    border.color: Colors.primary600
+                                    opacity: parent.enabled ? 1 : 0.5
+                                }
+                                onClicked: {
+                                    askIndexedDocuments(ragQuestionInput.text)
+                                }
+                            }
+
+                            Rectangle {
+                                width: parent.width
+                                height: 1
+                                color: Colors.borderLight
+                            }
+
+                            Button {
+                                width: parent.width
+                                Layout.preferredHeight: 36
+                                text: "참고문서 관리"
+                                enabled: canUseAI()
+                                contentItem: Text {
+                                    text: parent.text
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: Typography.bodySmall
+                                    font.weight: Typography.weightMedium
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                    color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
+                                }
+                                background: Rectangle {
+                                    color: parent.enabled ? Colors.surface : Colors.bgTertiary
+                                    border.color: Colors.borderLight
                                     radius: Metrics.radiusSm
                                 }
                                 onClicked: {
-                                    if (root.aiRunning) {
-                                        var ac = getAssistantController()
-                                        if (ac) {
-                                            ac.cancel()
-                                            root.responseText += "\n[안내] 작업을 취소했습니다."
-                                        }
-                                    } else {
-                                        runSelectedAction()
-                                    }
-                                }
-                            }
-                        }
-
-                        // AI 참고문서 card - consolidated RAG UI
-                        Rectangle {
-                            width: parent.width
-                            radius: Metrics.radiusLg
-                            color: Colors.surface
-                            border.color: Colors.borderLight
-                            implicitHeight: referenceDocsCardColumn.implicitHeight + (Metrics.md * 2)
-
-                            Column {
-                                id: referenceDocsCardColumn
-                                width: parent.width - (Metrics.md * 2)
-                                spacing: Metrics.sm
-                                anchors.centerIn: parent
-
-                                Text {
-                                    text: "AI 참고문서"
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.bodyRegular
-                                    font.weight: Typography.weightSemibold
-                                    color: Colors.textPrimary
-                                }
-
-                                Text {
-                                    width: parent.width
-                                    text: "등록한 문서는 AI가 여러 문서에서 찾아 답변할 때 참고합니다."
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.caption
-                                    color: Colors.textSecondary
-                                    wrapMode: Text.WordWrap
-                                }
-
-                                Rectangle {
-                                    width: parent.width
-                                    height: 1
-                                    color: Colors.borderLight
-                                }
-
-                                Column {
-                                    width: parent.width
-                                    spacing: Metrics.xs
-
-                                    Text {
-                                        text: "현재 문서 질문: 지금 열려 있는 문서 하나만 참고합니다."
-                                        font.family: Typography.fontPrimary
-                                        font.pixelSize: Typography.caption
-                                        color: Colors.textTertiary
-                                    }
-
-                                    Text {
-                                        text: "등록된 문서 질문: 등록된 여러 문서에서 관련 내용을 찾아 답변합니다."
-                                        font.family: Typography.fontPrimary
-                                        font.pixelSize: Typography.caption
-                                        color: Colors.textTertiary
-                                    }
-                                }
-
-                                Rectangle {
-                                    width: parent.width
-                                    height: 1
-                                    color: Colors.borderLight
-                                }
-
-                                RowLayout {
-                                    width: parent.width
-                                    spacing: Metrics.sm
-
-                                    Button {
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: 32
-                                        text: "현재 문서 등록"
-                                        enabled: canUseAI() && !root.ragIndexingRunning && !root.ragRequestRunning
-                                        contentItem: Text {
-                                            text: parent.text
-                                            font.family: Typography.fontPrimary
-                                            font.pixelSize: Typography.caption
-                                            horizontalAlignment: Text.AlignHCenter
-                                            verticalAlignment: Text.AlignVCenter
-                                            color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
-                                        }
-                                        background: Rectangle {
-                                            color: parent.enabled ? Colors.surface : Colors.bgTertiary
-                                            border.color: Colors.borderLight
-                                            radius: Metrics.radiusSm
-                                        }
-                                        onClicked: {
-                                            indexCurrentNoteForRag()
-                                        }
-                                    }
-
-                                    Button {
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: 32
-                                        text: "등록된 문서 질문"
-                                        enabled: canUseAI() && !root.ragIndexingRunning && !root.ragRequestRunning
-                                        contentItem: Text {
-                                            text: parent.text
-                                            font.family: Typography.fontPrimary
-                                            font.pixelSize: Typography.caption
-                                            horizontalAlignment: Text.AlignHCenter
-                                            verticalAlignment: Text.AlignVCenter
-                                            color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
-                                        }
-                                        background: Rectangle {
-                                            color: parent.enabled ? Colors.surface : Colors.bgTertiary
-                                            border.color: Colors.borderLight
-                                            radius: Metrics.radiusSm
-                                        }
-                                        onClicked: {
-                                            askIndexedDocuments()
-                                        }
-                                    }
-
-                                    Button {
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: 32
-                                        text: "관리"
-                                        enabled: canUseAI()
-                                        contentItem: Text {
-                                            text: parent.text
-                                            font.family: Typography.fontPrimary
-                                            font.pixelSize: Typography.caption
-                                            horizontalAlignment: Text.AlignHCenter
-                                            verticalAlignment: Text.AlignVCenter
-                                            color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
-                                        }
-                                        background: Rectangle {
-                                            color: parent.enabled ? Colors.surface : Colors.bgTertiary
-                                            border.color: Colors.borderLight
-                                            radius: Metrics.radiusSm
-                                        }
-                                        onClicked: {
-                                            root.openReferenceDocsSettings()
-                                        }
-                                    }
+                                    root.openReferenceDocsSettings()
                                 }
                             }
                         }
@@ -1458,285 +1652,283 @@ Rectangle {
                         }
                     }
                 }
+            }
+        }
 
-                Rectangle {
-                    width: parent.width
-                    radius: Metrics.radiusLg
-                    color: Colors.surface
-                    border.color: Colors.borderLight
-                    implicitHeight: resultPreviewLayout.implicitHeight + (Metrics.md * 2)
+        Rectangle {
+            Layout.fillWidth: true
+            radius: Metrics.radiusLg
+            color: Colors.surface
+            border.color: Colors.borderLight
+            implicitHeight: resultPreviewLayout.implicitHeight + (Metrics.md * 2)
 
-                    ColumnLayout {
-                        id: resultPreviewLayout
-                        anchors.fill: parent
-                        anchors.margins: Metrics.md
-                        spacing: Metrics.sm
+            ColumnLayout {
+                id: resultPreviewLayout
+                anchors.fill: parent
+                anchors.margins: Metrics.md
+                spacing: Metrics.sm
 
-                        Text {
-                            text: "결과 미리보기"
+                Text {
+                    text: "결과 미리보기"
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.bodySmall
+                    font.weight: Typography.weightMedium
+                    color: Colors.textPrimary
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 220
+
+                    Item {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        visible: root.responseText === ""
+
+                        Column {
+                            anchors.centerIn: parent
+                            spacing: Metrics.xs
+                            Text {
+                                text: "아직 결과가 없습니다"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodySmall
+                                color: Colors.textSecondary
+                            }
+                            Text {
+                                text: "AI 작업을 실행하면 요약이나 답변이 이곳에 표시됩니다."
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.caption
+                                color: Colors.textTertiary
+                                horizontalAlignment: Text.AlignHCenter
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+                    }
+
+                    ScrollView {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        visible: root.responseText !== ""
+                        ScrollBar.vertical.policy: ScrollBar.AsNeeded
+
+                        TextArea {
+                            text: root.responseText
+                            readOnly: true
+                            wrapMode: TextEdit.Wrap
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.bodySmall
+                            color: Colors.textPrimary
+                            background: null
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: ragCitationsColumn.implicitHeight + Metrics.sm
+                        color: Colors.surface
+                        border.color: Colors.borderLight
+                        radius: Metrics.radiusSm
+                        visible: root.hasRagCitations
+
+                        Column {
+                            id: ragCitationsColumn
+                            width: parent.width - (Metrics.sm * 2)
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            spacing: Metrics.xs
+
+                            Text {
+                                text: "근거 문서 (" + root.ragCitations.length + ")"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.caption
+                                font.weight: Typography.weightMedium
+                                color: Colors.textSecondary
+                            }
+
+                            Repeater {
+                                model: root.ragCitations
+                                delegate: Column {
+                                    width: parent.width
+                                    spacing: 2
+
+                                    Row {
+                                        spacing: Metrics.xs
+                                        Text {
+                                            text: modelData.source_id + " · " + (modelData.title || "제목 없음")
+                                            font.family: Typography.fontPrimary
+                                            font.pixelSize: Typography.caption
+                                            color: Colors.textPrimary
+                                            elide: Text.ElideRight
+                                            Layout.maximumWidth: root.width - 100
+                                        }
+                                        Text {
+                                            text: "답변에 인용됨"
+                                            font.family: Typography.fontPrimary
+                                            font.pixelSize: 10
+                                            color: Colors.primary500
+                                            visible: modelData.cited_in_answer
+                                        }
+                                    }
+
+                                    Text {
+                                        text: formatHeadingPath(modelData.heading_path)
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: 10
+                                        color: Colors.textTertiary
+                                        visible: modelData.heading_path && modelData.heading_path.length > 0
+                                    }
+
+                                    Text {
+                                        text: modelData.source_type + (modelData.note_id ? " · note_id: " + modelData.note_id : (modelData.source_path ? " · " + formatSourcePath(modelData.source_path) : ""))
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: 10
+                                        color: Colors.textTertiary
+                                        elide: Text.ElideRight
+                                        Layout.maximumWidth: root.width - 60
+                                    }
+
+                                    Row {
+                                        spacing: Metrics.xs
+                                        visible: modelData.note_id || modelData.source_path
+
+                                        Button {
+                                            implicitWidth: 60
+                                            implicitHeight: 20
+                                            padding: 0
+                                            text: formatCitationActionLabel(modelData)
+                                            font.family: Typography.fontPrimary
+                                            font.pixelSize: 9
+                                            onClicked: {
+                                                openCitation(modelData)
+                                            }
+                                            background: Rectangle {
+                                                color: Colors.bgSecondary
+                                                border.color: Colors.borderLight
+                                                radius: 3
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: ragWarningsColumn.implicitHeight + Metrics.sm
+                        color: Colors.surface
+                        border.color: Colors.warning
+                        radius: Metrics.radiusSm
+                        visible: root.hasRagWarnings
+
+                        Column {
+                            id: ragWarningsColumn
+                            width: parent.width - (Metrics.sm * 2)
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            spacing: Metrics.xs
+
+                            Text {
+                                text: "알림"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.caption
+                                font.weight: Typography.weightMedium
+                                color: Colors.warning
+                            }
+
+                            Repeater {
+                                model: root.ragWarnings
+                                delegate: Text {
+                                    text: "- " + formatRagWarningMessage(modelData)
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: 10
+                                    color: Colors.textSecondary
+                                    wrapMode: Text.Wrap
+                                    width: parent.width
+                                }
+                            }
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Metrics.sm
+
+                    Button {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 40
+                        text: "본문에 삽입"
+                        enabled: root.responseText !== ""
+                        contentItem: Text {
+                            text: parent.text
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.bodySmall
+                            font.weight: Typography.weightMedium
+                            color: Colors.white
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            color: Colors.primary500
+                            radius: Metrics.radiusSm
+                            border.color: Colors.primary600
+                            opacity: parent.enabled ? 1 : 0.5
+                        }
+                        onClicked: {
+                            console.log("[AIAssistantPanel] 본문에 삽입 clicked")
+                        }
+                    }
+
+                    Button {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 40
+                        text: "새 노트로 저장"
+                        enabled: root.responseText !== "" && typeof noteController !== "undefined"
+                        contentItem: Text {
+                            text: parent.text
                             font.family: Typography.fontPrimary
                             font.pixelSize: Typography.bodySmall
                             font.weight: Typography.weightMedium
                             color: Colors.textPrimary
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
                         }
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: 220
-
-                            Item {
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                visible: root.responseText === ""
-
-                                Column {
-                                    anchors.centerIn: parent
-                                    spacing: Metrics.xs
-                                    Text {
-                                        text: "아직 결과가 없습니다"
-                                        font.family: Typography.fontPrimary
-                                        font.pixelSize: Typography.bodySmall
-                                        color: Colors.textSecondary
-                                    }
-                                    Text {
-                                        text: "AI 작업을 실행하면 요약이나 답변이 이곳에 표시됩니다."
-                                        font.family: Typography.fontPrimary
-                                        font.pixelSize: Typography.caption
-                                        color: Colors.textTertiary
-                                        horizontalAlignment: Text.AlignHCenter
-                                        wrapMode: Text.WordWrap
-                                    }
-                                }
-                            }
-
-                            ScrollView {
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                clip: true
-                                visible: root.responseText !== ""
-                                ScrollBar.vertical.policy: ScrollBar.AsNeeded
-
-                                TextArea {
-                                    text: root.responseText
-                                    readOnly: true
-                                    wrapMode: TextEdit.Wrap
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.bodySmall
-                                    color: Colors.textPrimary
-                                    background: null
-                                }
-                            }
-
-                            // RAG citations section
-                            Rectangle {
-                                Layout.fillWidth: true
-                                implicitHeight: ragCitationsColumn.implicitHeight + Metrics.sm
-                                color: Colors.surface
-                                border.color: Colors.borderLight
-                                radius: Metrics.radiusSm
-                                visible: root.hasRagCitations
-
-                                Column {
-                                    id: ragCitationsColumn
-                                    width: parent.width - (Metrics.sm * 2)
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    spacing: Metrics.xs
-
-                                    Text {
-                                        text: "근거 문서 (" + root.ragCitations.length + ")"
-                                        font.family: Typography.fontPrimary
-                                        font.pixelSize: Typography.caption
-                                        font.weight: Typography.weightMedium
-                                        color: Colors.textSecondary
-                                    }
-
-                                    Repeater {
-                                        model: root.ragCitations
-                                        delegate: Column {
-                                            width: parent.width
-                                            spacing: 2
-
-                                            Row {
-                                                spacing: Metrics.xs
-                                                Text {
-                                                    text: modelData.source_id + " · " + (modelData.title || "제목 없음")
-                                                    font.family: Typography.fontPrimary
-                                                    font.pixelSize: Typography.caption
-                                                    color: Colors.textPrimary
-                                                    elide: Text.ElideRight
-                                                    Layout.maximumWidth: root.width - 100
-                                                }
-                                                Text {
-                                                    text: "답변에 인용됨"
-                                                    font.family: Typography.fontPrimary
-                                                    font.pixelSize: 10
-                                                    color: Colors.primary500
-                                                    visible: modelData.cited_in_answer
-                                                }
-                                            }
-
-                                            Text {
-                                                text: formatHeadingPath(modelData.heading_path)
-                                                font.family: Typography.fontPrimary
-                                                font.pixelSize: 10
-                                                color: Colors.textTertiary
-                                                visible: modelData.heading_path && modelData.heading_path.length > 0
-                                            }
-
-                                            Text {
-                                                text: modelData.source_type + (modelData.note_id ? " · note_id: " + modelData.note_id : (modelData.source_path ? " · " + formatSourcePath(modelData.source_path) : ""))
-                                                font.family: Typography.fontPrimary
-                                                font.pixelSize: 10
-                                                color: Colors.textTertiary
-                                                elide: Text.ElideRight
-                                                Layout.maximumWidth: root.width - 60
-                                            }
-
-                                            Row {
-                                                spacing: Metrics.xs
-                                                visible: modelData.note_id || modelData.source_path
-
-                                                Button {
-                                                    implicitWidth: 60
-                                                    implicitHeight: 20
-                                                    padding: 0
-                                                    text: formatCitationActionLabel(modelData)
-                                                    font.family: Typography.fontPrimary
-                                                    font.pixelSize: 9
-                                                    onClicked: {
-                                                        openCitation(modelData)
-                                                    }
-                                                    background: Rectangle {
-                                                        color: Colors.bgSecondary
-                                                        border.color: Colors.borderLight
-                                                        radius: 3
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // RAG warnings section
-                            Rectangle {
-                                Layout.fillWidth: true
-                                implicitHeight: ragWarningsColumn.implicitHeight + Metrics.sm
-                                color: Colors.surface
-                                border.color: Colors.warning
-                                radius: Metrics.radiusSm
-                                visible: root.hasRagWarnings
-
-                                Column {
-                                    id: ragWarningsColumn
-                                    width: parent.width - (Metrics.sm * 2)
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    spacing: Metrics.xs
-
-                                    Text {
-                                        text: "알림"
-                                        font.family: Typography.fontPrimary
-                                        font.pixelSize: Typography.caption
-                                        font.weight: Typography.weightMedium
-                                        color: Colors.warning
-                                    }
-
-                                    Repeater {
-                                        model: root.ragWarnings
-                                        delegate: Text {
-                                            text: "- " + formatRagWarningMessage(modelData)
-                                            font.family: Typography.fontPrimary
-                                            font.pixelSize: 10
-                                            color: Colors.textSecondary
-                                            wrapMode: Text.Wrap
-                                            width: parent.width
-                                        }
-                                    }
-                                }
+                        background: Rectangle {
+                            color: Colors.bgSecondary
+                            radius: Metrics.radiusSm
+                            border.color: Colors.borderLight
+                            opacity: parent.enabled ? 1 : 0.5
+                        }
+                        onClicked: {
+                            var ac = getAssistantController()
+                            if (ac && root.responseText) {
+                                ac.createNewNote("AI 결과", root.responseText, "")
                             }
                         }
+                    }
 
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: Metrics.sm
-
-                            Button {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 40
-                                text: "본문에 삽입"
-                                enabled: root.responseText !== ""
-                                contentItem: Text {
-                                    text: parent.text
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.bodySmall
-                                    font.weight: Typography.weightMedium
-                                    color: Colors.white
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                }
-                                background: Rectangle {
-                                    color: Colors.primary500
-                                    radius: Metrics.radiusSm
-                                    border.color: Colors.primary600
-                                    opacity: parent.enabled ? 1 : 0.5
-                                }
-                                onClicked: {
-                                    console.log("[AIAssistantPanel] 본문에 삽입 clicked")
-                                }
-                            }
-
-                            Button {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 40
-                                text: "새 노트로 저장"
-                                enabled: root.responseText !== "" && typeof noteController !== "undefined"
-                                contentItem: Text {
-                                    text: parent.text
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.bodySmall
-                                    font.weight: Typography.weightMedium
-                                    color: Colors.textPrimary
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                }
-                                background: Rectangle {
-                                    color: Colors.bgSecondary
-                                    radius: Metrics.radiusSm
-                                    border.color: Colors.borderLight
-                                    opacity: parent.enabled ? 1 : 0.5
-                                }
-                                onClicked: {
-                                    var ac = getAssistantController()
-                                    if (ac && root.responseText) {
-                                        ac.createNewNote("AI 결과", root.responseText, "")
-                                    }
-                                }
-                            }
-
-                            Button {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 40
-                                text: "복사"
-                                enabled: root.responseText !== ""
-                                contentItem: Text {
-                                    text: parent.text
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.bodySmall
-                                    font.weight: Typography.weightMedium
-                                    color: Colors.textPrimary
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                }
-                                background: Rectangle {
-                                    color: Colors.surface
-                                    radius: Metrics.radiusSm
-                                    border.color: Colors.borderLight
-                                    opacity: parent.enabled ? 1 : 0.5
-                                }
-                                onClicked: {
-                                    console.log("[AIAssistantPanel] 복사 clicked")
-                                }
-                            }
+                    Button {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 40
+                        text: "복사"
+                        enabled: root.responseText !== ""
+                        contentItem: Text {
+                            text: parent.text
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.bodySmall
+                            font.weight: Typography.weightMedium
+                            color: Colors.textPrimary
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            color: Colors.surface
+                            radius: Metrics.radiusSm
+                            border.color: Colors.borderLight
+                            opacity: parent.enabled ? 1 : 0.5
+                        }
+                        onClicked: {
+                            console.log("[AIAssistantPanel] 복사 clicked")
                         }
                     }
                 }

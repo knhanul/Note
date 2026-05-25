@@ -73,6 +73,13 @@ class AssistantController(QObject):
         self.runningChanged.emit(False)
         self._current_worker = None
         self._worker_manager.clear_worker()
+        
+        # Check for empty response - this happens when worker emitted error for empty response
+        if not self._response_text or len(self._response_text) == 0:
+            logger.warning(f"[AssistantController] Empty response detected, emitting error instead of resultReady")
+            self.errorOccurred.emit("AI 응답이 비어 있습니다. 모델 또는 응답 파싱을 확인해 주세요.")
+            return
+            
         logger.info(f"[AssistantController] Worker finished, emitting resultReady: response_text_len={len(self._response_text)}")
         self.resultReady.emit(self._response_text)
         logger.info("[AssistantController] Task finished")

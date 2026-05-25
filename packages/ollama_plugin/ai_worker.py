@@ -9,6 +9,29 @@ from PyQt6.QtCore import QRunnable, QObject, pyqtSignal, QThreadPool
 
 logger = logging.getLogger(__name__)
 
+DEBUG_MODE = False  # Set to True for debug logging
+
+
+def extract_response_text(chunk: dict) -> str:
+    """Extract actual text from Ollama streaming chunk.
+    
+    Supports both /api/generate (chunk["response"]) and /api/chat (chunk["message"]["content"]) formats.
+    Returns empty string if no valid text found.
+    """
+    # /api/generate format: {"response": "text", ...}
+    if "response" in chunk:
+        text = chunk["response"]
+        if isinstance(text, str):
+            return text
+    
+    # /api/chat format: {"message": {"content": "text", ...}, ...}
+    if "message" in chunk and isinstance(chunk["message"], dict):
+        content = chunk["message"].get("content")
+        if isinstance(content, str):
+            return content
+    
+    return ""
+
 
 class AIWorkerSignals(QObject):
     """Signals for AI worker."""
@@ -60,6 +83,9 @@ class AIWorker(QRunnable):
         """Run the AI operation."""
         start_time = time.time()
         first_token_time = None
+        accumulated_response = ""
+        chunk_count = 0
+        fallback_attempted = False
 
         if not self.model:
             self.signals.errorOccurred.emit("모델이 선택되지 않았습니다")
@@ -91,100 +117,24 @@ class AIWorker(QRunnable):
             )
 
         try:
-            url = f"{self.base_url}/api/generate"
-            data = {
-                "model": self.model,
-                "prompt": self.prompt,
-                "stream": self.stream,
-            }
-
-            if self.options:
-                data["options"] = self.options
-
-            if self.keep_alive:
-                data["keep_alive"] = self.keep_alive
-
-            request = urllib.request.Request(
-                url,
-                data=json.dumps(data).encode("utf-8"),
-                method="POST"
-            )
-            request.add_header("Content-Type", "application/json")
-
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                if response.status != 200:
-                    error_msg = f"오류: {response.status}"
-                    try:
-                        error_data = response.read().decode("utf-8")
-                        error_msg += f" - {error_data}"
-                    except:
-                        pass
-                    self.signals.errorOccurred.emit(error_msg)
-                    self.signals.finished.emit()
-                    return
-
-                if self.stream:
-                    buffer = ""
-                    for line in response:
-                        if self._is_cancelled:
-                            self.signals.statusChanged.emit("중지됨")
-                            self.signals.finished.emit()
-                            return
-
-                        if line:
-                            buffer += line.decode("utf-8")
-                            while "\n" in buffer:
-                                line, buffer = buffer.split("\n", 1)
-                                try:
-                                    data = json.loads(line)
-                                    if first_token_time is None:
-                                        first_token_time = time.time() - start_time
-                                        logger.info(
-                                            f"[AIWorker] First token received: {first_token_time:.2f}s, "
-                                            f"action_id={self.action_id}"
-                                        )
-                                    if "response" in data:
-                                        token = data["response"]
-                                        logger.info(f"[AIWorker] Emitting token: len={len(token)}, action_id={self.action_id}")
-                                        self.signals.tokenReceived.emit(token)
-                                    if data.get("done", False):
-                                        total_time = time.time() - start_time
-                                        load_duration_ms = data.get("load_duration", 0)
-                                        total_duration_ms = data.get("total_duration", 0)
-                                        load_duration_s = load_duration_ms / 1000 if load_duration_ms else 0
-                                        total_duration_s = total_duration_ms / 1000 if total_duration_ms else 0
-                                        logger.info(
-                                            f"[AIWorker] Stream complete: total={total_time:.2f}s, "
-                                            f"first_token={first_token_time:.2f}s, "
-                                            f"load_duration={load_duration_s:.2f}s, "
-                                            f"total_duration={total_duration_s:.2f}s, "
-                                            f"action_id={self.action_id}"
-                                        )
-                                except json.JSONDecodeError:
-                                    continue
-
-                    self.signals.statusChanged.emit("완료")
-                    self.signals.resultReady.emit("응답 완료")
-                else:
-                    body = response.read().decode("utf-8")
-                    data = json.loads(body)
-                    first_token_time = time.time() - start_time
-                    load_duration_ms = data.get("load_duration", 0)
-                    total_duration_ms = data.get("total_duration", 0)
-                    load_duration_s = load_duration_ms / 1000 if load_duration_ms else 0
-                    total_duration_s = total_duration_ms / 1000 if total_duration_ms else 0
-                    logger.info(
-                        f"[AIWorker] Non-stream response: first_token={first_token_time:.2f}s, "
-                        f"load_duration={load_duration_s:.2f}s, "
-                        f"total_duration={total_duration_s:.2f}s, "
-                        f"action_id={self.action_id}"
-                    )
-                    if "response" in data:
-                        token = data["response"]
-                        logger.info(f"[AIWorker] Emitting non-stream token: len={len(token)}, action_id={self.action_id}")
-                        self.signals.tokenReceived.emit(token)
-                    self.signals.statusChanged.emit("완료")
-                    self.signals.resultReady.emit("응답 완료")
+            # Try stream=True first, fallback to stream=False if empty response
+            response_text = self._execute_request(start_time, first_token_time, accumulated_response, chunk_count, fallback_attempted)
+            
+            # Check if response is empty and fallback not yet attempted
+            if not response_text and not fallback_attempted and self.stream:
+                logger.info("[AIWorker] Empty response with stream=True, retrying with stream=False")
+                fallback_attempted = True
+                response_text = self._execute_request(start_time, first_token_time, accumulated_response, chunk_count, fallback_attempted)
+            
+            # Handle empty response after all attempts
+            if not response_text:
+                logger.warning(f"[AIWorker] Empty response after all attempts, action_id={self.action_id}")
+                self.signals.errorOccurred.emit("AI 응답이 비어 있습니다. 모델 또는 응답 파싱을 확인해 주세요.")
+                self.signals.finished.emit()
+                return
+            
+            self.signals.statusChanged.emit("완료")
+            self.signals.resultReady.emit("응답 완료")
 
         except urllib.error.URLError as e:
             logger.error(f"[AIWorker] Connection error: {e}")
@@ -205,12 +155,175 @@ class AIWorker(QRunnable):
             self.signals.errorOccurred.emit(f"오류: {str(e)}")
 
         total_time = time.time() - start_time
+        first_token_str = f"{first_token_time:.2f}s" if first_token_time else "N/A"
         logger.info(
             f"[AIWorker] Task finished: total={total_time:.2f}s, "
-            f"first_token={first_token_time if first_token_time else 'N/A'}s, "
+            f"first_token={first_token_str}, "
             f"action_id={self.action_id}"
         )
         self.signals.finished.emit()
+
+    def _execute_request(self, start_time, first_token_time, accumulated_response, chunk_count, fallback_attempted):
+        """Execute the Ollama API request and return accumulated response."""
+        use_stream = self.stream and not fallback_attempted
+        
+        # Use /api/chat for chat mode, /api/generate for generate mode
+        # For now, use /api/generate as default
+        url = f"{self.base_url}/api/generate"
+        data = {
+            "model": self.model,
+            "prompt": self.prompt,
+            "stream": use_stream,
+        }
+
+        if self.options:
+            data["options"] = self.options
+
+        if self.keep_alive:
+            data["keep_alive"] = self.keep_alive
+
+        request = urllib.request.Request(
+            url,
+            data=json.dumps(data).encode("utf-8"),
+            method="POST"
+        )
+        request.add_header("Content-Type", "application/json")
+
+        accumulated_response = ""
+        chunk_count = 0
+        first_token_time = None
+
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                if response.status != 200:
+                    error_msg = f"오류: {response.status}"
+                    try:
+                        error_data = response.read().decode("utf-8")
+                        error_msg += f" - {error_data}"
+                    except:
+                        pass
+                    self.signals.errorOccurred.emit(error_msg)
+                    self.signals.finished.emit()
+                    return ""
+
+                if use_stream:
+                    buffer = ""
+                    for line in response:
+                        if self._is_cancelled:
+                            self.signals.statusChanged.emit("중지됨")
+                            self.signals.finished.emit()
+                            return ""
+
+                        if line:
+                            buffer += line.decode("utf-8")
+                            while "\n" in buffer:
+                                line, buffer = buffer.split("\n", 1)
+                                try:
+                                    chunk = json.loads(line)
+                                    chunk_count += 1
+                                    
+                                    # Debug log first 3 chunks
+                                    if DEBUG_MODE and chunk_count <= 3:
+                                        logger.debug(f"[AIWorker] Raw chunk {chunk_count}: {chunk}")
+                                    
+                                    # Extract text using helper function
+                                    token = extract_response_text(chunk)
+                                    
+                                    # Skip empty tokens for first token detection
+                                    if first_token_time is None and token:
+                                        first_token_time = time.time() - start_time
+                                        logger.info(
+                                            f"[AIWorker] First token received: {first_token_time:.2f}s, "
+                                            f"action_id={self.action_id}"
+                                        )
+                                    
+                                    # Only emit non-empty tokens
+                                    if token:
+                                        logger.info(f"[AIWorker] Emitting token: len={len(token)}, action_id={self.action_id}")
+                                        self.signals.tokenReceived.emit(token)
+                                        accumulated_response += token
+                                    
+                                    if chunk.get("done", False):
+                                        total_time = time.time() - start_time
+                                        # Handle both ms and ns duration values
+                                        load_duration_raw = chunk.get("load_duration", 0)
+                                        total_duration_raw = chunk.get("total_duration", 0)
+                                        
+                                        # Convert to seconds (Ollama returns ns, so values like 129552398300000000 need /1e9)
+                                        # If value > 1e11 (100+ seconds in ns), it's likely in ns
+                                        if load_duration_raw > 1e11:
+                                            load_duration_s = load_duration_raw / 1e9  # ns to seconds
+                                        else:
+                                            load_duration_s = load_duration_raw / 1000 if load_duration_raw else 0
+                                            
+                                        if total_duration_raw > 1e11:
+                                            total_duration_s = total_duration_raw / 1e9  # ns to seconds
+                                        else:
+                                            total_duration_s = total_duration_raw / 1000 if total_duration_raw else 0
+                                        
+                                        done_reason = chunk.get("done_reason", "")
+                                        eval_count = chunk.get("eval_count", 0)
+                                        prompt_eval_count = chunk.get("prompt_eval_count", 0)
+                                        
+                                        first_token_str = f"{first_token_time:.2f}s" if first_token_time else "N/A"
+                                        logger.info(
+                                            f"[AIWorker] Stream complete: total={total_time:.2f}s, "
+                                            f"first_token={first_token_str}, "
+                                            f"load_duration={load_duration_s:.2f}s, "
+                                            f"total_duration={total_duration_s:.2f}s, "
+                                            f"done_reason={done_reason}, "
+                                            f"eval_count={eval_count}, "
+                                            f"prompt_eval_count={prompt_eval_count}, "
+                                            f"action_id={self.action_id}"
+                                        )
+                                except json.JSONDecodeError:
+                                    continue
+
+                    return accumulated_response
+                else:
+                    body = response.read().decode("utf-8")
+                    data = json.loads(body)
+                    first_token_time = time.time() - start_time
+                    
+                    # Handle both ms and ns duration values
+                    load_duration_raw = data.get("load_duration", 0)
+                    total_duration_raw = data.get("total_duration", 0)
+                    
+                    # If value > 1e11 (100+ seconds in ns), it's likely in ns
+                    if load_duration_raw > 1e11:
+                        load_duration_s = load_duration_raw / 1e9
+                    else:
+                        load_duration_s = load_duration_raw / 1000 if load_duration_raw else 0
+                        
+                    if total_duration_raw > 1e11:
+                        total_duration_s = total_duration_raw / 1e9
+                    else:
+                        total_duration_s = total_duration_raw / 1000 if total_duration_raw else 0
+                    
+                    logger.info(
+                        f"[AIWorker] Non-stream response: first_token={first_token_time:.2f}s, "
+                        f"load_duration={load_duration_s:.2f}s, "
+                        f"total_duration={total_duration_s:.2f}s, "
+                        f"action_id={self.action_id}"
+                    )
+                    
+                    # Use helper function to extract text
+                    token = extract_response_text(data)
+                    if token:
+                        logger.info(f"[AIWorker] Emitting non-stream token: len={len(token)}, action_id={self.action_id}")
+                        self.signals.tokenReceived.emit(token)
+                        accumulated_response = token
+                    
+                    return accumulated_response
+
+        except urllib.error.URLError as e:
+            logger.error(f"[AIWorker] Connection error in _execute_request: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"[AIWorker] Error in _execute_request: {e}")
+            raise
+
+        return accumulated_response
 
 
 class AIWorkerManager:

@@ -31,6 +31,9 @@ class AiSearchService:
     def search_keyword(
         self, query: str, limit: int = 20, offset: int = 0
     ) -> list[SearchResultChunk]:
+        import logging
+        logger = logging.getLogger(__name__)
+        
         if not query or not query.strip():
             return []
 
@@ -64,6 +67,8 @@ class AiSearchService:
         """, (like_pattern, like_pattern, like_pattern))
         rows = cursor.fetchall()
 
+        logger.info(f"[AiSearchService] Keyword search: query='{query}', found {len(rows)} raw rows")
+
         results: list[SearchResultChunk] = []
         for row in rows:
             score = self._calculate_score(
@@ -78,6 +83,47 @@ class AiSearchService:
                 results.append(self._row_to_search_result(row, score, snippet))
 
         results.sort(key=lambda r: (-r.score, r.title or "", r.document_id, r.chunk_order))
+        
+        # Fallback: if no results, return recent indexed documents
+        if not results:
+            logger.info(f"[AiSearchService] No keyword match for '{query}', returning recent documents as fallback")
+            return self._get_recent_documents(limit, offset)
+        
+        return results[offset : offset + limit]
+    
+    def _get_recent_documents(self, limit: int, offset: int) -> list[SearchResultChunk]:
+        """Get recent indexed documents as fallback when no search results."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        conn = self._repo._db.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT
+                c.chunk_id,
+                c.document_id,
+                d.title,
+                d.source_type,
+                d.source_path,
+                d.note_id,
+                c.heading_path_json,
+                c.chunk_text,
+                c.chunk_order
+            FROM ai_document_chunks c
+            JOIN ai_documents d ON c.document_id = d.document_id
+            ORDER BY d.created_at DESC, c.chunk_order
+            LIMIT ?
+        """, (limit * 2,))  # Get more chunks to ensure we have enough
+        rows = cursor.fetchall()
+        
+        logger.info(f"[AiSearchService] Fallback: found {len(rows)} recent documents")
+        
+        results: list[SearchResultChunk] = []
+        for row in rows:
+            snippet = self._create_snippet(row["chunk_text"], "")
+            results.append(self._row_to_search_result(row, 0.1, snippet))
+        
         return results[offset : offset + limit]
 
     def search_by_document(
