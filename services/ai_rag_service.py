@@ -79,7 +79,7 @@ class AiRagService:
             )
 
         search_results = self._search.search_keyword(
-            question, limit=options.limit
+            question, limit=options.limit, fallback=True
         )
 
         if not search_results:

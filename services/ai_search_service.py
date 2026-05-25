@@ -29,7 +29,7 @@ class AiSearchService:
         self._repo = repository
 
     def search_keyword(
-        self, query: str, limit: int = 20, offset: int = 0
+        self, query: str, limit: int = 20, offset: int = 0, fallback: bool = False
     ) -> list[SearchResultChunk]:
         import logging
         logger = logging.getLogger(__name__)
@@ -84,8 +84,8 @@ class AiSearchService:
 
         results.sort(key=lambda r: (-r.score, r.title or "", r.document_id, r.chunk_order))
         
-        # Fallback: if no results, return recent indexed documents
-        if not results:
+        # Fallback: if no results and fallback enabled, return recent indexed documents
+        if not results and fallback:
             logger.info(f"[AiSearchService] No keyword match for '{query}', returning recent documents as fallback")
             return self._get_recent_documents(limit, offset)
         
