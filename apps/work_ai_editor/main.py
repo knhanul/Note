@@ -39,6 +39,7 @@ def plugin_setup(engine, services, config):
     # Setup Assistant Controller for AI operations
     assistant_controller = AssistantController(config.app_data_dir)
     assistant_controller.set_note_controller(services.note_controller)
+    assistant_controller.set_folder_controller(services.folder_controller)
     engine.rootContext().setContextProperty("assistantController", assistant_controller)
     engine._assistant_controller = assistant_controller  # Prevent GC
 

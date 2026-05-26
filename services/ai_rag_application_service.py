@@ -174,6 +174,35 @@ class AiRagApplicationService:
             "document_ids": document_ids,
         }
 
+    def index_external_folder(self, folder_path: str | Path) -> dict:
+        self._ensure_initialized()
+
+        folder = Path(folder_path)
+        if not folder.is_dir():
+            return {
+                "indexed_count": 0,
+                "failed_count": 0,
+                "warnings": ["폴더가 아닙니다"],
+                "document_ids": [],
+            }
+
+        supported_extensions = {".md", ".markdown", ".hwpx", ".hwp"}
+        file_paths = []
+
+        for path in folder.rglob("*"):
+            if path.is_file() and path.suffix.lower() in supported_extensions:
+                file_paths.append(str(path))
+
+        if not file_paths:
+            return {
+                "indexed_count": 0,
+                "failed_count": 0,
+                "warnings": ["지원하는 파일이 없습니다"],
+                "document_ids": [],
+            }
+
+        return self.index_external_files(file_paths)
+
     def search_index(self, query: str, limit: int = 20, offset: int = 0) -> list[SearchResultChunk]:
         self._ensure_initialized()
         return self._search_service.search_keyword(query, limit=limit, offset=offset)

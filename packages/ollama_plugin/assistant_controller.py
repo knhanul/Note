@@ -48,11 +48,16 @@ class AssistantController(QObject):
         self._retrieved_context = ""
         self._last_query = ""
         self._note_controller = None
+        self._folder_controller = None
         self._app_data_dir = app_data_dir
 
     def set_note_controller(self, controller):
         """Set note controller for creating notes."""
         self._note_controller = controller
+
+    def set_folder_controller(self, controller):
+        """Set folder controller for folder operations."""
+        self._folder_controller = controller
 
     @pyqtProperty(bool, notify=runningChanged)
     def isRunning(self) -> bool:
@@ -448,3 +453,26 @@ class AssistantController(QObject):
     def getResponseText(self) -> str:
         """Get the accumulated response text."""
         return self._response_text
+
+    @pyqtSlot(result=str)
+    def getOrCreateAIResultFolder(self) -> str:
+        """Find or create 'AI결과' folder in root and return its ID."""
+        if not self._folder_controller:
+            logger.warning("[AssistantController] Folder controller not set")
+            return ""
+
+        try:
+            all_folders = self._folder_controller.getAllFoldersJson()
+            import json
+            folders = json.loads(all_folders) if all_folders else []
+
+            for folder in folders:
+                if folder.get("name") == "AI결과" and not folder.get("parent_id"):
+                    return folder.get("id", "")
+
+            folder_id = self._folder_controller.createFolder("AI결과", "#3B82F6", "")
+            logger.info(f"[AssistantController] Created AI결과 folder: {folder_id}")
+            return folder_id
+        except Exception as e:
+            logger.error(f"[AssistantController] Failed to get/create AI결과 folder: {e}")
+            return ""

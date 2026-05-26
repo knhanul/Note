@@ -418,6 +418,26 @@ class AiRagController(QObject):
             logger.error(f"[AiRagController] indexExternalFilesJson failed: {e}")
             self.errorOccurred.emit(f"외부 파일 색인 실패: {e}")
 
+    @pyqtSlot(str)
+    def indexExternalFolder(self, folder_path: str) -> None:
+        try:
+            if not folder_path:
+                self._last_index_result = {
+                    "indexed_count": 0,
+                    "failed_count": 0,
+                    "warnings": ["No folder specified"],
+                    "document_ids": [],
+                }
+                self.indexStatusChanged.emit("indexed_empty")
+                return
+
+            result = self._get_app_service().index_external_folder(folder_path)
+            self._last_index_result = result
+            self.indexStatusChanged.emit("indexed_external_folder")
+        except Exception as e:
+            logger.error(f"[AiRagController] indexExternalFolder failed: {e}")
+            self.errorOccurred.emit(f"외부 폴더 색인 실패: {e}")
+
     @pyqtSlot(result=str)
     def getLastIndexResultJson(self) -> str:
         try:

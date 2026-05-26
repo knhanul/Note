@@ -45,6 +45,7 @@ Rectangle {
     property bool ragRequestRunning: false
     property bool ragIndexingRunning: false
     property int aiModeIndex: 0  // 0 = 현재 문서 AI, 1 = 참고문서 AI
+    property string lastAskedQuestion: ""
 
     onAiModeIndexChanged: {
         console.log("[AIAssistantPanel][DIAG] aiModeIndex changed:", aiModeIndex)
@@ -331,6 +332,7 @@ Rectangle {
         }
 
         root.responseText = ""
+        root.lastAskedQuestion = userInput || ""
 
         if (action.action_id === "current_note_qa") {
             if (!window.currentNote || !window.currentNote.content) {
@@ -486,6 +488,7 @@ Rectangle {
             return
         }
 
+        root.lastAskedQuestion = question
         clearRagState()
         root.ragRequestRunning = true
         root.responseText = "답변 생성 중..."
@@ -680,6 +683,12 @@ Rectangle {
     function fileUrlToLocalPath(fileUrl) {
         if (!fileUrl) return ""
         var path = fileUrl
+        if (Array.isArray(fileUrl)) {
+            path = fileUrl[0] || ""
+        }
+        if (typeof path !== "string") {
+            path = String(path)
+        }
         if (path.startsWith("file:///")) {
             path = path.substring(8)
         } else if (path.startsWith("file://")) {
@@ -714,6 +723,31 @@ Rectangle {
             var pathsJson = JSON.stringify(paths)
             console.log("[AIAssistantPanel] Indexing external files: " + paths.length + " files")
             ragCtrl.indexExternalFilesJson(pathsJson)
+        } catch (e) {
+            root.ragIndexingRunning = false
+            root.responseText = "[오류] 참고문서 등록 실패: " + e
+        }
+    }
+
+    function indexExternalFolderForRag(folderPath) {
+        var ragCtrl = getAiRagController()
+        if (!ragCtrl) {
+            root.responseText = "[오류] RAG 컨트롤러를 사용할 수 없습니다"
+            return
+        }
+
+        if (!folderPath) {
+            root.responseText = "선택된 폴더가 없습니다"
+            return
+        }
+
+        clearRagState()
+        root.ragIndexingRunning = true
+        root.responseText = "참고문서를 등록하는 중..."
+
+        try {
+            console.log("[AIAssistantPanel] Indexing external folder: " + folderPath)
+            ragCtrl.indexExternalFolder(folderPath)
         } catch (e) {
             root.ragIndexingRunning = false
             root.responseText = "[오류] 참고문서 등록 실패: " + e
@@ -1058,14 +1092,23 @@ Rectangle {
                                 color: Colors.textPrimary
                             }
 
-                            ListView {
-                                id: categoryFolderView
+                            Rectangle {
                                 width: parent.width
-                                height: 180
+                                height: 200
+                                implicitHeight: 200
+                                color: "transparent"
                                 clip: true
-                                spacing: Metrics.xs
-                                model: root.categoryList
-                                boundsBehavior: Flickable.StopAtBounds
+
+                                ListView {
+                                    id: categoryFolderView
+                                    width: parent.width
+                                    height: parent.height
+                                    spacing: Metrics.xs
+                                    model: root.categoryList
+                                    boundsBehavior: Flickable.StopAtBounds
+                                    ScrollBar.vertical: ScrollBar {
+                                        policy: ScrollBar.AsNeeded
+                                    }
 
                                 delegate: Item {
                                     id: categoryDelegate
@@ -1235,6 +1278,7 @@ Rectangle {
                                     }
                                 }
                             }
+                            }
 
                             Text {
                                 visible: root.categoryList.length === 0
@@ -1248,34 +1292,28 @@ Rectangle {
 
                             Rectangle {
                                 width: parent.width
-                                implicitHeight: selectedActionTitle.implicitHeight + (selectedActionDescription.visible ? selectedActionDescription.implicitHeight + Metrics.xs : 0) + Metrics.md * 2
+                                height: 60
                                 radius: Metrics.radiusMd
                                 color: Colors.bgSecondary
                                 border.color: Colors.borderLight
                                 border.width: 1
-                                visible: !!(root.selectedAction && root.selectedAction.action_id)
 
                                 Column {
                                     width: parent.width - (Metrics.md * 2)
-                                    anchors.top: parent.top
-                                    anchors.topMargin: Metrics.sm
-                                    anchors.bottom: parent.bottom
-                                    anchors.bottomMargin: Metrics.sm
-                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    anchors.centerIn: parent
                                     spacing: Metrics.xs
 
                                     Text {
-                                        id: selectedActionTitle
                                         width: parent.width
-                                        text: root.selectedAction ? (root.selectedAction.name || root.selectedAction.action_id) : ""
+                                        text: root.selectedAction ? (root.selectedAction.name || root.selectedAction.action_id) : "원하는 AI 기능을 선택하세요"
                                         font.family: Typography.fontPrimary
                                         font.pixelSize: Typography.bodyRegular
                                         font.weight: Font.Bold
                                         color: Colors.textPrimary
+                                        horizontalAlignment: Text.AlignHCenter
                                     }
 
                                     Text {
-                                        id: selectedActionDescription
                                         width: parent.width
                                         visible: root.selectedAction && root.selectedAction.description && root.selectedAction.description !== ""
                                         text: root.selectedAction ? root.selectedAction.description : ""
@@ -1283,6 +1321,7 @@ Rectangle {
                                         font.pixelSize: Typography.caption
                                         color: Colors.textSecondary
                                         wrapMode: Text.Wrap
+                                        horizontalAlignment: Text.AlignHCenter
                                     }
                                 }
                             }
@@ -1408,9 +1447,12 @@ Rectangle {
                                 color: Colors.textPrimary
                             }
 
-                            RowLayout {
+                            GridLayout {
                                 width: parent.width
-                                spacing: Metrics.sm
+                                columns: 3
+                                rows: 2
+                                rowSpacing: Metrics.sm
+                                columnSpacing: Metrics.sm
 
                                 Button {
                                     Layout.fillWidth: true
@@ -1457,11 +1499,6 @@ Rectangle {
                                         indexCurrentFolderForRag()
                                     }
                                 }
-                            }
-
-                            RowLayout {
-                                width: parent.width
-                                spacing: Metrics.sm
 
                                 Button {
                                     Layout.fillWidth: true
@@ -1506,6 +1543,52 @@ Rectangle {
                                     }
                                     onClicked: {
                                         externalFileDialog.open()
+                                    }
+                                }
+
+                                Button {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 32
+                                    text: "외부 폴더 등록"
+                                    enabled: canUseAI() && !root.ragIndexingRunning && !root.ragRequestRunning
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                        color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
+                                    }
+                                    background: Rectangle {
+                                        color: parent.enabled ? Colors.surface : Colors.bgTertiary
+                                        border.color: Colors.borderLight
+                                        radius: Metrics.radiusSm
+                                    }
+                                    onClicked: {
+                                        externalFolderDialog.open()
+                                    }
+                                }
+
+                                Button {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 32
+                                    text: "참고문서 관리"
+                                    enabled: canUseAI()
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                        color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
+                                    }
+                                    background: Rectangle {
+                                        color: parent.enabled ? Colors.surface : Colors.bgTertiary
+                                        border.color: Colors.borderLight
+                                        radius: Metrics.radiusSm
+                                    }
+                                    onClicked: {
+                                        root.openReferenceDocsSettings()
                                     }
                                 }
                             }
@@ -1555,36 +1638,6 @@ Rectangle {
                                 }
                                 onClicked: {
                                     askIndexedDocuments(ragQuestionInput.text)
-                                }
-                            }
-
-                            Rectangle {
-                                width: parent.width
-                                height: 1
-                                color: Colors.borderLight
-                            }
-
-                            Button {
-                                width: parent.width
-                                Layout.preferredHeight: 36
-                                text: "참고문서 관리"
-                                enabled: canUseAI()
-                                contentItem: Text {
-                                    text: parent.text
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.bodySmall
-                                    font.weight: Typography.weightMedium
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                    color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
-                                }
-                                background: Rectangle {
-                                    color: parent.enabled ? Colors.surface : Colors.bgTertiary
-                                    border.color: Colors.borderLight
-                                    radius: Metrics.radiusSm
-                                }
-                                onClicked: {
-                                    root.openReferenceDocsSettings()
                                 }
                             }
                         }
@@ -1902,7 +1955,39 @@ Rectangle {
                         onClicked: {
                             var ac = getAssistantController()
                             if (ac && root.responseText) {
-                                ac.createNewNote("AI 결과", root.responseText, "")
+                                var now = new Date()
+                                var dateStr = now.getFullYear() + "." +
+                                              String(now.getMonth() + 1).padStart(2, "0") + "." +
+                                              String(now.getDate()).padStart(2, "0") + " " +
+                                              String(now.getHours()).padStart(2, "0") + ":" +
+                                              String(now.getMinutes()).padStart(2, "0")
+
+                                var aiMode = root.aiModeIndex === 1 ? "참고문서AI" : "현재문서AI"
+                                var question = root.lastAskedQuestion || ""
+
+                                var title = "AI결과 (" + dateStr + ")"
+                                var content = title + "\n\n" + aiMode + "\n\n" + question + "\n\n" + root.responseText
+
+                                if (root.ragCitations && root.ragCitations.length > 0) {
+                                    content += "\n\n---\n\n## 근거 문서\n\n"
+                                    for (var i = 0; i < root.ragCitations.length; i++) {
+                                        var cite = root.ragCitations[i]
+                                        content += "- " + (cite.title || "제목 없음")
+                                        if (cite.heading_path && cite.heading_path.length > 0) {
+                                            content += " > " + cite.heading_path.join(" > ")
+                                        }
+                                        content += " (" + cite.source_type + ")"
+                                        if (cite.note_id) {
+                                            content += " · note_id: " + cite.note_id
+                                        } else if (cite.source_path) {
+                                            content += " · " + cite.source_path
+                                        }
+                                        content += ")\n"
+                                    }
+                                }
+
+                                var folderId = ac.getOrCreateAIResultFolder()
+                                ac.createNewNote(title, content, folderId)
                             }
                         }
                     }
@@ -2020,6 +2105,15 @@ Rectangle {
                 paths.push(fileUrlToLocalPath(selectedFiles[i]))
             }
             indexExternalFilesForRag(paths)
+        }
+    }
+
+    FolderDialog {
+        id: externalFolderDialog
+        title: "외부 폴더 선택"
+        onAccepted: {
+            var folderPath = fileUrlToLocalPath(selectedFolder)
+            indexExternalFolderForRag(folderPath)
         }
     }
 }

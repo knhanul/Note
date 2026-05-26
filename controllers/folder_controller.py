@@ -570,3 +570,14 @@ class FolderController(QObject):
         if not folder_id or self._is_smart_folder_id(folder_id):
             return []
         return self._folder_service.get_descendant_ids(folder_id)
+
+    @pyqtSlot(result=str)
+    def getAllFoldersJson(self) -> str:
+        """Get all folders as JSON string."""
+        try:
+            import json
+            folders = self._folder_service.get_all()
+            return json.dumps(folders, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"[FolderController] getAllFoldersJson failed: {e}")
+            return "[]"
