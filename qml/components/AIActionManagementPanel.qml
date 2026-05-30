@@ -546,7 +546,7 @@ Rectangle {
                         anchors.fill: parent
                         anchors.margins: Metrics.lg
                         spacing: Metrics.md
-                        visible: root.currentAction && root.currentAction.action_id
+                        visible: !!(root.currentAction && root.currentAction.action_id)
 
                         RowLayout {
                             Layout.fillWidth: true

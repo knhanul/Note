@@ -1,6 +1,10 @@
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 import re
+import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 from services.ai_context_builder import ContextBundle, ContextSource
 from services.ai_llm_client import LlmClient, LlmGenerateOptions, LlmGenerateResult
@@ -19,7 +23,7 @@ class RagQueryOptions:
     language: str = "ko"
     model: str | None = None
     temperature: float = 0.2
-    timeout_sec: float = 60.0
+    timeout_sec: float = 300.0
 
 
 @dataclass
@@ -52,11 +56,13 @@ class AiRagService:
         context_builder: AiContextBuilder,
         prompt_builder: AiRagPromptBuilder,
         llm_client: LlmClient,
+        default_model: str = "llama3.2:3b",
     ):
         self._search = search_service
         self._context = context_builder
         self._prompt = prompt_builder
         self._llm = llm_client
+        self._default_model = default_model
 
     def answer_question(
         self,
@@ -67,6 +73,7 @@ class AiRagService:
             options = RagQueryOptions()
 
         warnings: list[str] = []
+        start_time = time.time()
 
         if not question or not question.strip():
             warnings.append("RAG_EMPTY_QUESTION")
@@ -78,9 +85,12 @@ class AiRagService:
                 warnings=warnings,
             )
 
+        logger.info(f"[RAG_TIMING] Starting RAG for question: {question[:50]}...")
+        search_start = time.time()
         search_results = self._search.search_keyword(
             question, limit=options.limit, fallback=True
         )
+        logger.info(f"[RAG_TIMING] Search completed in {time.time() - search_start:.2f}s, results={len(search_results)}")
 
         if not search_results:
             warnings.append("RAG_NO_SEARCH_RESULTS")
@@ -121,17 +131,22 @@ class AiRagService:
 
         warnings.extend(prompt_payload.warnings)
 
+        llm_start = time.time()
         llm_options = LlmGenerateOptions(
-            model=options.model or "llama3.2:3b",
+            model=options.model or self._default_model,
             temperature=options.temperature,
             timeout_sec=options.timeout_sec,
         )
 
         llm_result = self._llm.generate_from_payload(prompt_payload, llm_options)
+        logger.info(f"[RAG_TIMING] LLM generation completed in {time.time() - llm_start:.2f}s")
 
         warnings.extend(llm_result.warnings)
 
         citations = self._build_citations(prompt_payload, llm_result.text, warnings)
+
+        total_time = time.time() - start_time
+        logger.info(f"[RAG_TIMING] Total RAG time: {total_time:.2f}s, answer_len={len(llm_result.text)}")
 
         return RagAnswer(
             answer_text=llm_result.text,
@@ -206,7 +221,7 @@ class AiRagService:
         warnings.extend(prompt_payload.warnings)
 
         llm_options = LlmGenerateOptions(
-            model=options.model or "llama3.2:3b",
+            model=options.model or self._default_model,
             temperature=options.temperature,
             timeout_sec=options.timeout_sec,
         )

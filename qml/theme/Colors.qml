@@ -46,6 +46,10 @@ QtObject {
     property color success: "#22C55E"
     property color warning: "#F59E0B"
     property color error:   "#EF4444"
+    property color error50:  "#FEF2F2"
+    property color error200: "#FECACA"
+    property color error400: "#F87171"
+    property color error500: "#EF4444"
 
     // Gradients
     property var primaryGradient: [primary500, primary600]

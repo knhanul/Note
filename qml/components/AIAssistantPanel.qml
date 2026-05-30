@@ -13,11 +13,10 @@ Rectangle {
     Layout.minimumWidth: 320
     Layout.preferredWidth: 360
     Layout.maximumWidth: 440
-    clip: true
+    clip: false
 
     signal openSettingsDialog()
     signal openReferenceDocsSettings()
-    property string responseText: ""
     property bool aiConnected: typeof aiAssistantController !== "undefined" && aiAssistantController !== null ? aiAssistantController.isConnected : false
     property string aiChatModel: typeof aiAssistantController !== "undefined" && aiAssistantController !== null ? aiAssistantController.chatModel : ""
     property string aiEmbeddingModel: typeof aiAssistantController !== "undefined" && aiAssistantController !== null ? aiAssistantController.embeddingModel : ""
@@ -46,6 +45,44 @@ Rectangle {
     property bool ragIndexingRunning: false
     property int aiModeIndex: 0  // 0 = 현재 문서 AI, 1 = 참고문서 AI
     property string lastAskedQuestion: ""
+    property string currentStreamingNoteId: ""
+    property string currentStreamingContent: ""
+    property string currentStreamingTitle: ""
+    property var noteEditorRef: null
+    property bool currentStreamingIsRag: false
+    property string currentRagAnswerText: ""
+
+    // 현재문서 AI 실행 결과 상태
+    property var currentAiRunStatus: ({
+        lastActionName: "",
+        lastQuestion: "",
+        lastSuccess: false,
+        lastElapsedMs: 0,
+        lastResourceText: "",
+        lastResultNoteId: "",
+        lastResultNoteTitle: "",
+        lastErrorMessage: "",
+        lastExecutedAt: ""
+    })
+
+    // 참고문서 AI(RAG) 실행 결과 상태
+    property var ragRunStatus: ({
+        lastQuestion: "",
+        lastSuccess: false,
+        lastElapsedMs: 0,
+        lastResourceText: "",
+        lastResultNoteId: "",
+        lastResultNoteTitle: "",
+        lastErrorMessage: "",
+        lastExecutedAt: ""
+    })
+
+    // RAG 대상 문서 목록 (QML에서 관리)
+    property var ragTargetDocuments: []
+
+    // 실행 시작 시간 추적
+    property var aiRunStartTime: 0
+    property var ragRunStartTime: 0
 
     onAiModeIndexChanged: {
         console.log("[AIAssistantPanel][DIAG] aiModeIndex changed:", aiModeIndex)
@@ -309,6 +346,67 @@ Rectangle {
         return defaults.indexOf(actionId) >= 0
     }
 
+    // 상태 업데이트 헬퍼: 현재문서 AI
+    function updateCurrentAiStatus(success, resultNoteId, resultNoteTitle, errorMsg) {
+        var endTime = new Date().getTime()
+        var elapsed = root.aiRunStartTime > 0 ? endTime - root.aiRunStartTime : 0
+        var modelName = safeGet("chatModel", "") || "리소스 정보 없음"
+
+        root.currentAiRunStatus = {
+            lastActionName: root.currentAiRunStatus.lastActionName,
+            lastQuestion: root.currentAiRunStatus.lastQuestion,
+            lastSuccess: success,
+            lastElapsedMs: elapsed,
+            lastResourceText: modelName,
+            lastResultNoteId: resultNoteId || "",
+            lastResultNoteTitle: resultNoteTitle || "",
+            lastErrorMessage: errorMsg || "",
+            lastExecutedAt: new Date().toLocaleTimeString()
+        }
+        root.aiRunStartTime = 0
+    }
+
+    // 상태 업데이트 헬퍼: 참고문서 AI (RAG)
+    function updateRagRunStatus(success, resultNoteId, resultNoteTitle, errorMsg) {
+        var endTime = new Date().getTime()
+        var elapsed = root.ragRunStartTime > 0 ? endTime - root.ragRunStartTime : 0
+        var modelName = safeGet("chatModel", "") || "리소스 정보 없음"
+
+        root.ragRunStatus = {
+            lastQuestion: root.ragRunStatus.lastQuestion,
+            lastSuccess: success,
+            lastElapsedMs: elapsed,
+            lastResourceText: modelName,
+            lastResultNoteId: resultNoteId || "",
+            lastResultNoteTitle: resultNoteTitle || "",
+            lastErrorMessage: errorMsg || "",
+            lastExecutedAt: new Date().toLocaleTimeString()
+        }
+        root.ragRunStartTime = 0
+    }
+
+    // RAG 대상 문서 목록 업데이트 (중복 제거)
+    function updateRagTargetDocuments(newDocs) {
+        var uniqueMap = {}
+        for (var i = 0; i < newDocs.length; i++) {
+            var doc = newDocs[i]
+            var key = doc.note_id || doc.source_path || doc.title
+            if (key && !uniqueMap[key]) {
+                uniqueMap[key] = doc
+            }
+        }
+        var uniqueList = []
+        for (var k in uniqueMap) {
+            uniqueList.push(uniqueMap[k])
+        }
+        root.ragTargetDocuments = uniqueList
+    }
+
+    // RAG 대상 목록 초기화
+    function clearRagTargetDocuments() {
+        root.ragTargetDocuments = []
+    }
+
     function runSelectedAction() {
         var action = root.selectedAction
         if (!action || !action.action_id) return
@@ -319,36 +417,147 @@ Rectangle {
         if (!canUseAI() || root.aiRunning) return
 
         var userInput = actionInput.text || ""
-        var currentNoteJson = ""
-        var selection = ""
+        root.lastAskedQuestion = userInput || ""
+        
+        // Step 1: Capture source note info FIRST before any note creation
+        var sourceNoteId = ""
+        var sourceTitle = ""
+        var sourceContent = ""
+        
+        // Get the currently selected note ID
+        var selectedNoteIdBefore = ""
+        if (typeof selectedNoteId !== "undefined") {
+            selectedNoteIdBefore = selectedNoteId
+        }
+        
+        // Get content from noteEditor (WYSIWYG) first, then fallback to currentNote
+        if (typeof noteEditor !== "undefined" && noteEditor) {
+            sourceContent = noteEditor.content || ""
+            sourceTitle = noteEditor.title || ""
+        }
+        if (!sourceContent && window.currentNote) {
+            sourceContent = window.currentNote.content || ""
+            sourceTitle = window.currentNote.title || ""
+        }
+        if (!sourceTitle && window.currentNote) {
+            sourceTitle = window.currentNote.title || ""
+        }
+        
+        // Get source note ID
+        if (window.currentNote && window.currentNote.id) {
+            sourceNoteId = window.currentNote.id
+        } else if (selectedNoteIdBefore) {
+            sourceNoteId = selectedNoteIdBefore
+        }
+        
+        var sourceContentLen = sourceContent ? sourceContent.trim().length : 0
+        
+        console.log(
+            "[AIAssistantPanel] runSelectedAction: action_id=" + action.action_id + 
+            ", source_note_id=" + sourceNoteId + 
+            ", source_title=" + (sourceTitle ? sourceTitle.substring(0, 30) : "(empty)") +
+            ", source_content_len=" + sourceContentLen +
+            ", selected_note_id_before=" + selectedNoteIdBefore
+        )
+        
+        // Content length validation (minimum 100 chars for summarize)
+        var minContentLength = 100
+        if (action.action_id === "summarize_note" && sourceContentLen < minContentLength) {
+            var errMsg = "현재 문서 본문을 충분히 가져오지 못했습니다. 원본 문서 선택 상태와 에디터 동기화를 확인해 주세요.\n현재 내용 길이: " + sourceContentLen + "자 (최소 필요: " + minContentLength + "자)"
+            root.currentAiRunStatus = {
+                lastActionName: action.name || action.action_id,
+                lastQuestion: userInput,
+                lastSuccess: false,
+                lastElapsedMs: 0,
+                lastResourceText: "",
+                lastResultNoteId: "",
+                lastResultNoteTitle: "",
+                lastErrorMessage: errMsg,
+                lastExecutedAt: new Date().toLocaleTimeString()
+            }
+            console.log(
+                "[AIAssistantPanel] runSelectedAction: content too short, source_content_len=" + sourceContentLen +
+                ", min required=" + minContentLength
+            )
+            return
+        }
+        
+        // Step 2: Reset streaming state (but don't create note yet)
+        root.currentStreamingNoteId = ""
+        root.currentStreamingContent = ""
+        root.currentStreamingTitle = ""
+        root.currentStreamingIsRag = false
+        root.currentRagAnswerText = ""
 
-        if (window.currentNote) {
-            currentNoteJson = JSON.stringify({
-                note_id: window.currentNote.id || "",
-                title: window.currentNote.title || "",
-                content: window.currentNote.content || "",
-                tags: window.currentNote.tags || ""
-            })
+        // 실행 시작 시간 기록 및 상태 초기화
+        root.aiRunStartTime = new Date().getTime()
+        root.currentAiRunStatus = {
+            lastActionName: action.name || action.action_id,
+            lastQuestion: userInput,
+            lastSuccess: false,
+            lastElapsedMs: 0,
+            lastResourceText: "",
+            lastResultNoteId: "",
+            lastResultNoteTitle: "",
+            lastErrorMessage: "",
+            lastExecutedAt: ""
         }
 
-        root.responseText = ""
-        root.lastAskedQuestion = userInput || ""
-
+        // Step 3: Create AI result note AFTER capturing source
+        var outputNoteId = ensureStreamingNote()
+        
+        var selectedNoteIdAfter = ""
+        if (typeof selectedNoteId !== "undefined") {
+            selectedNoteIdAfter = selectedNoteId
+        }
+        
+        console.log(
+            "[AIAssistantPanel] runSelectedAction: output_note_id=" + outputNoteId + 
+            ", selected_note_id_after=" + selectedNoteIdAfter
+        )
+        
+        var currentNoteJson = JSON.stringify({
+            note_id: sourceNoteId || "",
+            title: sourceTitle || "",
+            content: sourceContent || "",
+            tags: (window.currentNote && window.currentNote.tags) ? window.currentNote.tags : ""
+        })
+        
         if (action.action_id === "current_note_qa") {
-            if (!window.currentNote || !window.currentNote.content) {
-                root.responseText = "현재 노트를 선택한 뒤 실행해주세요."
+            if (!sourceContent) {
+                root.currentAiRunStatus = {
+                    lastActionName: action.name || action.action_id,
+                    lastQuestion: userInput,
+                    lastSuccess: false,
+                    lastElapsedMs: 0,
+                    lastResourceText: "",
+                    lastResultNoteId: "",
+                    lastResultNoteTitle: "",
+                    lastErrorMessage: "현재 노트를 선택한 뒤 실행해주세요.",
+                    lastExecutedAt: new Date().toLocaleTimeString()
+                }
                 console.log("[AIAssistantPanel] current_note_qa: no note selected")
                 return
             }
             if (!userInput) {
-                root.responseText = "질문 내용을 입력해주세요."
+                root.currentAiRunStatus = {
+                    lastActionName: action.name || action.action_id,
+                    lastQuestion: userInput,
+                    lastSuccess: false,
+                    lastElapsedMs: 0,
+                    lastResourceText: "",
+                    lastResultNoteId: "",
+                    lastResultNoteTitle: "",
+                    lastErrorMessage: "질문 내용을 입력해주세요.",
+                    lastExecutedAt: new Date().toLocaleTimeString()
+                }
                 console.log("[AIAssistantPanel] current_note_qa: no question input")
                 return
             }
 
             console.log(
                 "[AIAssistantPanel] current_note_qa: executing via runCustomAction, " +
-                "userInput_len=" + userInput.length + ", content_len=" + (window.currentNote.content ? window.currentNote.content.length : 0)
+                "userInput_len=" + userInput.length + ", content_len=" + sourceContentLen
             )
 
             try {
@@ -356,14 +565,14 @@ Rectangle {
             } catch (e) {
                 console.log("[AIAssistantPanel] current_note_qa runCustomAction failed: " + e)
                 console.log("[AIAssistantPanel] current_note_qa fallback to askQuestion")
-                ac.askQuestion(window.currentNote.content, userInput)
+                ac.askQuestion(sourceContent, userInput)
             }
         } else if (isDefaultAction(action.action_id)) {
-            var content = ""
-            if (window.currentNote && window.currentNote.content) {
-                content = window.currentNote.content
-            }
-            ac.runTask(action.action_id, content)
+            console.log(
+                "[AIAssistantPanel] runTask: action_id=" + action.action_id + 
+                ", content_len=" + sourceContentLen
+            )
+            ac.runTask(action.action_id, sourceContent)
         } else {
             ac.runCustomAction(action.action_id, userInput, currentNoteJson, selection, "[]")
         }
@@ -412,6 +621,7 @@ Rectangle {
         if (!ragCtrl) return
         var json = ragCtrl.getLastCitationsJson()
         root.ragCitations = parseJsonArraySafe(json, [])
+        refreshRagStreamingNoteContent()
     }
 
     function updateRagWarningsFromController() {
@@ -437,27 +647,84 @@ Rectangle {
         }
 
         root.ragWarnings = warnings
+        refreshRagStreamingNoteContent()
     }
 
     function clearRagState() {
         root.ragCitations = []
         root.ragWarnings = []
+        root.currentRagAnswerText = ""
+        root.currentStreamingIsRag = false
     }
 
-    function formatHeadingPath(headingPath) {
-        if (!headingPath || !Array.isArray(headingPath) || headingPath.length === 0) return ""
-        return headingPath.join(" > ")
+    // RAG 인덱스 초기화 후 등록 (replace 모드)
+    function clearRagIndexAndRegister(registerFn) {
+        var ragCtrl = getAiRagController()
+        if (!ragCtrl) {
+            root.ragRunStatus = {
+                lastQuestion: "",
+                lastSuccess: false,
+                lastElapsedMs: 0,
+                lastResourceText: "",
+                lastResultNoteId: "",
+                lastResultNoteTitle: "",
+                lastErrorMessage: "RAG 컨트롤러를 사용할 수 없습니다",
+                lastExecutedAt: new Date().toLocaleTimeString()
+            }
+            return false
+        }
+
+        // 기존 인덱스 초기화 (실제 노트/문서는 삭제되지 않음)
+        console.log("[AIAssistantPanel] Clearing RAG index for replace mode")
+        ragCtrl.clearIndex()
+        clearRagTargetDocuments()
+
+        // 등록 함수 실행
+        registerFn()
+        return true
     }
 
     function indexCurrentNoteForRag() {
         var ragCtrl = getAiRagController()
         if (!ragCtrl) {
-            root.responseText = "[오류] RAG 컨트롤러를 사용할 수 없습니다"
+            root.ragRunStatus = {
+                lastQuestion: "",
+                lastSuccess: false,
+                lastElapsedMs: 0,
+                lastResourceText: "",
+                lastResultNoteId: "",
+                lastResultNoteTitle: "",
+                lastErrorMessage: "RAG 컨트롤러를 사용할 수 없습니다",
+                lastExecutedAt: new Date().toLocaleTimeString()
+            }
             return
         }
 
         if (!window.currentNote || !window.currentNote.id) {
-            root.responseText = "현재 노트가 없습니다"
+            root.ragRunStatus = {
+                lastQuestion: "",
+                lastSuccess: false,
+                lastElapsedMs: 0,
+                lastResourceText: "",
+                lastResultNoteId: "",
+                lastResultNoteTitle: "",
+                lastErrorMessage: "현재 노트가 없습니다",
+                lastExecutedAt: new Date().toLocaleTimeString()
+            }
+            return
+        }
+
+        if (root.ragIndexingRunning || root.ragRequestRunning) {
+            root.ragRunStatus = {
+                lastQuestion: "",
+                lastSuccess: false,
+                lastElapsedMs: 0,
+                lastResourceText: "",
+                lastResultNoteId: "",
+                lastResultNoteTitle: "",
+                lastErrorMessage: "현재 작업이 진행 중입니다",
+                lastExecutedAt: new Date().toLocaleTimeString()
+            }
             return
         }
 
@@ -467,31 +734,78 @@ Rectangle {
             tagsJson = JSON.stringify(note.tags)
         }
 
+        // RAG 대상 목록 업데이트 (replace 모드)
+        updateRagTargetDocuments([{
+            title: note.title || "제목 없음",
+            note_id: note.id,
+            source_type: "note",
+            registration_method: "현재 문서"
+        }])
+
         clearRagState()
         root.ragIndexingRunning = true
-        root.responseText = "참고문서를 등록하는 중..."
 
-        console.log("[AIAssistantPanel] Indexing current note: id=" + note.id)
+        console.log("[AIAssistantPanel] Indexing current note (replace mode): id=" + note.id)
         ragCtrl.indexCurrentNote(note.id, note.title || "", note.content || "", tagsJson)
     }
 
     function askIndexedDocuments(questionText) {
         var ragCtrl = getAiRagController()
         if (!ragCtrl) {
-            root.responseText = "[오류] RAG 컨트롤러를 사용할 수 없습니다"
+            root.ragRunStatus = {
+                lastQuestion: questionText || "",
+                lastSuccess: false,
+                lastElapsedMs: 0,
+                lastResourceText: "",
+                lastResultNoteId: "",
+                lastResultNoteTitle: "",
+                lastErrorMessage: "RAG 컨트롤러를 사용할 수 없습니다",
+                lastExecutedAt: new Date().toLocaleTimeString()
+            }
             return
         }
 
         var question = questionText || actionInput.text || ""
         if (!question) {
-            root.responseText = "질문 내용을 입력해주세요."
+            root.ragRunStatus = {
+                lastQuestion: "",
+                lastSuccess: false,
+                lastElapsedMs: 0,
+                lastResourceText: "",
+                lastResultNoteId: "",
+                lastResultNoteTitle: "",
+                lastErrorMessage: "질문 내용을 입력해주세요.",
+                lastExecutedAt: new Date().toLocaleTimeString()
+            }
             return
         }
 
         root.lastAskedQuestion = question
+
+        // RAG 실행 시작 시간 기록 및 상태 초기화
+        root.ragRunStartTime = new Date().getTime()
+        root.ragRunStatus = {
+            lastQuestion: question,
+            lastSuccess: false,
+            lastElapsedMs: 0,
+            lastResourceText: "",
+            lastResultNoteId: "",
+            lastResultNoteTitle: "",
+            lastErrorMessage: "",
+            lastExecutedAt: ""
+        }
+
         clearRagState()
+        root.currentStreamingIsRag = true
+        root.currentRagAnswerText = ""
+
+        // Reset and prepare streaming note immediately
+        root.currentStreamingNoteId = ""
+        root.currentStreamingContent = ""
+        root.currentStreamingTitle = "RAG 답변: " + question
+        ensureStreamingNote()
         root.ragRequestRunning = true
-        root.responseText = "답변 생성 중..."
+        console.log("[AIAssistantPanel] [TIMING] RAG request START, ragRequestRunning=true")
 
         console.log("[AIAssistantPanel] Asking indexed documents: question=" + question)
         ragCtrl.askIndexedDocuments(question)
@@ -508,63 +822,110 @@ Rectangle {
     function indexCurrentFolderForRag() {
         var ragCtrl = getAiRagController()
         if (!ragCtrl) {
-            root.responseText = "[오류] RAG 컨트롤러를 사용할 수 없습니다"
+            console.log("[AIAssistantPanel] RAG 컨트롤러 오류")
             return
         }
 
         var folderCtrl = getFolderController()
         if (!folderCtrl) {
-            root.responseText = "[오류] 폴더 컨트롤러를 사용할 수 없습니다"
+            console.log("[AIAssistantPanel] 폴더 컨트롤러 오류")
             return
         }
 
         var currentFolderId = folderCtrl.currentFolderId
         if (!currentFolderId) {
-            root.responseText = "현재 폴더가 선택되지 않았습니다"
+            console.log("[AIAssistantPanel] 현재 폴더 미선택")
             return
         }
 
+        if (root.ragIndexingRunning || root.ragRequestRunning) {
+            console.log("[AIAssistantPanel] 현재 작업 진행 중")
+            return
+        }
+
+        // 기존 인덱스 초기화 (replace 모드)
+        console.log("[AIAssistantPanel] Clearing RAG index for replace mode (folder)")
+        ragCtrl.clearIndex()
+        clearRagTargetDocuments()
+
         clearRagState()
         root.ragIndexingRunning = true
-        root.responseText = "참고문서를 등록하는 중..."
+        console.log("[AIAssistantPanel] 참고문서 등록 중...")
 
         try {
             var descendantIds = folderCtrl.getDescendantIds(currentFolderId)
             var folderIds = [currentFolderId].concat(descendantIds || [])
             var notesJson = noteController.getNotesForRagByFolderIdsJson(JSON.stringify(folderIds))
+            var notes = JSON.parse(notesJson)
 
-            console.log("[AIAssistantPanel] Indexing folder: " + currentFolderId + ", notes count: " + (JSON.parse(notesJson).length || 0))
+            // RAG 대상 목록 업데이트
+            var targetDocs = []
+            for (var i = 0; i < notes.length; i++) {
+                targetDocs.push({
+                    title: notes[i].title || "제목 없음",
+                    note_id: notes[i].note_id,
+                    source_type: "note",
+                    registration_method: "현재 폴더"
+                })
+            }
+            updateRagTargetDocuments(targetDocs)
+
+            console.log("[AIAssistantPanel] Indexing folder (replace mode): " + currentFolderId + ", notes count: " + notes.length)
             ragCtrl.indexCurrentFolderNotes(notesJson, currentFolderId)
         } catch (e) {
             root.ragIndexingRunning = false
-            root.responseText = "[오류] 참고문서 등록 실패: " + e
+            console.log("[AIAssistantPanel] 참고문서 등록 실패: " + e)
         }
     }
 
     function indexAllNotesForRag() {
         var ragCtrl = getAiRagController()
         if (!ragCtrl) {
-            root.responseText = "[오류] RAG 컨트롤러를 사용할 수 없습니다"
+            console.log("[AIAssistantPanel] RAG 컨트롤러 오류")
             return
         }
 
         var noteCtrl = getNoteController()
         if (!noteCtrl) {
-            root.responseText = "[오류] 노트 컨트롤러를 사용할 수 없습니다"
+            console.log("[AIAssistantPanel] 노트 컨트롤러 오류")
             return
         }
 
+        if (root.ragIndexingRunning || root.ragRequestRunning) {
+            console.log("[AIAssistantPanel] 현재 작업 진행 중")
+            return
+        }
+
+        // 기존 인덱스 초기화 (replace 모드)
+        console.log("[AIAssistantPanel] Clearing RAG index for replace mode (all notes)")
+        ragCtrl.clearIndex()
+        clearRagTargetDocuments()
+
         clearRagState()
         root.ragIndexingRunning = true
-        root.responseText = "참고문서를 등록하는 중..."
+        console.log("[AIAssistantPanel] 참고문서 등록 중...")
 
         try {
             var notesJson = noteCtrl.getAllNotesForRagJson()
-            console.log("[AIAssistantPanel] Indexing all notes, count: " + (JSON.parse(notesJson).length || 0))
+            var notes = JSON.parse(notesJson)
+
+            // RAG 대상 목록 업데이트
+            var targetDocs = []
+            for (var i = 0; i < notes.length; i++) {
+                targetDocs.push({
+                    title: notes[i].title || "제목 없음",
+                    note_id: notes[i].note_id,
+                    source_type: "note",
+                    registration_method: "전체 노트"
+                })
+            }
+            updateRagTargetDocuments(targetDocs)
+
+            console.log("[AIAssistantPanel] Indexing all notes (replace mode), count: " + notes.length)
             ragCtrl.indexAllNotesJson(notesJson)
         } catch (e) {
             root.ragIndexingRunning = false
-            root.responseText = "[오류] 참고문서 등록 실패: " + e
+            console.log("[AIAssistantPanel] 참고문서 등록 실패: " + e)
         }
     }
 
@@ -587,39 +948,6 @@ Rectangle {
         return msg
     }
 
-    function openCitation(citation) {
-        var noteCtrl = getNoteController()
-        if (!noteCtrl) {
-            root.responseText += "\n[RAG 오류] 노트 컨트롤러를 사용할 수 없습니다"
-            return
-        }
-
-        if (citation.note_id) {
-            console.log("[AIAssistantPanel] Opening citation note: " + citation.note_id)
-            var success = noteCtrl.selectNote(citation.note_id)
-            if (success) {
-                root.responseText += "\n[안내] 근거 노트를 열었습니다"
-            } else {
-                root.responseText += "\n[RAG 오류] 근거 노트를 찾을 수 없습니다"
-            }
-        } else if (citation.source_path) {
-            var copied = copyCitationPath(citation)
-            if (copied) {
-                root.responseText += "\n[안내] 파일 경로를 복사했습니다"
-            } else {
-                root.responseText += "\n[안내] 파일 경로: " + citation.source_path
-            }
-        } else {
-            root.responseText += "\n[안내] 열 수 있는 원문 정보가 없습니다"
-        }
-    }
-
-    function formatCitationActionLabel(citation) {
-        if (citation.note_id) return "노트 열기"
-        if (citation.source_path) return "경로 복사"
-        return ""
-    }
-
     function copyTextToClipboard(text) {
         if (!text) return false
         try {
@@ -631,11 +959,6 @@ Rectangle {
             console.warn("[AIAssistantPanel] Clipboard copy failed: " + e)
         }
         return false
-    }
-
-    function copyCitationPath(citation) {
-        if (!citation || !citation.source_path) return false
-        return copyTextToClipboard(citation.source_path)
     }
 
     function formatSourcePath(path) {
@@ -680,6 +1003,184 @@ Rectangle {
         return warningText
     }
 
+    function formatRagCitationLine(citation) {
+        if (!citation)
+            return ""
+
+        var headingSuffix = ""
+        if (citation.heading_path && citation.heading_path.length > 0) {
+            headingSuffix = " > " + citation.heading_path.join(" > ")
+        }
+
+        var detailParts = []
+        if (citation.source_type)
+            detailParts.push(citation.source_type)
+        if (citation.note_id) {
+            detailParts.push("note_id: " + citation.note_id)
+        } else if (citation.source_path) {
+            detailParts.push("path: " + formatSourcePath(citation.source_path))
+        }
+        if (citation.cited_in_answer)
+            detailParts.push("답변에 인용")
+
+        var detailText = detailParts.length > 0 ? " (" + detailParts.join(" · ") + ")" : ""
+        var linkText = ""
+        if (citation.note_id) {
+            linkText = " [노트 열기](https://note.local/open/" + citation.note_id + ")"
+        }
+        return "- " + (citation.title || "제목 없음") + headingSuffix + detailText + linkText
+    }
+
+    function buildRagCitationsSection() {
+        if (!root.ragCitations || root.ragCitations.length === 0)
+            return ""
+
+        var lines = ["## 근거 문서"]
+        for (var i = 0; i < root.ragCitations.length; i++) {
+            lines.push(formatRagCitationLine(root.ragCitations[i]))
+        }
+        return lines.join("\n")
+    }
+
+    function buildRagWarningsSection() {
+        if (!root.ragWarnings || root.ragWarnings.length === 0)
+            return ""
+
+        var lines = ["## 경고"]
+        for (var i = 0; i < root.ragWarnings.length; i++) {
+            lines.push("- " + formatRagWarningMessage(root.ragWarnings[i]))
+        }
+        return lines.join("\n")
+    }
+
+    function buildRagAnswerBody() {
+        var sections = []
+        if (root.currentRagAnswerText && root.currentRagAnswerText !== "")
+            sections.push(root.currentRagAnswerText)
+
+        var citationsSection = buildRagCitationsSection()
+        if (citationsSection !== "")
+            sections.push(citationsSection)
+
+        var warningsSection = buildRagWarningsSection()
+        if (warningsSection !== "")
+            sections.push(warningsSection)
+
+        return sections.join("\n\n---\n\n")
+    }
+
+    function refreshRagStreamingNoteContent() {
+        if (!root.currentStreamingIsRag)
+            return
+        if (!root.currentStreamingNoteId || root.currentStreamingNoteId === "")
+            return
+        if (!root.currentRagAnswerText || root.currentRagAnswerText === "")
+            return
+
+        var body = buildRagAnswerBody()
+        if (!body || body.trim() === "")
+            return
+
+        updateStreamingNote(body, false)
+    }
+
+    function ensureStreamingNote() {
+        if (root.currentStreamingNoteId !== "") {
+            console.log("[AIAssistantPanel] ensureStreamingNote: returning existing noteId=" + root.currentStreamingNoteId)
+            return root.currentStreamingNoteId
+        }
+
+        var ac = getAssistantController()
+        if (!ac) {
+            console.log("[AIAssistantPanel] ensureStreamingNote: no assistantController")
+            return ""
+        }
+
+        var now = new Date()
+        var dateStr = now.getFullYear() + "." +
+                      String(now.getMonth() + 1).padStart(2, "0") + "." +
+                      String(now.getDate()).padStart(2, "0") + " " +
+                      String(now.getHours()).padStart(2, "0") + ":" +
+                      String(now.getMinutes()).padStart(2, "0")
+
+        var aiMode = root.aiModeIndex === 1 ? "참고문서AI" : "현재문서AI"
+        var question = root.lastAskedQuestion || ""
+        var title = "AI결과 (" + dateStr + ")"
+        
+        root.currentStreamingTitle = title
+        root.currentStreamingContent = title + "\n" + aiMode + "\n" + question + "\n"
+        
+        console.log("[AIAssistantPanel] ensureStreamingNote: creating new note, title=" + title)
+        var folderId = ac.getOrCreateAIResultFolder()
+        console.log("[AIAssistantPanel] ensureStreamingNote: folderId=" + folderId)
+        var noteId = ac.createNewNote(title, root.currentStreamingContent, folderId)
+        console.log("[AIAssistantPanel] ensureStreamingNote: created noteId=" + noteId)
+        
+        if (noteId) {
+            root.currentStreamingNoteId = noteId
+            if (!root.currentStreamingIsRag) {
+                console.log("[AIAssistantPanel] AI 결과를 노트에 저장 중: " + title)
+            }
+            
+            // Open the note in the editor
+            console.log("[AIAssistantPanel] ensureStreamingNote: opening note in editor, selectedNoteId=" + noteId)
+            if (typeof selectedNoteId !== "undefined") {
+                selectedNoteId = noteId
+            }
+        }
+        
+        return noteId
+    }
+
+    function updateStreamingNote(newText, isAppend) {
+        var noteId = ensureStreamingNote()
+        console.log("[AIAssistantPanel] updateStreamingNote: noteId=" + noteId + ", isAppend=" + isAppend + ", textLen=" + newText.length)
+        if (!noteId) {
+            console.log("[AIAssistantPanel] updateStreamingNote: no noteId, skipping save")
+            return
+        }
+
+        if (isAppend) {
+            root.currentStreamingContent += newText
+        } else {
+            // If it's a full replacement (like RAG answer), keep the header
+            var aiMode = root.aiModeIndex === 1 ? "참고문서AI" : "현재문서AI"
+            var question = root.lastAskedQuestion || ""
+            root.currentStreamingContent = root.currentStreamingTitle + "\n" + aiMode + "\n" + question + "\n" + newText
+        }
+
+        var nc = getNoteController()
+        if (nc) {
+            console.log("[AIAssistantPanel] updateStreamingNote: calling nc.updateNote, contentLen=" + root.currentStreamingContent.length)
+            nc.updateNote(noteId, root.currentStreamingTitle, root.currentStreamingContent)
+            
+            // Also update current note cache by reassignment so bindings are notified.
+            if (typeof window !== "undefined" && window.currentNote && window.selectedNoteId === noteId) {
+                console.log("[AIAssistantPanel] updateStreamingNote: refreshing window.currentNote binding")
+                window.currentNote = {
+                    id: window.currentNote.id || noteId,
+                    title: root.currentStreamingTitle,
+                    content: root.currentStreamingContent,
+                    content_json: window.currentNote.content_json || "",
+                    tags: window.currentNote.tags || ""
+                }
+            }
+            
+            // Force WebNoteEditor to refresh immediately for live streaming visibility.
+            if (root.noteEditorRef && typeof window !== "undefined" && window.selectedNoteId === noteId) {
+                if (typeof root.noteEditorRef.applyLiveMarkdown === "function") {
+                    console.log("[AIAssistantPanel] updateStreamingNote: forcing noteEditorRef.applyLiveMarkdown")
+                    root.noteEditorRef.applyLiveMarkdown(root.currentStreamingContent)
+                } else if (typeof root.noteEditorRef.setEditorContent === "function") {
+                    console.log("[AIAssistantPanel] updateStreamingNote: fallback noteEditorRef.setEditorContent")
+                    root.noteEditorRef.setEditorContent(root.currentStreamingContent, "")
+                }
+            }
+        } else {
+            console.log("[AIAssistantPanel] updateStreamingNote: no noteController")
+        }
+    }
+
     function fileUrlToLocalPath(fileUrl) {
         if (!fileUrl) return ""
         var path = fileUrl
@@ -706,51 +1207,96 @@ Rectangle {
     function indexExternalFilesForRag(paths) {
         var ragCtrl = getAiRagController()
         if (!ragCtrl) {
-            root.responseText = "[오류] RAG 컨트롤러를 사용할 수 없습니다"
+            console.log("[AIAssistantPanel] RAG 컨트롤러 오류")
             return
         }
 
         if (!paths || paths.length === 0) {
-            root.responseText = "선택된 파일이 없습니다"
+            console.log("[AIAssistantPanel] 선택된 파일 없음")
             return
         }
 
+        if (root.ragIndexingRunning || root.ragRequestRunning) {
+            console.log("[AIAssistantPanel] 현재 작업 진행 중")
+            return
+        }
+
+        // 기존 인덱스 초기화 (replace 모드)
+        console.log("[AIAssistantPanel] Clearing RAG index for replace mode (external files)")
+        ragCtrl.clearIndex()
+        clearRagTargetDocuments()
+
         clearRagState()
         root.ragIndexingRunning = true
-        root.responseText = "참고문서를 등록하는 중..."
+        console.log("[AIAssistantPanel] 참고문서 등록 중...")
 
         try {
             var pathsJson = JSON.stringify(paths)
-            console.log("[AIAssistantPanel] Indexing external files: " + paths.length + " files")
+
+            // RAG 대상 목록 업데이트
+            var targetDocs = []
+            for (var i = 0; i < paths.length; i++) {
+                var pathParts = paths[i].split(/[/\\]/)
+                var fileName = pathParts[pathParts.length - 1]
+                targetDocs.push({
+                    title: fileName,
+                    source_path: paths[i],
+                    source_type: "external_file",
+                    registration_method: "외부 파일"
+                })
+            }
+            updateRagTargetDocuments(targetDocs)
+
+            console.log("[AIAssistantPanel] Indexing external files (replace mode): " + paths.length + " files")
             ragCtrl.indexExternalFilesJson(pathsJson)
         } catch (e) {
             root.ragIndexingRunning = false
-            root.responseText = "[오류] 참고문서 등록 실패: " + e
+            console.log("[AIAssistantPanel] 참고문서 등록 실패: " + e)
         }
     }
 
     function indexExternalFolderForRag(folderPath) {
         var ragCtrl = getAiRagController()
         if (!ragCtrl) {
-            root.responseText = "[오류] RAG 컨트롤러를 사용할 수 없습니다"
+            console.log("[AIAssistantPanel] RAG 컨트롤러 오류")
             return
         }
 
         if (!folderPath) {
-            root.responseText = "선택된 폴더가 없습니다"
+            console.log("[AIAssistantPanel] 선택된 폴더 없음")
             return
         }
 
+        if (root.ragIndexingRunning || root.ragRequestRunning) {
+            console.log("[AIAssistantPanel] 현재 작업 진행 중")
+            return
+        }
+
+        // 기존 인덱스 초기화 (replace 모드)
+        console.log("[AIAssistantPanel] Clearing RAG index for replace mode (external folder)")
+        ragCtrl.clearIndex()
+        clearRagTargetDocuments()
+
         clearRagState()
         root.ragIndexingRunning = true
-        root.responseText = "참고문서를 등록하는 중..."
+        console.log("[AIAssistantPanel] 참고문서 등록 중...")
 
         try {
-            console.log("[AIAssistantPanel] Indexing external folder: " + folderPath)
+            // RAG 대상 목록 업데이트
+            var pathParts = folderPath.split(/[/\\]/)
+            var folderName = pathParts[pathParts.length - 1]
+            updateRagTargetDocuments([{
+                title: folderName,
+                source_path: folderPath,
+                source_type: "external_folder",
+                registration_method: "외부 폴더"
+            }])
+
+            console.log("[AIAssistantPanel] Indexing external folder (replace mode): " + folderPath)
             ragCtrl.indexExternalFolder(folderPath)
         } catch (e) {
             root.ragIndexingRunning = false
-            root.responseText = "[오류] 참고문서 등록 실패: " + e
+            console.log("[AIAssistantPanel] 참고문서 등록 실패: " + e)
         }
     }
 
@@ -764,26 +1310,51 @@ Rectangle {
         root.aiRunning = ac.isRunning
 
         ac.tokenReceived.connect(function(token) {
-            console.log("[AIAssistantPanel] Token received: length=" + token.length + ", responseText.length=" + root.responseText.length)
-            root.responseText += token
+            console.log("[AIAssistantPanel] Token received: length=" + token.length + ", currentStreamingContent.length=" + root.currentStreamingContent.length)
+            updateStreamingNote(token, true)
         })
 
         ac.resultReady.connect(function(result) {
-            console.log("[AIAssistantPanel] Result ready: length=" + result.length + ", responseText.length=" + root.responseText.length)
+            console.log("[AIAssistantPanel] Result ready: length=" + result.length)
             if (result && result !== "") {
-                root.responseText = result
+                updateStreamingNote(result, false)
             }
         })
 
         ac.runningChanged.connect(function(running) {
             root.aiRunning = running
             if (!running) {
-                console.log("[AIAssistantPanel] Task finished, responseText.length=" + root.responseText.length)
+                console.log("[AIAssistantPanel] Task finished, currentStreamingContent.length=" + root.currentStreamingContent.length)
+
+                // Check if response is empty
+                var isTrulyEmpty = (root.currentStreamingContent.indexOf(root.currentStreamingTitle) === 0 &&
+                                   root.currentStreamingContent.length <= root.currentStreamingTitle.length + 20)
+
+                if (root.currentStreamingNoteId !== "") {
+                    if (isTrulyEmpty) {
+                        console.log("[AIAssistantPanel] AI 답변 생성 실패")
+                        updateStreamingNote("\n\n[오류] AI 응답이 비어 있습니다. 모델이 질문을 이해하지 못했거나 토큰 제한에 걸렸을 수 있습니다.", true)
+                        // 상태 업데이트: 실패
+                        updateCurrentAiStatus(false, root.currentStreamingNoteId, root.currentStreamingTitle, "AI 응답이 비어 있습니다")
+                    } else {
+                        console.log("[AIAssistantPanel] 모든 결과가 노트에 저장되었습니다.")
+                        // 상태 업데이트: 성공
+                        updateCurrentAiStatus(true, root.currentStreamingNoteId, root.currentStreamingTitle, "")
+                    }
+                }
             }
         })
 
         ac.errorOccurred.connect(function(error) {
-            root.responseText += "\n[오류] " + error
+            if (root.currentStreamingNoteId !== "") {
+                updateStreamingNote("\n[오류] " + error, true)
+                // 상태 업데이트: 실패
+                updateCurrentAiStatus(false, root.currentStreamingNoteId, root.currentStreamingTitle, error)
+            } else {
+                console.log("[AIAssistantPanel] AI 오류: " + error)
+                // 상태 업데이트: 실패 (노트 미생성)
+                updateCurrentAiStatus(false, "", "", error)
+            }
         })
 
         root.loadActionSelectionOrder()
@@ -792,13 +1363,22 @@ Rectangle {
 
         // Connect aiRagController signals
         var ragCtrl = getAiRagController()
+        console.log("[AIAssistantPanel] RAG controller check:", ragCtrl ? "exists" : "null")
         if (ragCtrl) {
+            console.log("[AIAssistantPanel] Connecting RAG signals...")
             ragCtrl.ragAnswerReady.connect(function(answerText) {
                 console.log("[AIAssistantPanel] RAG answer received: len=" + answerText.length)
                 root.ragRequestRunning = false
-                root.responseText = "[등록된 문서 답변]\n" + answerText
+                if (root.currentStreamingIsRag) {
+                    root.currentRagAnswerText = answerText || ""
+                    refreshRagStreamingNoteContent()
+                } else {
+                    updateStreamingNote(answerText, false)
+                }
                 updateRagCitationsFromController()
                 updateRagWarningsFromController()
+                // 상태 업데이트: 성공
+                updateRagRunStatus(true, root.currentStreamingNoteId, root.currentStreamingTitle, "")
             })
 
             ragCtrl.ragCitationsChanged.connect(function() {
@@ -823,23 +1403,23 @@ Rectangle {
                 console.log("[AIAssistantPanel] RAG index status: " + status)
                 root.ragIndexingRunning = false
                 if (status === "indexed_current_note") {
-                    root.responseText = "현재 문서가 등록되었습니다. '등록된 문서 질문' 버튼을 눌러 질문하세요."
+                    console.log("[AIAssistantPanel] 현재 문서 등록 완료")
                 } else if (status === "indexed_folder") {
                     var result = updateLastIndexResultFromController()
-                    root.responseText = formatIndexResultMessage(result, "현재 폴더")
+                    console.log("[AIAssistantPanel] 현재 폴더 등록 완료: " + formatIndexResultMessage(result, "현재 폴더"))
                 } else if (status === "indexed_all_notes") {
                     var result = updateLastIndexResultFromController()
-                    root.responseText = formatIndexResultMessage(result, "전체 노트")
+                    console.log("[AIAssistantPanel] 전체 노트 등록 완료: " + formatIndexResultMessage(result, "전체 노트"))
                 } else if (status === "indexed_notes") {
                     var result = updateLastIndexResultFromController()
-                    root.responseText = formatIndexResultMessage(result, "노트")
+                    console.log("[AIAssistantPanel] 노트 등록 완료: " + formatIndexResultMessage(result, "노트"))
                 } else if (status === "indexed_external_files") {
                     var result = updateLastIndexResultFromController()
-                    root.responseText = formatIndexResultMessage(result, "외부 문서")
+                    console.log("[AIAssistantPanel] 외부 문서 등록 완료: " + formatIndexResultMessage(result, "외부 문서"))
                 } else if (status === "indexed_empty") {
-                    root.responseText = "등록할 노트가 없습니다."
+                    console.log("[AIAssistantPanel] 등록할 노트 없음")
                 } else if (status === "cleared") {
-                    root.responseText = "참고문서 등록이 초기화되었습니다."
+                    console.log("[AIAssistantPanel] 참고문서 등록 초기화됨")
                     clearRagState()
                 }
             })
@@ -847,7 +1427,9 @@ Rectangle {
             ragCtrl.errorOccurred.connect(function(error) {
                 root.ragRequestRunning = false
                 root.ragIndexingRunning = false
-                root.responseText += "\n[RAG 오류] " + error
+                console.log("[AIAssistantPanel] RAG 오류: " + error)
+                // 상태 업데이트: 실패
+                updateRagRunStatus(false, root.currentStreamingNoteId, root.currentStreamingTitle, error)
             })
         }
     }
@@ -1305,7 +1887,7 @@ Rectangle {
 
                                     Text {
                                         width: parent.width
-                                        text: root.selectedAction ? (root.selectedAction.name || root.selectedAction.action_id) : "원하는 AI 기능을 선택하세요"
+                                        text: (typeof root.selectedAction !== 'undefined' && root.selectedAction) ? (root.selectedAction.name || root.selectedAction.action_id || "") : "원하는 AI 기능을 선택하세요"
                                         font.family: Typography.fontPrimary
                                         font.pixelSize: Typography.bodyRegular
                                         font.weight: Font.Bold
@@ -1315,8 +1897,8 @@ Rectangle {
 
                                     Text {
                                         width: parent.width
-                                        visible: root.selectedAction && root.selectedAction.description && root.selectedAction.description !== ""
-                                        text: root.selectedAction ? root.selectedAction.description : ""
+                                        visible: typeof root.selectedAction !== 'undefined' && root.selectedAction && typeof root.selectedAction.description !== 'undefined' && root.selectedAction.description !== ""
+                                        text: (typeof root.selectedAction !== 'undefined' && root.selectedAction) ? (root.selectedAction.description || "") : ""
                                         font.family: Typography.fontPrimary
                                         font.pixelSize: Typography.caption
                                         color: Colors.textSecondary
@@ -1364,12 +1946,146 @@ Rectangle {
                                             var ac = getAssistantController()
                                             if (ac) {
                                                 ac.cancel()
-                                                root.responseText += "\n[안내] 작업을 취소했습니다."
+                                                console.log("[AIAssistantPanel] 작업 취소됨")
                                             }
                                         } else {
                                             runSelectedAction()
                                         }
                                     }
+                                }
+                            }
+                        }
+
+                        // 현재문서 AI 실행 결과 메시지 박스
+                        Rectangle {
+                            width: parent.width
+                            radius: Metrics.radiusMd
+                            color: Colors.bgSecondary
+                            border.color: Colors.borderLight
+                            border.width: 1
+                            visible: root.aiModeIndex === 0 && (root.currentAiRunStatus.lastExecutedAt !== "" || root.aiRunning)
+
+                            Column {
+                                width: parent.width - (Metrics.md * 2)
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.margins: Metrics.sm
+                                spacing: Metrics.xs
+
+                                Row {
+                                    spacing: Metrics.xs
+                                    Text {
+                                        text: root.currentAiRunStatus.lastActionName || "AI 실행"
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
+                                        font.weight: Typography.weightMedium
+                                        color: Colors.textPrimary
+                                    }
+                                    Text {
+                                        text: root.aiRunning ? "실행 중..." : (root.currentAiRunStatus.lastSuccess ? "실행 완료" : (root.currentAiRunStatus.lastErrorMessage ? "실행 실패" : ""))
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
+                                        color: root.aiRunning ? Colors.primary500 : (root.currentAiRunStatus.lastSuccess ? Colors.success : (root.currentAiRunStatus.lastErrorMessage ? Colors.error : Colors.textSecondary))
+                                    }
+                                }
+
+                                Text {
+                                    text: root.currentAiRunStatus.lastSuccess ?
+                                          (root.currentAiRunStatus.lastElapsedMs > 0 ? "소요시간: " + (root.currentAiRunStatus.lastElapsedMs / 1000).toFixed(1) + "초" : "") :
+                                          (root.currentAiRunStatus.lastErrorMessage || "")
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: 10
+                                    color: root.currentAiRunStatus.lastSuccess ? Colors.textTertiary : Colors.error
+                                    visible: root.currentAiRunStatus.lastExecutedAt !== "" && !root.aiRunning
+                                }
+
+                                Text {
+                                    text: "리소스: " + root.currentAiRunStatus.lastResourceText
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: 10
+                                    color: Colors.textTertiary
+                                    visible: root.currentAiRunStatus.lastSuccess && root.currentAiRunStatus.lastResourceText && !root.aiRunning
+                                }
+
+                                Text {
+                                    text: "결과 노트: " + (root.currentAiRunStatus.lastResultNoteTitle || root.currentAiRunStatus.lastResultNoteId || "생성 중...")
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: 10
+                                    color: Colors.primary500
+                                    visible: root.currentAiRunStatus.lastResultNoteTitle !== "" && !root.aiRunning
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        onClicked: {
+                                            if (root.currentAiRunStatus.lastResultNoteId && typeof selectedNoteId !== "undefined") {
+                                                selectedNoteId = root.currentAiRunStatus.lastResultNoteId
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // 현재문서 AI 프롬프트 미리보기
+                        Rectangle {
+                            width: parent.width
+                            radius: Metrics.radiusMd
+                            color: Colors.surface
+                            border.color: Colors.borderLight
+                            border.width: 1
+                            implicitHeight: promptPreviewColumn.implicitHeight + (Metrics.sm * 2)
+                            visible: root.aiModeIndex === 0
+
+                            Column {
+                                id: promptPreviewColumn
+                                width: parent.width - (Metrics.sm * 2)
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                anchors.margins: Metrics.sm
+                                spacing: Metrics.xs
+
+                                Text {
+                                    text: "프롬프트 미리보기"
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: Typography.caption
+                                    font.weight: Typography.weightMedium
+                                    color: Colors.textSecondary
+                                }
+
+                                Text {
+                                    text: (typeof root.selectedAction !== 'undefined' && root.selectedAction && root.selectedAction.current_prompt && root.selectedAction.current_prompt.title) ?
+                                          root.selectedAction.current_prompt.title :
+                                          "연결된 프롬프트 노트가 없습니다."
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: Typography.caption
+                                    font.weight: Font.Bold
+                                    color: Colors.textPrimary
+                                    visible: typeof root.selectedAction !== 'undefined' && root.selectedAction && typeof root.selectedAction.current_prompt !== 'undefined'
+                                }
+
+                                ScrollView {
+                                    width: parent.width
+                                    height: 80
+                                    clip: true
+                                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                                    visible: typeof root.selectedAction !== 'undefined' && root.selectedAction && typeof root.selectedAction.current_prompt !== 'undefined' && typeof root.selectedAction.current_prompt.content_md !== 'undefined'
+
+                                    Text {
+                                        text: (typeof root.selectedAction !== 'undefined' && root.selectedAction) ? ((typeof root.selectedAction.current_prompt !== 'undefined' && root.selectedAction.current_prompt) ? root.selectedAction.current_prompt.content_md : "") : ""
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: 10
+                                        color: Colors.textSecondary
+                                        wrapMode: Text.Wrap
+                                        width: parent.width
+                                    }
+                                }
+
+                                Text {
+                                    text: "연결된 프롬프트 노트가 없습니다."
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: Typography.caption
+                                    color: Colors.textTertiary
+                                    horizontalAlignment: Text.AlignHCenter
+                                    width: parent.width
+                                    visible: !root.selectedAction || !root.selectedAction.current_prompt
                                 }
                             }
                         }
@@ -1641,6 +2357,152 @@ Rectangle {
                                 }
                             }
                         }
+
+                        // 참고문서 AI 실행 결과 메시지 박스
+                        Rectangle {
+                            width: parent.width
+                            radius: Metrics.radiusMd
+                            color: Colors.bgSecondary
+                            border.color: Colors.borderLight
+                            border.width: 1
+                            visible: root.aiModeIndex === 1 && (root.ragRunStatus.lastExecutedAt !== "" || root.ragRequestRunning)
+
+                            Column {
+                                width: parent.width - (Metrics.md * 2)
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.margins: Metrics.sm
+                                spacing: Metrics.xs
+
+                                Row {
+                                    spacing: Metrics.xs
+                                    Text {
+                                        text: root.ragRunStatus.lastQuestion ? (root.ragRunStatus.lastQuestion.substring(0, 20) + (root.ragRunStatus.lastQuestion.length > 20 ? "..." : "")) : "RAG 질문"
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
+                                        font.weight: Typography.weightMedium
+                                        color: Colors.textPrimary
+                                    }
+                                    Text {
+                                        text: root.ragRequestRunning ? "실행 중..." : (root.ragRunStatus.lastSuccess ? "실행 완료" : (root.ragRunStatus.lastErrorMessage ? "실행 실패" : ""))
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
+                                        color: root.ragRequestRunning ? Colors.primary500 : (root.ragRunStatus.lastSuccess ? Colors.success : (root.ragRunStatus.lastErrorMessage ? Colors.error : Colors.textSecondary))
+                                    }
+                                }
+
+                                Text {
+                                    text: root.ragRunStatus.lastSuccess ?
+                                          (root.ragRunStatus.lastElapsedMs > 0 ? "소요시간: " + (root.ragRunStatus.lastElapsedMs / 1000).toFixed(1) + "초" : "") :
+                                          (root.ragRunStatus.lastErrorMessage || "")
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: 10
+                                    color: root.ragRunStatus.lastSuccess ? Colors.textTertiary : Colors.error
+                                    visible: root.ragRunStatus.lastExecutedAt !== "" && !root.ragRequestRunning
+                                }
+
+                                Text {
+                                    text: "리소스: " + root.ragRunStatus.lastResourceText
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: 10
+                                    color: Colors.textTertiary
+                                    visible: root.ragRunStatus.lastSuccess && root.ragRunStatus.lastResourceText && !root.ragRequestRunning
+                                }
+
+                                Text {
+                                    text: "결과 노트: " + (root.ragRunStatus.lastResultNoteTitle || root.ragRunStatus.lastResultNoteId || "생성 중...")
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: 10
+                                    color: Colors.primary500
+                                    visible: root.ragRunStatus.lastResultNoteTitle !== "" && !root.ragRequestRunning
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        onClicked: {
+                                            if (root.ragRunStatus.lastResultNoteId && typeof selectedNoteId !== "undefined") {
+                                                selectedNoteId = root.ragRunStatus.lastResultNoteId
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // 참고문서 AI 현재 RAG 대상 문서 목록
+                        Rectangle {
+                            width: parent.width
+                            radius: Metrics.radiusMd
+                            color: Colors.surface
+                            border.color: Colors.borderLight
+                            border.width: 1
+                            implicitHeight: ragTargetListColumn.implicitHeight + (Metrics.sm * 2)
+                            visible: root.aiModeIndex === 1
+
+                            Column {
+                                id: ragTargetListColumn
+                                width: parent.width - (Metrics.sm * 2)
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                anchors.margins: Metrics.sm
+                                spacing: Metrics.xs
+
+                                Text {
+                                    text: "현재 참고문서 대상 (" + root.ragTargetDocuments.length + "개)"
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: Typography.caption
+                                    font.weight: Typography.weightMedium
+                                    color: Colors.textSecondary
+                                }
+
+                                ScrollView {
+                                    width: parent.width
+                                    height: 80
+                                    clip: true
+                                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                                    visible: root.ragTargetDocuments.length > 0
+
+                                    Column {
+                                        width: parent.width
+                                        spacing: 2
+                                        Repeater {
+                                            model: root.ragTargetDocuments
+                                            delegate: Row {
+                                                spacing: Metrics.xs
+                                                Text {
+                                                    text: (index + 1) + ". "
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: 10
+                                                    color: Colors.textTertiary
+                                                }
+                                                Text {
+                                                    text: modelData.title || "제목 없음"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: 10
+                                                    color: Colors.textPrimary
+                                                    elide: Text.ElideRight
+                                                    Layout.maximumWidth: root.width - 80
+                                                }
+                                                Text {
+                                                    text: " (" + (modelData.registration_method || "등록됨") + ")"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: 9
+                                                    color: Colors.textTertiary
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Text {
+                                    text: "등록된 참고문서가 없습니다. 위에서 문서를 등록해주세요."
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: Typography.caption
+                                    color: Colors.textTertiary
+                                    horizontalAlignment: Text.AlignHCenter
+                                    width: parent.width
+                                    wrapMode: Text.Wrap
+                                    visible: root.ragTargetDocuments.length === 0
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -1696,7 +2558,7 @@ Rectangle {
                                 opacity: parent.enabled ? 1 : 0.5
                             }
                             onClicked: {
-                                root.responseText = ""
+                                console.log("[AIAssistantPanel] 질문 초기화")
                                 var ac = getAssistantController()
                                 if (ac && window.currentNote && window.currentNote.content && questionInput.text) {
                                     ac.askQuestion(window.currentNote.content, questionInput.text)
@@ -1707,324 +2569,15 @@ Rectangle {
                 }
             }
         }
-
-        Rectangle {
-            Layout.fillWidth: true
-            radius: Metrics.radiusLg
-            color: Colors.surface
-            border.color: Colors.borderLight
-            implicitHeight: resultPreviewLayout.implicitHeight + (Metrics.md * 2)
-
-            ColumnLayout {
-                id: resultPreviewLayout
-                anchors.fill: parent
-                anchors.margins: Metrics.md
-                spacing: Metrics.sm
-
-                Text {
-                    text: "결과 미리보기"
-                    font.family: Typography.fontPrimary
-                    font.pixelSize: Typography.bodySmall
-                    font.weight: Typography.weightMedium
-                    color: Colors.textPrimary
-                }
-
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 220
-
-                    Item {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        visible: root.responseText === ""
-
-                        Column {
-                            anchors.centerIn: parent
-                            spacing: Metrics.xs
-                            Text {
-                                text: "아직 결과가 없습니다"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.bodySmall
-                                color: Colors.textSecondary
-                            }
-                            Text {
-                                text: "AI 작업을 실행하면 요약이나 답변이 이곳에 표시됩니다."
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.caption
-                                color: Colors.textTertiary
-                                horizontalAlignment: Text.AlignHCenter
-                                wrapMode: Text.WordWrap
-                            }
-                        }
-                    }
-
-                    ScrollView {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        clip: true
-                        visible: root.responseText !== ""
-                        ScrollBar.vertical.policy: ScrollBar.AsNeeded
-
-                        TextArea {
-                            text: root.responseText
-                            readOnly: true
-                            wrapMode: TextEdit.Wrap
-                            font.family: Typography.fontPrimary
-                            font.pixelSize: Typography.bodySmall
-                            color: Colors.textPrimary
-                            background: null
-                        }
-                    }
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        implicitHeight: ragCitationsColumn.implicitHeight + Metrics.sm
-                        color: Colors.surface
-                        border.color: Colors.borderLight
-                        radius: Metrics.radiusSm
-                        visible: root.hasRagCitations
-
-                        Column {
-                            id: ragCitationsColumn
-                            width: parent.width - (Metrics.sm * 2)
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            spacing: Metrics.xs
-
-                            Text {
-                                text: "근거 문서 (" + root.ragCitations.length + ")"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.caption
-                                font.weight: Typography.weightMedium
-                                color: Colors.textSecondary
-                            }
-
-                            Repeater {
-                                model: root.ragCitations
-                                delegate: Column {
-                                    width: parent.width
-                                    spacing: 2
-
-                                    Row {
-                                        spacing: Metrics.xs
-                                        Text {
-                                            text: modelData.source_id + " · " + (modelData.title || "제목 없음")
-                                            font.family: Typography.fontPrimary
-                                            font.pixelSize: Typography.caption
-                                            color: Colors.textPrimary
-                                            elide: Text.ElideRight
-                                            Layout.maximumWidth: root.width - 100
-                                        }
-                                        Text {
-                                            text: "답변에 인용됨"
-                                            font.family: Typography.fontPrimary
-                                            font.pixelSize: 10
-                                            color: Colors.primary500
-                                            visible: modelData.cited_in_answer
-                                        }
-                                    }
-
-                                    Text {
-                                        text: formatHeadingPath(modelData.heading_path)
-                                        font.family: Typography.fontPrimary
-                                        font.pixelSize: 10
-                                        color: Colors.textTertiary
-                                        visible: modelData.heading_path && modelData.heading_path.length > 0
-                                    }
-
-                                    Text {
-                                        text: modelData.source_type + (modelData.note_id ? " · note_id: " + modelData.note_id : (modelData.source_path ? " · " + formatSourcePath(modelData.source_path) : ""))
-                                        font.family: Typography.fontPrimary
-                                        font.pixelSize: 10
-                                        color: Colors.textTertiary
-                                        elide: Text.ElideRight
-                                        Layout.maximumWidth: root.width - 60
-                                    }
-
-                                    Row {
-                                        spacing: Metrics.xs
-                                        visible: modelData.note_id || modelData.source_path
-
-                                        Button {
-                                            implicitWidth: 60
-                                            implicitHeight: 20
-                                            padding: 0
-                                            text: formatCitationActionLabel(modelData)
-                                            font.family: Typography.fontPrimary
-                                            font.pixelSize: 9
-                                            onClicked: {
-                                                openCitation(modelData)
-                                            }
-                                            background: Rectangle {
-                                                color: Colors.bgSecondary
-                                                border.color: Colors.borderLight
-                                                radius: 3
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        implicitHeight: ragWarningsColumn.implicitHeight + Metrics.sm
-                        color: Colors.surface
-                        border.color: Colors.warning
-                        radius: Metrics.radiusSm
-                        visible: root.hasRagWarnings
-
-                        Column {
-                            id: ragWarningsColumn
-                            width: parent.width - (Metrics.sm * 2)
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            spacing: Metrics.xs
-
-                            Text {
-                                text: "알림"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.caption
-                                font.weight: Typography.weightMedium
-                                color: Colors.warning
-                            }
-
-                            Repeater {
-                                model: root.ragWarnings
-                                delegate: Text {
-                                    text: "- " + formatRagWarningMessage(modelData)
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: 10
-                                    color: Colors.textSecondary
-                                    wrapMode: Text.Wrap
-                                    width: parent.width
-                                }
-                            }
-                        }
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: Metrics.sm
-
-                    Button {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 40
-                        text: "본문에 삽입"
-                        enabled: root.responseText !== ""
-                        contentItem: Text {
-                            text: parent.text
-                            font.family: Typography.fontPrimary
-                            font.pixelSize: Typography.bodySmall
-                            font.weight: Typography.weightMedium
-                            color: Colors.white
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            color: Colors.primary500
-                            radius: Metrics.radiusSm
-                            border.color: Colors.primary600
-                            opacity: parent.enabled ? 1 : 0.5
-                        }
-                        onClicked: {
-                            console.log("[AIAssistantPanel] 본문에 삽입 clicked")
-                        }
-                    }
-
-                    Button {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 40
-                        text: "새 노트로 저장"
-                        enabled: root.responseText !== "" && typeof noteController !== "undefined"
-                        contentItem: Text {
-                            text: parent.text
-                            font.family: Typography.fontPrimary
-                            font.pixelSize: Typography.bodySmall
-                            font.weight: Typography.weightMedium
-                            color: Colors.textPrimary
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            color: Colors.bgSecondary
-                            radius: Metrics.radiusSm
-                            border.color: Colors.borderLight
-                            opacity: parent.enabled ? 1 : 0.5
-                        }
-                        onClicked: {
-                            var ac = getAssistantController()
-                            if (ac && root.responseText) {
-                                var now = new Date()
-                                var dateStr = now.getFullYear() + "." +
-                                              String(now.getMonth() + 1).padStart(2, "0") + "." +
-                                              String(now.getDate()).padStart(2, "0") + " " +
-                                              String(now.getHours()).padStart(2, "0") + ":" +
-                                              String(now.getMinutes()).padStart(2, "0")
-
-                                var aiMode = root.aiModeIndex === 1 ? "참고문서AI" : "현재문서AI"
-                                var question = root.lastAskedQuestion || ""
-
-                                var title = "AI결과 (" + dateStr + ")"
-                                var content = title + "\n\n" + aiMode + "\n\n" + question + "\n\n" + root.responseText
-
-                                if (root.ragCitations && root.ragCitations.length > 0) {
-                                    content += "\n\n---\n\n## 근거 문서\n\n"
-                                    for (var i = 0; i < root.ragCitations.length; i++) {
-                                        var cite = root.ragCitations[i]
-                                        content += "- " + (cite.title || "제목 없음")
-                                        if (cite.heading_path && cite.heading_path.length > 0) {
-                                            content += " > " + cite.heading_path.join(" > ")
-                                        }
-                                        content += " (" + cite.source_type + ")"
-                                        if (cite.note_id) {
-                                            content += " · note_id: " + cite.note_id
-                                        } else if (cite.source_path) {
-                                            content += " · " + cite.source_path
-                                        }
-                                        content += ")\n"
-                                    }
-                                }
-
-                                var folderId = ac.getOrCreateAIResultFolder()
-                                ac.createNewNote(title, content, folderId)
-                            }
-                        }
-                    }
-
-                    Button {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 40
-                        text: "복사"
-                        enabled: root.responseText !== ""
-                        contentItem: Text {
-                            text: parent.text
-                            font.family: Typography.fontPrimary
-                            font.pixelSize: Typography.bodySmall
-                            font.weight: Typography.weightMedium
-                            color: Colors.textPrimary
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            color: Colors.surface
-                            radius: Metrics.radiusSm
-                            border.color: Colors.borderLight
-                            opacity: parent.enabled ? 1 : 0.5
-                        }
-                        onClicked: {
-                            console.log("[AIAssistantPanel] 복사 clicked")
-                        }
-                    }
-                }
-            }
-        }
     }
 
     Item {
+        id: progressOverlay
         anchors.fill: parent
-        visible: root.aiRunning
+        visible: root.aiRunning || root.ragRequestRunning
+        opacity: visible ? 1 : 0
         z: 999
+        enabled: visible
 
         Rectangle {
             anchors.fill: parent
@@ -2034,6 +2587,7 @@ Rectangle {
 
         MouseArea {
             anchors.fill: parent
+            hoverEnabled: true
             onClicked: {}
         }
 
@@ -2049,7 +2603,7 @@ Rectangle {
             }
 
             Text {
-                text: "AI 작업 실행 중"
+                text: root.ragRequestRunning ? "답변 생성 중..." : "AI 작업 실행 중"
                 font.family: Typography.fontPrimary
                 font.pixelSize: Typography.bodyLarge
                 font.weight: Typography.weightSemibold
@@ -2059,7 +2613,7 @@ Rectangle {
             }
 
             Text {
-                text: "작업이 완료될 때까지 다른 조작은 잠시 중단됩니다."
+                text: root.ragRequestRunning ? "참고문서를 검색하고 답변을 생성 중입니다." : "작업이 완료될 때까지 다른 조작은 잠시 중단됩니다."
                 font.family: Typography.fontPrimary
                 font.pixelSize: Typography.caption
                 color: Colors.textSecondary

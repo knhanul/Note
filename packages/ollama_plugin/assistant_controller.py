@@ -17,9 +17,9 @@ logger = logging.getLogger(__name__)
 MAX_CONTENT_LENGTH = 4000
 MAX_OUTPUT_LENGTH = 500
 RESPONSE_LENGTH_TO_NUM_PREDICT = {
-    "short": 256,
-    "medium": 512,
-    "long": 1024,
+    "short": 512,
+    "medium": 1024,
+    "long": 1536,
 }
 
 

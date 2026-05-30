@@ -167,13 +167,14 @@ class AIWorker(QRunnable):
         """Execute the Ollama API request and return accumulated response."""
         use_stream = self.stream and not fallback_attempted
         
-        # Use /api/chat for chat mode, /api/generate for generate mode
-        # For now, use /api/generate as default
+        # FIXED: Use /api/generate only (disable /api/chat auto-switch for this issue)
+        # TODO: Re-enable /api/chat path after verifying fix
         url = f"{self.base_url}/api/generate"
         data = {
             "model": self.model,
             "prompt": self.prompt,
             "stream": use_stream,
+            "think": False,  # Disable thinking to prevent token exhaustion
         }
 
         if self.options:
@@ -181,6 +182,14 @@ class AIWorker(QRunnable):
 
         if self.keep_alive:
             data["keep_alive"] = self.keep_alive
+
+        # Log payload options for debugging
+        logger.info(
+            f"[AIWorker] Request payload: model={self.model}, stream={use_stream}, "
+            f"think={data.get('think')}, num_predict={self.options.get('num_predict', 'default')}, "
+            f"num_ctx={self.options.get('num_ctx', 'default')}, temperature={self.options.get('temperature', 'default')}, "
+            f"action_id={self.action_id}"
+        )
 
         request = urllib.request.Request(
             url,
@@ -208,6 +217,7 @@ class AIWorker(QRunnable):
 
                 if use_stream:
                     buffer = ""
+                    accumulated_thinking = ""  # Track thinking separately
                     for line in response:
                         if self._is_cancelled:
                             self.signals.statusChanged.emit("중지됨")
@@ -226,8 +236,19 @@ class AIWorker(QRunnable):
                                     if DEBUG_MODE and chunk_count <= 3:
                                         logger.debug(f"[AIWorker] Raw chunk {chunk_count}: {chunk}")
                                     
-                                    # Extract text using helper function
+                                    # Extract thinking (if present) - don't emit to UI
+                                    thinking = chunk.get("thinking", "")
+                                    if thinking:
+                                        accumulated_thinking += thinking
+                                        if DEBUG_MODE:
+                                            logger.debug(f"[AIWorker] Thinking chunk: {len(thinking)} chars")
+                                    
+                                    # Extract text using helper function (response field)
                                     token = extract_response_text(chunk)
+                                    
+                                    # Log if eval_count is present but token is empty
+                                    if not token and chunk.get("eval_count", 0) > 0:
+                                        logger.warning(f"[AIWorker] Chunk has eval_count={chunk.get('eval_count')} but empty token text. Chunk keys: {list(chunk.keys())}")
                                     
                                     # Skip empty tokens for first token detection
                                     if first_token_time is None and token:
@@ -237,7 +258,7 @@ class AIWorker(QRunnable):
                                             f"action_id={self.action_id}"
                                         )
                                     
-                                    # Only emit non-empty tokens
+                                    # Only emit non-empty response tokens
                                     if token:
                                         logger.info(f"[AIWorker] Emitting token: len={len(token)}, action_id={self.action_id}")
                                         self.signals.tokenReceived.emit(token)
@@ -264,6 +285,8 @@ class AIWorker(QRunnable):
                                         done_reason = chunk.get("done_reason", "")
                                         eval_count = chunk.get("eval_count", 0)
                                         prompt_eval_count = chunk.get("prompt_eval_count", 0)
+                                        response_chars = len(accumulated_response)
+                                        thinking_chars = len(accumulated_thinking)
                                         
                                         first_token_str = f"{first_token_time:.2f}s" if first_token_time else "N/A"
                                         logger.info(
@@ -274,8 +297,18 @@ class AIWorker(QRunnable):
                                             f"done_reason={done_reason}, "
                                             f"eval_count={eval_count}, "
                                             f"prompt_eval_count={prompt_eval_count}, "
+                                            f"response_chars={response_chars}, "
+                                            f"thinking_chars={thinking_chars}, "
                                             f"action_id={self.action_id}"
                                         )
+                                        
+                                        # Check for thinking-only termination
+                                        if response_chars == 0 and thinking_chars > 0:
+                                            logger.warning(
+                                                f"[AIWorker] Thinking-only termination detected: "
+                                                f"thinking_chars={thinking_chars}, done_reason={done_reason}. "
+                                                f"Consider increasing num_predict or disabling think."
+                                            )
                                 except json.JSONDecodeError:
                                     continue
 
@@ -300,10 +333,15 @@ class AIWorker(QRunnable):
                     else:
                         total_duration_s = total_duration_raw / 1000 if total_duration_raw else 0
                     
+                    # Extract thinking (if present) - don't emit to UI
+                    thinking = data.get("thinking", "")
+                    thinking_chars = len(thinking) if thinking else 0
+                    
                     logger.info(
                         f"[AIWorker] Non-stream response: first_token={first_token_time:.2f}s, "
                         f"load_duration={load_duration_s:.2f}s, "
                         f"total_duration={total_duration_s:.2f}s, "
+                        f"thinking_chars={thinking_chars}, "
                         f"action_id={self.action_id}"
                     )
                     
@@ -313,6 +351,15 @@ class AIWorker(QRunnable):
                         logger.info(f"[AIWorker] Emitting non-stream token: len={len(token)}, action_id={self.action_id}")
                         self.signals.tokenReceived.emit(token)
                         accumulated_response = token
+                    else:
+                        # Check for thinking-only response
+                        if thinking_chars > 0:
+                            logger.warning(
+                                f"[AIWorker] Non-stream response has thinking only (no response). "
+                                f"thinking_chars={thinking_chars}. Consider increasing num_predict or disabling think."
+                            )
+                        else:
+                            logger.warning(f"[AIWorker] Non-stream response has empty token. Data keys: {list(data.keys())}")
                     
                     return accumulated_response
 

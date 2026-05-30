@@ -200,6 +200,22 @@ ColumnLayout {
                             }
                         }
                     )
+                } else if (msg.indexOf("REQUEST_OPEN_NOTE:") === 0) {
+                    var openNoteId = msg.substring("REQUEST_OPEN_NOTE:".length)
+                    if (openNoteId.indexOf("https://note.local/open/") === 0)
+                        openNoteId = openNoteId.substring("https://note.local/open/".length)
+                    var splitIdx = openNoteId.indexOf("?")
+                    if (splitIdx >= 0)
+                        openNoteId = openNoteId.substring(0, splitIdx)
+                    splitIdx = openNoteId.indexOf("#")
+                    if (splitIdx >= 0)
+                        openNoteId = openNoteId.substring(0, splitIdx)
+                    if (noteController && openNoteId) {
+                        var opened = noteController.selectNote(openNoteId)
+                        if (opened && typeof selectedNoteId !== "undefined") {
+                            selectedNoteId = openNoteId
+                        }
+                    }
                 }
             }
 
@@ -220,6 +236,30 @@ ColumnLayout {
                                 }
                                 window.__nuniLastSaveReq = now;
                                 console.log('REQUEST_SAVE');
+                            }
+
+                            function ensureNoteLinkHandler() {
+                                if (window.__nuniNoteLinkHookAttached) return true;
+                                window.__nuniNoteLinkHookAttached = true;
+
+                                document.addEventListener('click', function(e) {
+                                    var node = e.target;
+                                    if (node && node.nodeType === 3) {
+                                        node = node.parentElement;
+                                    }
+                                    while (node && node.tagName && node.tagName.toLowerCase() !== 'a') {
+                                        node = node.parentElement;
+                                    }
+                                    if (!node || !node.getAttribute) return;
+                                    var href = node.getAttribute('href') || '';
+                                    if (href && href.indexOf('https://note.local/open/') === 0) {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        console.log('REQUEST_OPEN_NOTE:' + href);
+                                    }
+                                }, true);
+
+                                return true;
                             }
 
                             function attachHooks() {
@@ -244,6 +284,8 @@ ColumnLayout {
                                     }, 0);
                                 }, true);
 
+                                ensureNoteLinkHandler();
+
                                 return true;
                             }
 
@@ -255,6 +297,7 @@ ColumnLayout {
                                 if (attachHooks()) {
                                     clearInterval(timer);
                                     console.log('EDITOR_LISTENERS_ATTACHED');
+                                    ensureNoteLinkHandler();
                                 } else if (tries >= 20) {
                                     clearInterval(timer);
                                     console.log('EDITOR_LISTENERS_ATTACH_TIMEOUT');
@@ -308,6 +351,14 @@ ColumnLayout {
     // Backward-compatible alias
     function setMarkdownContent(md) {
         setEditorContent(md, "")
+    }
+
+    // Force live markdown refresh for same-note streaming updates.
+    // Uses editorAPI.setMarkdown which does not ignore same noteId updates.
+    function applyLiveMarkdown(md) {
+        var setMd = "window.__liveMd = " + JSON.stringify(md || "") + ";"
+        webView.runJavaScript(setMd +
+            "if (window.editorAPI && window.editorAPI.setMarkdown) { window.editorAPI.setMarkdown(window.__liveMd); }")
     }
     
     // Get markdown content from editor

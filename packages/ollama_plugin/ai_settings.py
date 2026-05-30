@@ -25,10 +25,11 @@ class AISettings:
     first_token_timeout: int = 180  # Timeout for first token
     idle_timeout: int = 60  # Timeout between tokens
     # Ollama options
-    num_predict: int = 512
+    num_predict: int = 1024
     num_ctx: int = 4096
     temperature: float = 0.2
     keep_alive: str = "10m"  # Keep model loaded
+    enable_thinking: bool = False  # Disable thinking by default to prevent token exhaustion
 
 
 class AISettingsManager:
@@ -45,14 +46,15 @@ class AISettingsManager:
         timeout=300,
         first_token_timeout=180,
         idle_timeout=60,
-        num_predict=512,
+        num_predict=1024,
         num_ctx=4096,
         temperature=0.2,
-        keep_alive="10m"
+        keep_alive="10m",
+        enable_thinking=False,
     )
 
     LOW_PERFORMANCE_DEFAULTS = {
-        "num_predict": 512,
+        "num_predict": 1024,
         "num_ctx": 4096,
         "temperature": 0.2,
         "keep_alive": "10m",
@@ -94,6 +96,7 @@ class AISettingsManager:
                         num_ctx=data.get("num_ctx", self.DEFAULT_SETTINGS.num_ctx),
                         temperature=data.get("temperature", self.DEFAULT_SETTINGS.temperature),
                         keep_alive=data.get("keep_alive", self.DEFAULT_SETTINGS.keep_alive),
+                        enable_thinking=data.get("enable_thinking", self.DEFAULT_SETTINGS.enable_thinking),
                     )
                     logger.info(f"Loaded AI settings from {self._settings_file}")
                     return loaded
@@ -151,7 +154,7 @@ class AISettingsManager:
         elif mode == "normal":
             self.settings.top_k = 5
             self.settings.streaming = True
-            self.settings.num_predict = 512
+            self.settings.num_predict = 1024
             self.settings.num_ctx = 4096
             self.settings.temperature = 0.2
             self.settings.keep_alive = "10m"

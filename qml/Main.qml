@@ -4816,6 +4816,8 @@ Window {
                 Layout.minimumWidth: 320
                 Layout.preferredWidth: 360
                 Layout.maximumWidth: 440
+                z: 1000  // High z-order to ensure progress overlay renders on top
+                noteEditorRef: noteEditor
 
                 Behavior on Layout.preferredWidth {
                     NumberAnimation { duration: Metrics.durationNormal; easing.type: Easing.InOutQuart }

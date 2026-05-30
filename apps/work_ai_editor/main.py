@@ -74,7 +74,7 @@ def plugin_setup(engine, services, config):
         logger.info("[work_ai_editor] Initializing AiRagController...")
         ai_db_path = config.app_data_dir / "ai" / "ai_index.db"
         ai_db_path.parent.mkdir(parents=True, exist_ok=True)
-        app_service = AiRagApplicationService(db_path=str(ai_db_path))
+        app_service = AiRagApplicationService(db_path=str(ai_db_path), app_data_dir=config.app_data_dir)
         ai_rag_controller = AiRagController(app_service=app_service)
         engine.rootContext().setContextProperty("aiRagController", ai_rag_controller)
         engine._ai_rag_controller = ai_rag_controller

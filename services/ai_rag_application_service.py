@@ -13,6 +13,7 @@ from services.ollama_llm_client import OllamaLlmClient
 from services.document_chunk_model import IndexedDocument
 from services.ai_search_service import SearchResultChunk
 from services.ai_rag_service import RagAnswer, RagCitation
+from packages.ollama_plugin.ai_settings import AISettingsManager
 
 
 class FakeLlmClient(LlmClient):
@@ -45,10 +46,13 @@ class AiRagApplicationService:
         db_path: str | Path | None = None,
         llm_client: LlmClient | None = None,
         default_model: str = "llama3.2:3b",
+        app_data_dir: Path | None = None,
     ):
         self._db_path = db_path
         self._default_model = default_model
         self._llm_client = llm_client
+        self._app_data_dir = app_data_dir
+        self._settings_manager: Optional[AISettingsManager] = None
         self._db: Optional[AiIndexDatabase] = None
         self._repo: Optional[AiDocumentIndexRepository] = None
         self._index_service: Optional[AiDocumentIndexService] = None
@@ -71,6 +75,13 @@ class AiRagApplicationService:
         self._context_builder = AiContextBuilder(self._repo)
         self._prompt_builder = AiRagPromptBuilder()
 
+        # Initialize settings manager to get model from AI settings
+        if self._app_data_dir:
+            self._settings_manager = AISettingsManager(self._app_data_dir)
+            settings_model = self._settings_manager.settings.chat_model
+            if settings_model:
+                self._default_model = settings_model
+
         llm = self._llm_client
         if llm is None:
             llm = OllamaLlmClient(default_model=self._default_model)
@@ -80,6 +91,7 @@ class AiRagApplicationService:
             context_builder=self._context_builder,
             prompt_builder=self._prompt_builder,
             llm_client=llm,
+            default_model=self._default_model,
         )
 
         self._initialized = True

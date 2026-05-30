@@ -1,5 +1,6 @@
 import json
 import logging
+import threading
 from typing import Optional, Any
 from pathlib import Path
 
@@ -219,6 +220,8 @@ class AiRagController(QObject):
     indexStatusChanged = pyqtSignal(str)
     errorOccurred = pyqtSignal(str)
     searchResultsChanged = pyqtSignal()
+    _askCompleted = pyqtSignal(object)
+    _askFailed = pyqtSignal(str)
 
     def __init__(self, app_service: AiRagApplicationService | None = None, parent=None):
         super().__init__(parent)
@@ -227,6 +230,23 @@ class AiRagController(QObject):
         self._last_warnings: list[str] = []
         self._last_search_results: list[SearchResultChunk] = []
         self._last_index_result: dict = {}
+        self._ask_in_progress = False
+        self._askCompleted.connect(self._on_ask_completed)
+        self._askFailed.connect(self._on_ask_failed)
+
+    @pyqtSlot(object)
+    def _on_ask_completed(self, answer: RagAnswer) -> None:
+        self._ask_in_progress = False
+        self._last_answer = answer
+        self._last_warnings = answer.warnings
+        self.ragAnswerReady.emit(answer.answer_text)
+        self.ragCitationsChanged.emit()
+        self.ragWarningsChanged.emit()
+
+    @pyqtSlot(str)
+    def _on_ask_failed(self, message: str) -> None:
+        self._ask_in_progress = False
+        self.errorOccurred.emit(message)
 
     def _get_app_service(self) -> AiRagApplicationService:
         if self._app_service is None:
@@ -299,13 +319,24 @@ class AiRagController(QObject):
                 self.errorOccurred.emit("질문을 입력해주세요.")
                 return
 
-            self._last_answer = self._get_app_service().ask_indexed_documents(question.strip())
-            self._last_warnings = self._last_answer.warnings
+            if self._ask_in_progress:
+                self.errorOccurred.emit("이미 참고문서 질문을 처리 중입니다. 잠시만 기다려주세요.")
+                return
 
-            self.ragAnswerReady.emit(self._last_answer.answer_text)
-            self.ragCitationsChanged.emit()
-            self.ragWarningsChanged.emit()
+            self._ask_in_progress = True
+            normalized_question = question.strip()
+
+            def _worker() -> None:
+                try:
+                    answer = self._get_app_service().ask_indexed_documents(normalized_question)
+                    self._askCompleted.emit(answer)
+                except Exception as worker_error:
+                    logger.error(f"[AiRagController] askIndexedDocuments worker failed: {worker_error}")
+                    self._askFailed.emit(f"질문 실패: {worker_error}")
+
+            threading.Thread(target=_worker, daemon=True).start()
         except Exception as e:
+            self._ask_in_progress = False
             logger.error(f"[AiRagController] askIndexedDocuments failed: {e}")
             self.errorOccurred.emit(f"질문 실패: {e}")
 
