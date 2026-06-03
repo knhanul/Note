@@ -146,7 +146,7 @@ class AiDocumentIndexRepository:
         query = (
             """
             SELECT d.document_id, d.source_type, d.source_path, d.note_id, d.title,
-                   d.created_at, d.updated_at,
+                   d.created_at, d.updated_at, d.indexed_at,
                    COUNT(c.chunk_id) AS chunk_count
             FROM ai_documents d
             LEFT JOIN ai_document_chunks c ON c.document_id = d.document_id
@@ -158,7 +158,7 @@ class AiDocumentIndexRepository:
             else
             """
             SELECT d.document_id, d.source_type, d.source_path, d.note_id, d.title,
-                   d.created_at, d.updated_at,
+                   d.created_at, d.updated_at, d.indexed_at,
                    COUNT(c.chunk_id) AS chunk_count
             FROM ai_documents d
             LEFT JOIN ai_document_chunks c ON c.document_id = d.document_id
