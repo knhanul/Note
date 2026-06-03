@@ -129,6 +129,7 @@ Rectangle {
     property string aiEmbeddingModel: typeof aiAssistantController !== "undefined" && aiAssistantController !== null ? aiAssistantController.embeddingModel : ""
     property string aiPerformanceMode: typeof aiAssistantController !== "undefined" && aiAssistantController !== null ? aiAssistantController.performanceMode : "low"
     property var aiModelList: typeof aiAssistantController !== "undefined" && aiAssistantController !== null ? aiAssistantController.modelList : []
+    property string editorGuardMessage: ""
 
     signal closed()
 
@@ -217,22 +218,39 @@ Rectangle {
                     color: closeMA.containsMouse ? Colors.bgTertiary : Colors.bgSecondary
                     border.width: 1
                     border.color: Colors.borderLight
+                    opacity: (root.settingsMenuIndex === 1 && actionManagementPanel && actionManagementPanel.isActionEditorOpen) ? 0.55 : 1.0
 
                     Text {
                         anchors.centerIn: parent
                         text: "닫기"
                         font.family: Typography.fontPrimary
                         font.pixelSize: 12
-                        color: Colors.textSecondary
+                        color: (root.settingsMenuIndex === 1 && actionManagementPanel && actionManagementPanel.isActionEditorOpen) ? Colors.textTertiary : Colors.textSecondary
                     }
 
                     MouseArea {
                         id: closeMA
                         anchors.fill: parent
                         hoverEnabled: true
-                        onClicked: root.closed()
+                        onClicked: {
+                            if (root.settingsMenuIndex === 1 && actionManagementPanel && actionManagementPanel.isActionEditorOpen) {
+                                root.editorGuardMessage = "AI 기능을 편집 중입니다. 먼저 저장 또는 취소를 눌러주세요."
+                                return
+                            }
+                            root.closed()
+                        }
                     }
                 }
+            }
+
+            Text {
+                Layout.fillWidth: true
+                visible: root.editorGuardMessage !== ""
+                text: root.editorGuardMessage
+                font.family: Typography.fontPrimary
+                font.pixelSize: Typography.caption
+                color: Colors.warning
+                wrapMode: Text.Wrap
             }
 
             RowLayout {
@@ -686,6 +704,7 @@ Rectangle {
                         Layout.fillHeight: true
 
                         AIActionManagementPanel {
+                            id: actionManagementPanel
                             anchors.fill: parent
                             visible: typeof aiActionController !== "undefined" && aiActionController !== null
                         }

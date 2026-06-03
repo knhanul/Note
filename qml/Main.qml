@@ -98,9 +98,11 @@ Window {
     property string lastRealLibraryIdBeforeAIPromptMode: ""
     property int promptListRefreshCounter: 0  // Force ListView refresh
     property string aiPromptTitleDraft: ""
+    property string saveStatusMessage: ""
+    property bool saveStatusError: false
     property var promptRuleInsertItems: [
         { "icon": "\uD83C\uDFAD", "label": "역할", "description": "AI의 역할과 페르소나를 정의합니다", "value": "[역할]\n당신은 현재 문서와 사용자의 요청을 바탕으로 업무에 바로 활용할 수 있는 결과를 작성하는 AI 업무비서입니다.\n" },
-        { "icon": "\uD83D\uDCE5", "label": "입력", "description": "프롬프트에 포함할 입력 데이터를 안내합니다", "value": "[입력]\n현재 문서 내용:\n{{CONTENT}}\n\n선택한 내용:\n{{SELECTION}}\n\n사용자 입력:\n{{USER_INPUT}}\n\n참고문서 내용:\n{{CONTEXT}}\n" },
+        { "icon": "\uD83D\uDCE5", "label": "입력", "description": "프롬프트에 포함할 입력 데이터를 안내합니다", "value": "[입력]\n현재 문서 내용:\n{{CONTENT}}\n\n선택한 내용:\n{{SELECTION}}\n\n사용자 입력:\n{{USER_INPUT}}\n" },
         { "icon": "\uD83D\uDCCB", "label": "출력 형식", "description": "결과물의 구조를 정합니다", "value": "[출력 형식]\n사용자의 요청에 맞게 결과를 작성하세요.\n필요한 경우 제목, 핵심 요약, 주요 내용, 확인 필요 사항, 다음 작업으로 나누어 정리하세요.\n" },
         { "icon": "\uD83D\uDCCF", "label": "답변 길이", "description": "응답 분량을 안내합니다", "value": "[답변 길이]\n불필요하게 길게 쓰지 말고, 사용자가 바로 활용할 수 있을 정도로 간결하게 작성하세요.\n" },
         { "icon": "\uD83D\uDCAC", "label": "말투", "description": "문체와 어조를 설정합니다", "value": "[말투]\n자연스럽고 명확한 한국어 문장으로 작성하세요.\n" },
@@ -111,8 +113,7 @@ Window {
     property var promptVariableInsertItems: [
         { "icon": "\uD83D\uDCC4", "label": "현재 문서 내용", "code": "{{CONTENT}}", "description": "현재 열려 있는 문서 전체 내용을 프롬프트에 넣습니다.", "value": "{{CONTENT}}" },
         { "icon": "\u2702\uFE0F", "label": "선택한 내용", "code": "{{SELECTION}}", "description": "사용자가 문서에서 선택한 텍스트를 프롬프트에 넣습니다.", "value": "{{SELECTION}}" },
-        { "icon": "\u2328\uFE0F", "label": "사용자 입력", "code": "{{USER_INPUT}}", "description": "AI 실행창에 사용자가 입력한 요청을 프롬프트에 넣습니다.", "value": "{{USER_INPUT}}" },
-        { "icon": "\uD83D\uDD0D", "label": "참고문서 내용", "code": "{{CONTEXT}}", "description": "참고문서 AI 또는 RAG 검색 결과를 프롬프트에 넣습니다.", "value": "{{CONTEXT}}" }
+        { "icon": "\u2328\uFE0F", "label": "사용자 입력", "code": "{{USER_INPUT}}", "description": "AI 실행창에 사용자가 입력한 요청을 프롬프트에 넣습니다.", "value": "{{USER_INPUT}}" }
     ]
 
     // Reload prompt documents when switching to AI prompt mode
@@ -166,6 +167,15 @@ Window {
         }
     }
 
+    Timer {
+        id: saveStatusTimer
+        interval: 3000
+        repeat: false
+        onTriggered: {
+            window.saveStatusMessage = ""
+        }
+    }
+
     function currentPromptReadonly() {
         return !!(window.currentAIPromptDocument && window.currentAIPromptDocument.readonly)
     }
@@ -183,10 +193,9 @@ Window {
         var hasContent = text.indexOf("{{CONTENT}}") >= 0
         var hasSelection = text.indexOf("{{SELECTION}}") >= 0
         var hasUserInput = text.indexOf("{{USER_INPUT}}") >= 0
-        var hasContext = text.indexOf("{{CONTEXT}}") >= 0
 
         var warnings = []
-        if (!(hasContent || hasSelection || hasUserInput || hasContext)) {
+        if (!(hasContent || hasSelection || hasUserInput)) {
             warnings.push("프롬프트에 입력 변수가 없습니다. AI가 문서나 사용자 입력을 참고하지 못할 수 있습니다.")
         }
         if (!hasUserInput) {
@@ -1720,6 +1729,16 @@ Window {
                     }
                 }
             }
+        }
+        function onInfoMessage(message) {
+            window.saveStatusMessage = message
+            window.saveStatusError = false
+            window.saveStatusTimer.restart()
+        }
+        function onErrorOccurred(message) {
+            window.saveStatusMessage = message
+            window.saveStatusError = true
+            window.saveStatusTimer.restart()
         }
     }
 
@@ -4310,135 +4329,111 @@ Window {
                                     Layout.fillWidth: true
                                     spacing: Metrics.md
 
-                                    // Status badge
-                                    Rectangle {
-                                        height: 24
-                                        radius: Metrics.radiusSm
-                                        color: {
-                                            if (!window.currentAIPromptDocument) return Colors.borderLight
-                                            if (window.isPromptSample(window.currentAIPromptDocument)) return Colors.accentOrangeLight
-                                            return Colors.success
-                                        }
-                                        visible: window.currentAIPromptDocument !== null && !window.isPromptSample(window.currentAIPromptDocument)
-
-                                        Text {
-                                            anchors.centerIn: parent
-                                            anchors.leftMargin: 8
-                                            anchors.rightMargin: 8
-                                            text: !window.currentAIPromptDocument ? "프롬프트를 선택하세요" : "사용자 프롬프트 · 편집 가능"
-                                            font.family: Typography.fontPrimary
-                                            font.pixelSize: 11
-                                            color: {
-                                                if (!window.currentAIPromptDocument) return Colors.textSecondary
-                                                return Colors.white
-                                            }
-                                        }
-                                    }
-
-                                    // Spacer
-                                    Item {
+                                    // Warning messages container (fills space up to buttons)
+                                    Column {
                                         Layout.fillWidth: true
-                                    }
+                                        spacing: Metrics.xs
 
-                                    // Duplicate button (only for sample prompt)
-                                    Rectangle {
-                                        width: 200
-                                        height: 28
-                                        radius: Metrics.radiusMd
-                                        color: duplicateBtnArea.containsMouse ? Colors.primary500 : Colors.primary400
-                                        visible: window.isPromptSample(window.currentAIPromptDocument)
+                                        Repeater {
+                                            model: window.promptWarningMessages
 
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: "샘플에서 새 프롬프트 만들기"
-                                            font.family: Typography.fontPrimary
-                                            font.weight: Typography.weightMedium
-                                            font.pixelSize: 11
-                                            color: Colors.textInverse
-                                        }
+                                            Rectangle {
+                                                width: parent.width
+                                                implicitHeight: warningText.implicitHeight + Metrics.xs * 2
+                                                radius: Metrics.radiusSm
+                                                color: Qt.rgba(245/255, 158/255, 11/255, 0.12)
+                                                border.color: Colors.warning
+                                                border.width: 1
 
-                                        MouseArea {
-                                            id: duplicateBtnArea
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            onClicked: {
-                                                if (typeof promptDocumentController !== "undefined" && promptDocumentController && window.promptSampleDocId) {
-                                                    promptDocumentController.duplicatePromptDocument(window.promptSampleDocId)
+                                                Text {
+                                                    id: warningText
+                                                    anchors.fill: parent
+                                                    anchors.leftMargin: Metrics.xs
+                                                    anchors.rightMargin: Metrics.xs
+                                                    text: modelData
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.caption
+                                                    color: Colors.warning
+                                                    wrapMode: Text.Wrap
                                                 }
                                             }
                                         }
                                     }
 
-                                    // Delete button (only for user prompts)
-                                    Rectangle {
-                                        width: 80
-                                        height: 28
-                                        radius: Metrics.radiusMd
-                                        color: deletePromptBtnArea.containsMouse ? Colors.error500 : Colors.error400
-                                        visible: window.currentAIPromptDocument && !window.currentPromptReadonly() && window.currentAIPromptDocument.source_type !== "default"
+                                    // Buttons container (fixed width at right)
+                                    Row {
+                                        spacing: Metrics.md
 
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: "삭제"
-                                            font.family: Typography.fontPrimary
-                                            font.weight: Typography.weightMedium
-                                            font.pixelSize: 11
-                                            color: Colors.textInverse
-                                        }
-
-                                        MouseArea {
-                                            id: deletePromptBtnArea
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            onClicked: {
-                                                console.log("[Main] Delete button clicked, selectedAIPromptDocId:", window.selectedAIPromptDocId)
-                                                if (typeof promptDocumentController !== "undefined" && promptDocumentController && window.selectedAIPromptDocId) {
-                                                    var bindingCount = promptDocumentController.countBindingsForPrompt(window.selectedAIPromptDocId)
-                                                    console.log("[Main] Binding count:", bindingCount)
-                                                    if (bindingCount > 0) {
-                                                        var boundActions = promptDocumentController.listActionsBoundToPrompt(window.selectedAIPromptDocId)
-                                                        var actionNames = boundActions.map(function(a) { return a.name || a.action_id }).join(", ")
-                                                        promptDeleteDialog.text = "이 프롬프트는 다음 AI 기능에 연결되어 있습니다: " + actionNames + ". 완전히 삭제하시겠습니까?"
-                                                        promptDeleteDialog.pendingPromptDocId = window.selectedAIPromptDocId
-                                                        promptDeleteDialog.open()
-                                                    } else {
-                                                        promptDeleteDialog.text = "이 AI 프롬프트를 완전히 삭제하시겠습니까?"
-                                                        promptDeleteDialog.pendingPromptDocId = window.selectedAIPromptDocId
-                                                        promptDeleteDialog.open()
-                                                    }
-                                                } else {
-                                                    console.log("[Main] promptDocumentController not available or no prompt selected")
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: Metrics.xs
-                                    visible: window.promptWarningMessages.length > 0
-
-                                    Repeater {
-                                        model: window.promptWarningMessages
-
+                                        // Duplicate button (only for sample prompt)
                                         Rectangle {
-                                            Layout.fillWidth: true
-                                            implicitHeight: warningText.implicitHeight + Metrics.xs * 2
-                                            radius: Metrics.radiusSm
-                                            color: Qt.rgba(245/255, 158/255, 11/255, 0.12)
-                                            border.color: Colors.warning
-                                            border.width: 1
+                                            width: 200
+                                            height: 28
+                                            radius: Metrics.radiusMd
+                                            color: duplicateBtnArea.containsMouse ? Colors.primary500 : Colors.primary400
+                                            visible: window.isPromptSample(window.currentAIPromptDocument)
 
                                             Text {
-                                                id: warningText
-                                                anchors.fill: parent
-                                                anchors.margins: Metrics.xs
-                                                text: modelData
+                                                anchors.centerIn: parent
+                                                text: "샘플에서 새 프롬프트 만들기"
                                                 font.family: Typography.fontPrimary
-                                                font.pixelSize: Typography.caption
-                                                color: Colors.warning
-                                                wrapMode: Text.Wrap
+                                                font.weight: Typography.weightMedium
+                                                font.pixelSize: 11
+                                                color: Colors.textInverse
+                                            }
+
+                                            MouseArea {
+                                                id: duplicateBtnArea
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                onClicked: {
+                                                    if (typeof promptDocumentController !== "undefined" && promptDocumentController && window.promptSampleDocId) {
+                                                        promptDocumentController.duplicatePromptDocument(window.promptSampleDocId)
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        // Delete button (only for user prompts)
+                                        Rectangle {
+                                            width: 80
+                                            height: 28
+                                            radius: Metrics.radiusMd
+                                            color: deletePromptBtnArea.containsMouse ? Colors.error500 : Colors.error400
+                                            visible: window.currentAIPromptDocument && !window.isPromptSample(window.currentAIPromptDocument)
+
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: "삭제"
+                                                font.family: Typography.fontPrimary
+                                                font.weight: Typography.weightMedium
+                                                font.pixelSize: 11
+                                                color: Colors.textInverse
+                                            }
+
+                                            MouseArea {
+                                                id: deletePromptBtnArea
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                onClicked: {
+                                                    console.log("[Main] Delete button clicked, selectedAIPromptDocId:", window.selectedAIPromptDocId)
+                                                    if (typeof promptDocumentController !== "undefined" && promptDocumentController && window.selectedAIPromptDocId) {
+                                                        var bindingCount = promptDocumentController.countBindingsForPrompt(window.selectedAIPromptDocId)
+                                                        console.log("[Main] Binding count:", bindingCount)
+                                                        if (bindingCount > 0) {
+                                                            var boundActions = promptDocumentController.listActionsBoundToPrompt(window.selectedAIPromptDocId)
+                                                            var actionNames = boundActions.map(function(a) { return a.name || a.action_id }).join(", ")
+                                                            promptDeleteDialog.text = "이 프롬프트는 다음 AI 기능에 연결되어 있습니다: " + actionNames + ". 완전히 삭제하시겠습니까?"
+                                                            promptDeleteDialog.pendingPromptDocId = window.selectedAIPromptDocId
+                                                            promptDeleteDialog.open()
+                                                        } else {
+                                                            promptDeleteDialog.text = "이 AI 프롬프트를 완전히 삭제하시겠습니까?"
+                                                            promptDeleteDialog.pendingPromptDocId = window.selectedAIPromptDocId
+                                                            promptDeleteDialog.open()
+                                                        }
+                                                    } else {
+                                                        console.log("[Main] promptDocumentController not available or no prompt selected")
+                                                    }
+                                                }
                                             }
                                         }
                                     }

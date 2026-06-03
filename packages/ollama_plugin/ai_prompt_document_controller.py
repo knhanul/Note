@@ -184,6 +184,12 @@ class AIPromptDocumentController(QObject):
         if not title:
             title = "새 AI 프롬프트"
 
+        existing = self._prompt_service.get_prompt_document_by_title(title)
+        if existing:
+            logger.warning(f"[AIPromptDocumentController] Duplicate title: {title}")
+            self.errorOccurred.emit("같은 제목의 프롬프트가 이미 존재합니다.")
+            return {}
+
         default_content = content_md or """# 새 AI 프롬프트
 
 아래 입력을 참고하여 답변해주세요.
@@ -270,9 +276,9 @@ class AIPromptDocumentController(QObject):
             logger.warning(f"[AIPromptDocumentController] deletePromptDocument: document not found: {prompt_doc_id}")
             return False
 
-        if doc.get("source_type") == "default" or int(doc.get("readonly", 0)):
-            logger.warning(f"[AIPromptDocumentController] deletePromptDocument: cannot delete default or readonly: {prompt_doc_id}")
-            self.errorOccurred.emit("기본 프롬프트는 삭제할 수 없습니다.")
+        if doc.get("source_type") == "sample" or int(doc.get("readonly", 0)):
+            logger.warning(f"[AIPromptDocumentController] deletePromptDocument: cannot delete sample or readonly: {prompt_doc_id}")
+            self.errorOccurred.emit("샘플 프롬프트는 삭제할 수 없습니다.")
             return False
 
         try:

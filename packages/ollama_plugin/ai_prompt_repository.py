@@ -475,7 +475,10 @@ class PromptRepository:
                        created_at, updated_at
                 FROM ai_prompt_documents
                 {where_clause}
-                ORDER BY archived ASC, source_type ASC, title COLLATE NOCASE ASC
+                ORDER BY archived ASC, 
+                         CASE WHEN source_type = 'sample' THEN 0 ELSE 1 END,
+                         source_type ASC, 
+                         title COLLATE NOCASE ASC
                 """
             ).fetchall()
             return [dict(row) for row in rows]
@@ -491,6 +494,20 @@ class PromptRepository:
                 WHERE prompt_doc_id = ?
                 """,
                 (prompt_doc_id,),
+            ).fetchone()
+            return self._row_to_dict(row)
+
+    def get_prompt_document_by_title(self, title: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT prompt_doc_id, title, description, content_md, source_type,
+                       readonly, archived, variables_json, content_hash,
+                       created_at, updated_at
+                FROM ai_prompt_documents
+                WHERE title = ? AND archived = 0
+                """,
+                (title,),
             ).fetchone()
             return self._row_to_dict(row)
 

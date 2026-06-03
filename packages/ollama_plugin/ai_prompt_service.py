@@ -271,6 +271,12 @@ class PromptService:
             return None
         return self._document_to_summary(doc, include_content=True)
 
+    def get_prompt_document_by_title(self, title: str) -> dict[str, Any] | None:
+        doc = self._repo.get_prompt_document_by_title(title)
+        if not doc or doc.get("prompt_doc_id") == "_schema_meta":
+            return None
+        return self._document_to_summary(doc, include_content=True)
+
     def get_binding(self, action_id: str) -> dict[str, Any] | None:
         summary = self._repo.get_prompt_summary_for_action(action_id)
         if not summary:

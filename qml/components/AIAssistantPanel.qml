@@ -1818,8 +1818,8 @@ Rectangle {
 
                             Rectangle {
                                 width: parent.width
-                                height: 200
-                                implicitHeight: 200
+                                height: 300
+                                implicitHeight: 300
                                 color: "transparent"
                                 clip: true
 
@@ -2119,14 +2119,6 @@ Rectangle {
                             spacing: Metrics.xs
 
                             Text {
-                                text: "프롬프트 미리보기"
-                                font.family: Typography.fontPrimary
-                                font.pixelSize: Typography.caption
-                                font.weight: Typography.weightMedium
-                                color: Colors.textSecondary
-                            }
-
-                            Text {
                                 text: (typeof root.selectedAction !== 'undefined' && root.selectedAction && root.selectedAction.current_prompt && root.selectedAction.current_prompt.title) ?
                                       root.selectedAction.current_prompt.title :
                                       "연결된 프롬프트 노트가 없습니다."
@@ -2139,7 +2131,7 @@ Rectangle {
 
                             ScrollView {
                                 width: parent.width
-                                height: 80
+                                height: 130
                                 clip: true
                                 ScrollBar.vertical.policy: ScrollBar.AsNeeded
                                 visible: typeof root.selectedAction !== 'undefined' && root.selectedAction && typeof root.selectedAction.current_prompt !== 'undefined' && typeof root.selectedAction.current_prompt.content_md !== 'undefined'
@@ -2503,19 +2495,21 @@ Rectangle {
                 // 참고문서 AI 현재 RAG 대상 문서 목록 (메인 섹션 하단)
                 Rectangle {
                     width: parent.width
+                    height: 300
                     radius: Metrics.radiusMd
                     color: Colors.surface
                     border.color: Colors.borderLight
                     border.width: 1
-                    implicitHeight: ragTargetListColumn.implicitHeight + (Metrics.sm * 2)
                     visible: root.aiModeIndex === 1
-                    height: visible ? implicitHeight : 0
 
                     Column {
                         id: ragTargetListColumn
                         width: parent.width - (Metrics.sm * 2)
                         anchors.horizontalCenter: parent.horizontalCenter
-                        anchors.margins: Metrics.sm
+                        anchors.top: parent.top
+                        anchors.topMargin: Metrics.sm
+                        anchors.bottom: parent.bottom
+                        anchors.bottomMargin: Metrics.sm
                         spacing: Metrics.xs
 
                         Text {
@@ -2525,19 +2519,13 @@ Rectangle {
                             font.weight: Typography.weightMedium
                             color: Colors.textSecondary
                         }
-                        Text {
-                            text: "최대 " + root.ragTargetDocumentsDisplayLimit + "개까지만 표시됩니다."
-                            font.family: Typography.fontPrimary
-                            font.pixelSize: 9
-                            color: Colors.textTertiary
-                            visible: root.ragTargetDocumentsTotalCount > root.ragTargetDocumentsDisplayLimit
-                        }
 
                         ScrollView {
                             width: parent.width
-                            height: 225
+                            height: 270
                             clip: true
                             ScrollBar.vertical.policy: ScrollBar.AlwaysOn
+                            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
                             visible: root.ragTargetDocuments.length > 0
 
                             Column {
