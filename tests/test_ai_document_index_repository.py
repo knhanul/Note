@@ -141,6 +141,23 @@ class AiDocumentIndexRepositoryTest(unittest.TestCase):
         finally:
             db.close()
 
+    def test_list_document_summaries(self):
+        db = AiIndexDatabase(":memory:")
+        try:
+            db.initialize()
+            repo = AiDocumentIndexRepository(db)
+            repo.upsert_document(self._make_document(document_id="doc-1"))
+            repo.upsert_document(self._make_document(document_id="doc-2"))
+            repo.replace_chunks("doc-1", [self._make_chunk("doc-1", 0), self._make_chunk("doc-1", 1)])
+            repo.replace_chunks("doc-2", [self._make_chunk("doc-2", 0)])
+
+            summaries, total = repo.list_document_summaries(limit=1)
+            self.assertEqual(total, 2)
+            self.assertEqual(len(summaries), 1)
+            self.assertEqual(summaries[0].chunk_count, 2)
+        finally:
+            db.close()
+
     def test_clear_all(self):
         db = AiIndexDatabase(":memory:")
         try:

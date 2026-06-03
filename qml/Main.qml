@@ -86,6 +86,10 @@ Window {
     property int folderSettingsMenuIndex: 0
     property string folderRenameEditName: ""
     property bool aiPanelOpen: true
+    property bool promptRulesExpanded: false
+    property bool promptVarsExpanded: false
+    property string promptSampleDocId: "prompt_sample_current_doc"
+    property var promptWarningMessages: []
 
     // AI Prompt Workspace Mode
     property string activeContentMode: "notes"  // "notes" | "ai_prompts"
@@ -95,23 +99,20 @@ Window {
     property int promptListRefreshCounter: 0  // Force ListView refresh
     property string aiPromptTitleDraft: ""
     property var promptRuleInsertItems: [
-        { "label": "역할", "value": "## 역할\n\n당신은 사내 업무 문서를 돕는 AI 업무비서입니다.\n" },
-        { "label": "입력 변수", "value": "## 입력\n\n{{CONTENT}}\n" },
-        { "label": "출력 형식", "value": "## 출력 형식\n\n- 핵심 요약:\n- 중요한 항목:\n- 확인할 사항:\n" },
-        { "label": "답변 길이", "value": "## 답변 길이\n\n- 답변은 5개 항목 이내로 작성합니다.\n- 각 항목은 1~2문장으로 작성합니다.\n" },
-        { "label": "말투", "value": "## 말투\n\n- 한국어로 작성합니다.\n- 사내 보고서에 어울리는 간결하고 공손한 문체를 사용합니다.\n" },
-        { "label": "금지사항", "value": "## 금지사항\n\n- 문서에 없는 내용은 추측하지 않습니다.\n- 원문을 불필요하게 길게 반복하지 않습니다.\n- 개인정보나 민감정보를 임의로 생성하지 않습니다.\n" },
-        { "label": "불확실할 때", "value": "## 불확실할 때\n\n- 근거가 부족하면 \"문서에서 확인되지 않습니다\"라고 답변합니다.\n" },
-        { "label": "예시 출력", "value": "## 예시 출력\n\n- 핵심 요약:\n- 근거:\n- 후속 확인 사항:\n" }
+        { "icon": "\uD83C\uDFAD", "label": "역할", "description": "AI의 역할과 페르소나를 정의합니다", "value": "[역할]\n당신은 현재 문서와 사용자의 요청을 바탕으로 업무에 바로 활용할 수 있는 결과를 작성하는 AI 업무비서입니다.\n" },
+        { "icon": "\uD83D\uDCE5", "label": "입력", "description": "프롬프트에 포함할 입력 데이터를 안내합니다", "value": "[입력]\n현재 문서 내용:\n{{CONTENT}}\n\n선택한 내용:\n{{SELECTION}}\n\n사용자 입력:\n{{USER_INPUT}}\n\n참고문서 내용:\n{{CONTEXT}}\n" },
+        { "icon": "\uD83D\uDCCB", "label": "출력 형식", "description": "결과물의 구조를 정합니다", "value": "[출력 형식]\n사용자의 요청에 맞게 결과를 작성하세요.\n필요한 경우 제목, 핵심 요약, 주요 내용, 확인 필요 사항, 다음 작업으로 나누어 정리하세요.\n" },
+        { "icon": "\uD83D\uDCCF", "label": "답변 길이", "description": "응답 분량을 안내합니다", "value": "[답변 길이]\n불필요하게 길게 쓰지 말고, 사용자가 바로 활용할 수 있을 정도로 간결하게 작성하세요.\n" },
+        { "icon": "\uD83D\uDCAC", "label": "말투", "description": "문체와 어조를 설정합니다", "value": "[말투]\n자연스럽고 명확한 한국어 문장으로 작성하세요.\n" },
+        { "icon": "\uD83D\uDEAB", "label": "금지 사항", "description": "AI가 하지 말아야 할 행동을 명시합니다", "value": "[금지 사항]\n문서에 없는 내용을 사실처럼 추가하지 마세요.\n사용자의 요청과 관련 없는 내용은 포함하지 마세요.\n선택한 내용이 있는 경우, 선택한 내용을 우선 기준으로 처리하세요.\n" },
+        { "icon": "\u2753", "label": "불확실할 때", "description": "정보가 부족할 때 행동을 지정합니다", "value": "[불확실할 때]\n문서 내용만으로 판단하기 어려운 부분은 \"문서에서 확인할 수 없습니다\"라고 표시하세요.\n추측이 필요한 경우에는 \"추측입니다\"라고 밝혀 주세요.\n" },
+        { "icon": "\uD83D\uDCDD", "label": "예시 출력", "description": "원하는 출력 예시를 보여줍니다", "value": "[예시 출력]\n핵심 요약:\n- \n\n확인 필요 사항:\n- \n\n다음 작업:\n- \n" }
     ]
     property var promptVariableInsertItems: [
-        { "label": "{{CONTENT}}", "value": "{{CONTENT}}" },
-        { "label": "{{SELECTION}}", "value": "{{SELECTION}}" },
-        { "label": "{{QUESTION}}", "value": "{{QUESTION}}" },
-        { "label": "{{USER_INPUT}}", "value": "{{USER_INPUT}}" },
-        { "label": "{{TITLE}}", "value": "{{TITLE}}" },
-        { "label": "{{TAGS}}", "value": "{{TAGS}}" },
-        { "label": "{{CONTEXT}}", "value": "{{CONTEXT}}" }
+        { "icon": "\uD83D\uDCC4", "label": "현재 문서 내용", "code": "{{CONTENT}}", "description": "현재 열려 있는 문서 전체 내용을 프롬프트에 넣습니다.", "value": "{{CONTENT}}" },
+        { "icon": "\u2702\uFE0F", "label": "선택한 내용", "code": "{{SELECTION}}", "description": "사용자가 문서에서 선택한 텍스트를 프롬프트에 넣습니다.", "value": "{{SELECTION}}" },
+        { "icon": "\u2328\uFE0F", "label": "사용자 입력", "code": "{{USER_INPUT}}", "description": "AI 실행창에 사용자가 입력한 요청을 프롬프트에 넣습니다.", "value": "{{USER_INPUT}}" },
+        { "icon": "\uD83D\uDD0D", "label": "참고문서 내용", "code": "{{CONTEXT}}", "description": "참고문서 AI 또는 RAG 검색 결과를 프롬프트에 넣습니다.", "value": "{{CONTEXT}}" }
     ]
 
     // Reload prompt documents when switching to AI prompt mode
@@ -128,6 +129,8 @@ Window {
             } else {
                 console.log("[Main] promptDocumentController not available")
             }
+        } else {
+            window.promptWarningMessages = []
         }
     }
 
@@ -135,6 +138,11 @@ Window {
         window.aiPromptTitleDraft = window.currentAIPromptDocument ? (window.currentAIPromptDocument.title || "") : ""
         if (aiPromptTitleField) {
             aiPromptTitleField.text = window.aiPromptTitleDraft
+        }
+        // Initialize editor with prompt content when in AI prompt mode
+        if (window.activeContentMode === "ai_prompts" && window.currentAIPromptDocument && noteEditor) {
+            var content = window.currentAIPromptDocument.content_md || ""
+            noteEditor.resetEditor(content, "")
         }
     }
 
@@ -162,28 +170,106 @@ Window {
         return !!(window.currentAIPromptDocument && window.currentAIPromptDocument.readonly)
     }
 
+    function isPromptSample(doc) {
+        if (!doc)
+            return false
+        if (doc.prompt_doc_id && doc.prompt_doc_id === window.promptSampleDocId)
+            return true
+        return doc.source_type && doc.source_type === "sample"
+    }
+
+    function updatePromptWarnings(markdown) {
+        var text = markdown || ""
+        var hasContent = text.indexOf("{{CONTENT}}") >= 0
+        var hasSelection = text.indexOf("{{SELECTION}}") >= 0
+        var hasUserInput = text.indexOf("{{USER_INPUT}}") >= 0
+        var hasContext = text.indexOf("{{CONTEXT}}") >= 0
+
+        var warnings = []
+        if (!(hasContent || hasSelection || hasUserInput || hasContext)) {
+            warnings.push("프롬프트에 입력 변수가 없습니다. AI가 문서나 사용자 입력을 참고하지 못할 수 있습니다.")
+        }
+        if (!hasUserInput) {
+            warnings.push("사용자 입력 변수가 없습니다. AI 실행창에 입력한 내용이 반영되지 않을 수 있습니다.")
+        }
+        if (!hasContent && !hasSelection) {
+            warnings.push("현재 문서 내용 또는 선택한 내용 변수가 없습니다. 문서 기반 작업이 어려울 수 있습니다.")
+        }
+        window.promptWarningMessages = warnings
+    }
+
     function insertPromptSnippet(text) {
         if (window.activeContentMode !== "ai_prompts") return
         if (window.currentPromptReadonly()) return
         if (!text) return
 
-        // Try insertMarkdownAtCursor first if noteEditor is available
-        if (noteEditor && noteEditor.webView) {
+        console.log("[Main] insertPromptSnippet called with text:", text)
+        console.log("[Main] noteEditor available:", !!noteEditor)
+        console.log("[Main] noteEditor._editorReady:", !!(noteEditor && noteEditor._editorReady))
+
+        // Try insertMarkdownAtCursor first if noteEditor is ready
+        if (noteEditor && noteEditor._editorReady) {
+            console.log("[Main] calling noteEditor.insertMarkdownAtCursor")
             noteEditor.insertMarkdownAtCursor(text)
+            return
         }
 
-        // Fallback: append to content_md end if editor is not available
-        // This handles cases where editor is not ready or webView is unavailable
-        if (!noteEditor || !noteEditor.webView) {
-            if (window.currentAIPromptDocument) {
-                var currentContent = window.currentAIPromptDocument.content_md || ""
-                if (!currentContent.endsWith("\n") && text.length > 0) {
-                    text = "\n" + text
-                }
-                window.currentAIPromptDocument.content_md = currentContent + text
-                console.log("[Main] insertPromptSnippet: appended to content_md end (fallback)")
-            }
+        console.log("[Main] noteEditor not ready, waiting for editor to be ready")
+        var newContent = appendPromptText(text)
+        scheduleEditorRetry(text, newContent)
+    }
+
+    function appendPromptText(text) {
+        if (!window.currentAIPromptDocument) return ""
+        var currentContent = window.currentAIPromptDocument.content_md || ""
+        var snippet = text
+        if (!currentContent.endsWith("\n") && snippet.length > 0) {
+            snippet = "\n" + snippet
         }
+        var updated = currentContent + snippet
+        window.currentAIPromptDocument.content_md = updated
+        window.updatePromptWarnings(updated)
+        console.log("[Main] appendPromptText: updated content length:", updated.length)
+        // Trigger binding update so fallback text appears immediately
+        Qt.callLater(function() {
+            var tempDoc = window.currentAIPromptDocument
+            window.currentAIPromptDocument = null
+            window.currentAIPromptDocument = tempDoc
+        })
+        return updated
+    }
+
+    function scheduleEditorRetry(text, contentSnapshot) {
+        var retryTimer = Qt.createQmlObject(
+            "import QtQuick 2.15; Timer { interval: 120; repeat: true }",
+            window
+        )
+        var attempts = 0
+        var maxAttempts = 25
+        var cachedContent = contentSnapshot
+        retryTimer.triggered.connect(function() {
+            if (attempts >= maxAttempts) {
+                console.log("[Main] scheduleEditorRetry exceeded max attempts; stopping")
+                retryTimer.stop()
+                retryTimer.destroy()
+                return
+            }
+            attempts += 1
+            if (window.noteEditor && window.noteEditor._editorReady) {
+                console.log("[Main] scheduleEditorRetry: editor ready on attempt", attempts)
+                if (window.currentAIPromptDocument) {
+                    window.noteEditor.resetEditor(window.currentAIPromptDocument.content_md || "", "")
+                }
+                retryTimer.stop()
+                retryTimer.destroy()
+            } else {
+                // Keep editor content in sync while waiting
+                if (window.currentAIPromptDocument && window.currentAIPromptDocument.content_md !== cachedContent) {
+                    cachedContent = window.currentAIPromptDocument.content_md
+                }
+            }
+        })
+        retryTimer.start()
     }
 
     function forcePromptListRefresh() {
@@ -1608,14 +1694,31 @@ Window {
         enabled: typeof promptDocumentController !== "undefined"
         function onSelectedPromptDocIdChanged() {
             window.selectedAIPromptDocId = promptDocumentController ? (promptDocumentController.selectedPromptDocId || "") : ""
+            if (!window.selectedAIPromptDocId) {
+                window.promptWarningMessages = []
+            }
         }
         function onCurrentPromptDocumentChanged() {
             var currentDoc = promptDocumentController ? promptDocumentController.currentPromptDocument : null
             window.currentAIPromptDocument = currentDoc && Object.keys(currentDoc).length > 0 ? currentDoc : null
+            if (window.currentAIPromptDocument && window.currentAIPromptDocument.content_md !== undefined) {
+                window.updatePromptWarnings(window.currentAIPromptDocument.content_md || "")
+            } else {
+                window.promptWarningMessages = []
+            }
         }
         function onPromptDocumentsChanged() {
             if (window.activeContentMode === "ai_prompts") {
                 window.forcePromptListRefresh()
+            }
+            if (promptDocumentController && promptDocumentController.promptDocumentList) {
+                var docs = promptDocumentController.promptDocumentList
+                for (var i = 0; i < docs.length; i++) {
+                    if (window.isPromptSample(docs[i])) {
+                        window.promptSampleDocId = docs[i].prompt_doc_id || window.promptSampleDocId
+                        break
+                    }
+                }
             }
         }
     }
@@ -1825,6 +1928,7 @@ Window {
                                         onClicked: newLibraryDialog.open()
                                     }
                                 }
+
                             }
 
                             // Library dropdown / selector
@@ -2810,6 +2914,7 @@ Window {
 
                             Text {
                                 text: {
+                                    if (window.activeContentMode === "ai_prompts") return "AI 프롬프트"
                                     if (!noteController) return "노트"
                                     if (noteController.selectedTag !== "") return "#" + noteController.selectedTag
                                     return noteController.currentFolderName || "노트"
@@ -2836,7 +2941,7 @@ Window {
                                 color: noteController && noteController.includeSubfolders ? Colors.primary500 : Colors.bgSecondary
                                 border.width: 1
                                 border.color: noteController && noteController.includeSubfolders ? Colors.primary500 : Colors.borderLight
-                                visible: noteController && noteController.selectedTag === ""
+                                visible: window.activeContentMode === "notes" && noteController && noteController.selectedTag === ""
 
                                 Rectangle {
                                     width: 18
@@ -2875,7 +2980,7 @@ Window {
                                 color: addNoteArea.containsMouse ? Colors.primary100 : Colors.bgSecondary
                                 border.width: 1
                                 border.color: addNoteArea.containsMouse ? Colors.primary200 : Colors.borderLight
-                                visible: noteController && noteController.selectedTag === ""
+                                visible: (window.activeContentMode === "notes" && noteController && noteController.selectedTag === "") || (window.activeContentMode === "ai_prompts")
 
                                 Behavior on color {
                                     ColorAnimation { duration: Metrics.durationFast }
@@ -2886,7 +2991,18 @@ Window {
                                     anchors.fill: parent
                                     hoverEnabled: true
                                     onClicked: {
-                                        window.startDraftNote()
+                                        if (window.activeContentMode === "ai_prompts") {
+                                            if (typeof promptDocumentController !== "undefined" && promptDocumentController) {
+                                                var newDoc = promptDocumentController.createPromptDocument("새 AI 프롬프트", "", "새로 만든 프롬프트입니다.")
+                                                if (newDoc && newDoc.prompt_doc_id) {
+                                                    promptDocumentController.selectPromptDocument(newDoc.prompt_doc_id)
+                                                    window.selectedAIPromptDocId = newDoc.prompt_doc_id
+                                                    window.currentAIPromptDocument = newDoc
+                                                }
+                                            }
+                                        } else {
+                                            window.startDraftNote()
+                                        }
                                     }
                                 }
 
@@ -2907,7 +3023,7 @@ Window {
                                 color: noteSelectionMode ? Colors.primary200 : (selectModeArea.containsMouse ? Colors.primary100 : Colors.bgSecondary)
                                 border.width: 1
                                 border.color: noteSelectionMode ? Colors.primary300 : Colors.borderLight
-                                visible: noteController && noteController.selectedTag === ""
+                                visible: window.activeContentMode === "notes" && noteController && noteController.selectedTag === ""
 
                                 Image {
                                     anchors.centerIn: parent
@@ -3562,6 +3678,7 @@ Window {
                                 updatedDate: modelRef && modelRef.updated_at ? noteController.formatDate(modelRef.updated_at) : ""
                                 tags: modelRef && modelRef.tags ? modelRef.tags : []
                                 isPinned: noteItem.pinState
+                                folderPath: noteController && noteItem.noteId ? noteController.getFolderPathForNote(noteItem.noteId) : ""
                                 selectionMode: window.noteSelectionMode
                                 isBatchHighlighted: window.noteSelectionMode && window.isNoteSelected(noteItem.noteId)
                                 isSelected: {
@@ -3633,9 +3750,19 @@ Window {
                             Component {
                                 id: aiPromptListDelegate
                                 Rectangle {
+                                    id: aiPromptItem
                                     width: ListView.view.width
                                     height: 60
-                                    color: aiPromptMouse.containsMouse ? Colors.bgTertiary : "transparent"
+                                    property bool isSample: modelData && window.isPromptSample(modelData)
+                                    property bool isSelected: modelData && window.selectedAIPromptDocId === (modelData.prompt_doc_id || "")
+                                    color: {
+                                        if (aiPromptItem.isSelected) return Colors.surfaceHigh
+                                        if (aiPromptMouse.containsMouse) return Colors.bgTertiary
+                                        if (aiPromptItem.isSample) return Qt.rgba(249/255, 115/255, 22/255, 0.08)
+                                        return "transparent"
+                                    }
+                                    border.width: aiPromptItem.isSelected ? 2 : (aiPromptItem.isSample ? 1 : 0)
+                                    border.color: aiPromptItem.isSelected ? Colors.primary400 : (aiPromptItem.isSample ? Colors.accentOrangeLight : "transparent")
                                     radius: Metrics.radiusMd
 
                                     RowLayout {
@@ -3674,33 +3801,26 @@ Window {
                                                 Rectangle {
                                                     height: 16
                                                     radius: Metrics.radiusSm
-                                                    color: {
-                                                        if (!modelData || !modelData.source_type) return "#10B981"
-                                                        return modelData.source_type === "default" ? "#DBEAFE" : "#10B981"
-                                                    }
+                                                    color: aiPromptItem.isSample ? Qt.rgba(249/255, 115/255, 22/255, 0.15) : Colors.primary50
+                                                    border.color: aiPromptItem.isSample ? Colors.accentOrangeLight : "transparent"
                                                     visible: true
 
                                                     Text {
                                                         anchors.centerIn: parent
                                                         anchors.leftMargin: 4
                                                         anchors.rightMargin: 4
-                                                        text: (modelData && modelData.source_type === "default") ? "기본" : "사용자"
+                                                        text: aiPromptItem.isSample ? "샘플" : "사용자"
                                                         font.family: Typography.fontPrimary
                                                         font.pixelSize: 9
-                                                        color: {
-                                                            if (!modelData || !modelData.source_type) return "#059669"
-                                                            return modelData.source_type === "default" ? "#1E40AF" : "#059669"
-                                                        }
+                                                        color: aiPromptItem.isSample ? Colors.accentOrange : Colors.primary700
                                                     }
                                                 }
 
                                                 Rectangle {
                                                     height: 16
                                                     radius: Metrics.radiusSm
-                                                    color: {
-                                                        if (!modelData || !modelData.readonly) return "transparent"
-                                                        return "#FCD34D"
-                                                    }
+                                                    color: aiPromptItem.isSample ? Qt.rgba(249/255, 115/255, 22/255, 0.15) : Colors.bgSecondary
+                                                    border.color: aiPromptItem.isSample ? Colors.accentOrangeLight : "transparent"
                                                     visible: !!(modelData && modelData.readonly)
 
                                                     Text {
@@ -3710,7 +3830,7 @@ Window {
                                                         text: "읽기 전용"
                                                         font.family: Typography.fontPrimary
                                                         font.pixelSize: 9
-                                                        color: "#D97706"
+                                                        color: aiPromptItem.isSample ? Colors.accentOrange : Colors.textSecondary
                                                     }
                                                 }
                                             }
@@ -4108,6 +4228,39 @@ Window {
                                         color: Colors.textInverse
                                     }
                                 }
+
+                                // AI Prompts mode: 샘플에서 새 프롬프트 만들기
+                                Rectangle {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    width: 220
+                                    height: 32
+                                    radius: Metrics.radiusLg
+                                    visible: window.activeContentMode === "ai_prompts"
+                                    color: Colors.bgSecondary
+                                    border.color: Colors.primary200
+                                    border.width: 1
+
+                                    MouseArea {
+                                        id: samplePromptBtnArea
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            if (typeof promptDocumentController !== "undefined" && promptDocumentController && window.promptSampleDocId) {
+                                                promptDocumentController.duplicatePromptDocument(window.promptSampleDocId)
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "샘플에서 새 프롬프트 만들기"
+                                        font.family: Typography.fontPrimary
+                                        font.weight: Typography.weightMedium
+                                        font.pixelSize: Typography.bodySmall
+                                        color: Colors.textSecondary
+                                    }
+                                }
                             }
                         }
 
@@ -4125,115 +4278,6 @@ Window {
                                 anchors.fill: parent
                                 anchors.margins: Metrics.md
                                 spacing: Metrics.sm
-
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: Metrics.md
-
-                                    // Status badge
-                                    Rectangle {
-                                        height: 24
-                                        radius: Metrics.radiusSm
-                                        color: {
-                                            if (!window.currentAIPromptDocument) return "#10B981"
-                                            if (window.currentAIPromptDocument.readonly) return "#FCD34D"
-                                            return "#10B981"
-                                        }
-                                        visible: window.currentAIPromptDocument !== null
-
-                                        Text {
-                                            anchors.centerIn: parent
-                                            anchors.leftMargin: 8
-                                            anchors.rightMargin: 8
-                                            text: (window.currentAIPromptDocument && window.currentAIPromptDocument.readonly) ? "기본 프롬프트 / 읽기 전용" : "사용자 프롬프트 / 편집 가능"
-                                            font.family: Typography.fontPrimary
-                                            font.pixelSize: 11
-                                            color: {
-                                                if (!window.currentAIPromptDocument) return "#059669"
-                                                if (window.currentAIPromptDocument.readonly) return "#D97706"
-                                                return "#059669"
-                                            }
-                                        }
-                                    }
-
-                                    // Spacer
-                                    Item {
-                                        Layout.fillWidth: true
-                                    }
-
-                                    // Duplicate button (only for readonly prompts)
-                                    Rectangle {
-                                        width: 120
-                                        height: 28
-                                        radius: Metrics.radiusMd
-                                        color: duplicateBtnArea.containsMouse ? Colors.primary500 : Colors.primary400
-                                        visible: window.currentAIPromptDocument && window.currentAIPromptDocument.readonly
-
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: "복사해서 수정"
-                                            font.family: Typography.fontPrimary
-                                            font.weight: Typography.weightMedium
-                                            font.pixelSize: 11
-                                            color: Colors.textInverse
-                                        }
-
-                                        MouseArea {
-                                            id: duplicateBtnArea
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            onClicked: {
-                                                if (typeof promptDocumentController !== "undefined" && promptDocumentController && window.selectedAIPromptDocId) {
-                                                    promptDocumentController.duplicatePromptDocument(window.selectedAIPromptDocId)
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    // Delete button (only for user prompts)
-                                    Rectangle {
-                                        width: 80
-                                        height: 28
-                                        radius: Metrics.radiusMd
-                                        color: deletePromptBtnArea.containsMouse ? Colors.error500 : Colors.error400
-                                        visible: window.currentAIPromptDocument && !window.currentAIPromptDocument.readonly && window.currentAIPromptDocument.source_type !== "default"
-
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: "삭제"
-                                            font.family: Typography.fontPrimary
-                                            font.weight: Typography.weightMedium
-                                            font.pixelSize: 11
-                                            color: Colors.textInverse
-                                        }
-
-                                        MouseArea {
-                                            id: deletePromptBtnArea
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            onClicked: {
-                                                if (typeof promptDocumentController !== "undefined" && promptDocumentController && window.selectedAIPromptDocId) {
-                                                    var bindingCount = promptDocumentController.countBindingsForPrompt(window.selectedAIPromptDocId)
-                                                    if (bindingCount > 0) {
-                                                        var boundActions = promptDocumentController.listActionsBoundToPrompt(window.selectedAIPromptDocId)
-                                                        var actionNames = boundActions.map(function(a) { return a.name || a.action_id }).join(", ")
-                                                        if (confirm("이 프롬프트는 다음 AI 기능에 연결되어 있습니다: " + actionNames + ". 삭제하시겠습니까?")) {
-                                                            promptDocumentController.archivePromptDocument(window.selectedAIPromptDocId)
-                                                            window.selectedAIPromptDocId = ""
-                                                            window.currentAIPromptDocument = null
-                                                        }
-                                                    } else {
-                                                        if (confirm("이 AI 프롬프트를 삭제하시겠습니까? 실제 삭제가 아니라 보관 처리되며 목록에서 숨겨집니다.")) {
-                                                            promptDocumentController.archivePromptDocument(window.selectedAIPromptDocId)
-                                                            window.selectedAIPromptDocId = ""
-                                                            window.currentAIPromptDocument = null
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
 
                                 TextField {
                                     id: aiPromptTitleField
@@ -4262,6 +4306,154 @@ Window {
                                     }
                                 }
 
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: Metrics.md
+
+                                    // Status badge
+                                    Rectangle {
+                                        height: 24
+                                        radius: Metrics.radiusSm
+                                        color: {
+                                            if (!window.currentAIPromptDocument) return Colors.borderLight
+                                            if (window.isPromptSample(window.currentAIPromptDocument)) return Colors.accentOrangeLight
+                                            return Colors.success
+                                        }
+                                        visible: window.currentAIPromptDocument !== null && !window.isPromptSample(window.currentAIPromptDocument)
+
+                                        Text {
+                                            anchors.centerIn: parent
+                                            anchors.leftMargin: 8
+                                            anchors.rightMargin: 8
+                                            text: !window.currentAIPromptDocument ? "프롬프트를 선택하세요" : "사용자 프롬프트 · 편집 가능"
+                                            font.family: Typography.fontPrimary
+                                            font.pixelSize: 11
+                                            color: {
+                                                if (!window.currentAIPromptDocument) return Colors.textSecondary
+                                                return Colors.white
+                                            }
+                                        }
+                                    }
+
+                                    // Spacer
+                                    Item {
+                                        Layout.fillWidth: true
+                                    }
+
+                                    // Duplicate button (only for sample prompt)
+                                    Rectangle {
+                                        width: 200
+                                        height: 28
+                                        radius: Metrics.radiusMd
+                                        color: duplicateBtnArea.containsMouse ? Colors.primary500 : Colors.primary400
+                                        visible: window.isPromptSample(window.currentAIPromptDocument)
+
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "샘플에서 새 프롬프트 만들기"
+                                            font.family: Typography.fontPrimary
+                                            font.weight: Typography.weightMedium
+                                            font.pixelSize: 11
+                                            color: Colors.textInverse
+                                        }
+
+                                        MouseArea {
+                                            id: duplicateBtnArea
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            onClicked: {
+                                                if (typeof promptDocumentController !== "undefined" && promptDocumentController && window.promptSampleDocId) {
+                                                    promptDocumentController.duplicatePromptDocument(window.promptSampleDocId)
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Delete button (only for user prompts)
+                                    Rectangle {
+                                        width: 80
+                                        height: 28
+                                        radius: Metrics.radiusMd
+                                        color: deletePromptBtnArea.containsMouse ? Colors.error500 : Colors.error400
+                                        visible: window.currentAIPromptDocument && !window.currentPromptReadonly() && window.currentAIPromptDocument.source_type !== "default"
+
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "삭제"
+                                            font.family: Typography.fontPrimary
+                                            font.weight: Typography.weightMedium
+                                            font.pixelSize: 11
+                                            color: Colors.textInverse
+                                        }
+
+                                        MouseArea {
+                                            id: deletePromptBtnArea
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            onClicked: {
+                                                console.log("[Main] Delete button clicked, selectedAIPromptDocId:", window.selectedAIPromptDocId)
+                                                if (typeof promptDocumentController !== "undefined" && promptDocumentController && window.selectedAIPromptDocId) {
+                                                    var bindingCount = promptDocumentController.countBindingsForPrompt(window.selectedAIPromptDocId)
+                                                    console.log("[Main] Binding count:", bindingCount)
+                                                    if (bindingCount > 0) {
+                                                        var boundActions = promptDocumentController.listActionsBoundToPrompt(window.selectedAIPromptDocId)
+                                                        var actionNames = boundActions.map(function(a) { return a.name || a.action_id }).join(", ")
+                                                        promptDeleteDialog.text = "이 프롬프트는 다음 AI 기능에 연결되어 있습니다: " + actionNames + ". 완전히 삭제하시겠습니까?"
+                                                        promptDeleteDialog.pendingPromptDocId = window.selectedAIPromptDocId
+                                                        promptDeleteDialog.open()
+                                                    } else {
+                                                        promptDeleteDialog.text = "이 AI 프롬프트를 완전히 삭제하시겠습니까?"
+                                                        promptDeleteDialog.pendingPromptDocId = window.selectedAIPromptDocId
+                                                        promptDeleteDialog.open()
+                                                    }
+                                                } else {
+                                                    console.log("[Main] promptDocumentController not available or no prompt selected")
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: Metrics.xs
+                                    visible: window.promptWarningMessages.length > 0
+
+                                    Repeater {
+                                        model: window.promptWarningMessages
+
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            implicitHeight: warningText.implicitHeight + Metrics.xs * 2
+                                            radius: Metrics.radiusSm
+                                            color: Qt.rgba(245/255, 158/255, 11/255, 0.12)
+                                            border.color: Colors.warning
+                                            border.width: 1
+
+                                            Text {
+                                                id: warningText
+                                                anchors.fill: parent
+                                                anchors.margins: Metrics.xs
+                                                text: modelData
+                                                font.family: Typography.fontPrimary
+                                                font.pixelSize: Typography.caption
+                                                color: Colors.warning
+                                                wrapMode: Text.Wrap
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: "작성 샘플은 편집할 수 없습니다. 샘플을 복사해 새 프롬프트를 만들어주세요."
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: Typography.caption
+                                    color: Colors.textSecondary
+                                    wrapMode: Text.Wrap
+                                    visible: window.isPromptSample(window.currentAIPromptDocument)
+                                }
+
                                 Rectangle {
                                     Layout.fillWidth: true
                                     implicitHeight: promptToolCardLayout.implicitHeight + Metrics.md * 2
@@ -4274,71 +4466,241 @@ Window {
                                         id: promptToolCardLayout
                                         anchors.fill: parent
                                         anchors.margins: Metrics.md
-                                        spacing: Metrics.sm
+                                        spacing: Metrics.xs
 
-                                        Text {
-                                            text: "프롬프트 규칙 삽입"
-                                            font.family: Typography.fontPrimary
-                                            font.pixelSize: Typography.bodySmall
-                                            font.weight: Typography.weightMedium
-                                            color: Colors.textPrimary
+                                        // --- 구조 블록 접이식 헤더 ---
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            implicitHeight: 28
+                                            radius: Metrics.radiusSm
+                                            color: ruleHeaderMA.containsMouse ? Colors.bgSecondary : "transparent"
+
+                                            RowLayout {
+                                                anchors.fill: parent
+                                                anchors.leftMargin: Metrics.xs
+                                                anchors.rightMargin: Metrics.xs
+                                                spacing: Metrics.xs
+
+                                                Text {
+                                                    text: window.promptRulesExpanded ? "▼" : "▶"
+                                                    font.pixelSize: 9
+                                                    color: Colors.textTertiary
+                                                }
+                                                Text {
+                                                    text: "구조 블록"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.bodySmall
+                                                    font.weight: Typography.weightMedium
+                                                    color: Colors.textPrimary
+                                                }
+                                                Text {
+                                                    text: "클릭하면 커서 위치에 삽입"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: 10
+                                                    color: Colors.textTertiary
+                                                }
+                                                Item { Layout.fillWidth: true }
+                                            }
+
+                                            MouseArea {
+                                                id: ruleHeaderMA
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: window.promptRulesExpanded = !window.promptRulesExpanded
+                                            }
                                         }
 
+                                        // --- 구조 블록 칩 목록 (접이식) ---
                                         Item {
                                             Layout.fillWidth: true
-                                            implicitHeight: promptRuleFlow.implicitHeight
+                                            visible: window.promptRulesExpanded
+                                            implicitHeight: ruleChipFlow.implicitHeight
 
                                             Flow {
-                                                id: promptRuleFlow
+                                                id: ruleChipFlow
                                                 width: parent.width
                                                 spacing: Metrics.xs
 
                                                 Repeater {
                                                     model: window.promptRuleInsertItems
 
-                                                    Button {
-                                                        text: modelData.label
-                                                        enabled: !window.currentPromptReadonly()
-                                                        onClicked: window.insertPromptSnippet(modelData.value)
+                                                    Rectangle {
+                                                        implicitWidth: ruleChipRow.implicitWidth + Metrics.sm * 2
+                                                        implicitHeight: 26
+                                                        radius: Metrics.radiusFull
+                                                        color: ruleChipMA.containsMouse ? Colors.primary50 : Colors.bgSecondary
+                                                        border.color: ruleChipMA.containsMouse ? Colors.primary200 : Colors.borderLight
+                                                        border.width: 1
+                                                        opacity: window.currentPromptReadonly() ? 0.5 : 1.0
+
+                                                        Row {
+                                                            id: ruleChipRow
+                                                            anchors.centerIn: parent
+                                                            spacing: Metrics.xs
+
+                                                            Text {
+                                                                text: modelData.icon
+                                                                font.pixelSize: 12
+                                                                anchors.verticalCenter: parent.verticalCenter
+                                                            }
+                                                            Text {
+                                                                text: modelData.label
+                                                                font.family: Typography.fontPrimary
+                                                                font.pixelSize: 11
+                                                                font.weight: Typography.weightMedium
+                                                                color: Colors.textPrimary
+                                                                anchors.verticalCenter: parent.verticalCenter
+                                                            }
+                                                        }
+
+                                                        MouseArea {
+                                                            id: ruleChipMA
+                                                            anchors.fill: parent
+                                                            hoverEnabled: true
+                                                            cursorShape: window.currentPromptReadonly() ? Qt.ArrowCursor : Qt.PointingHandCursor
+                                                            ToolTip.visible: containsMouse
+                                                            ToolTip.delay: 300
+                                                            ToolTip.text: modelData.description
+                                                            onClicked: {
+                                                                if (!window.currentPromptReadonly()) {
+                                                                    window.insertPromptSnippet(modelData.value)
+                                                                }
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
 
-                                        Text {
-                                            text: "변수 삽입"
-                                            font.family: Typography.fontPrimary
-                                            font.pixelSize: Typography.caption
-                                            color: Colors.textSecondary
+                                        // --- 변수 접이식 헤더 ---
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            implicitHeight: 28
+                                            radius: Metrics.radiusSm
+                                            color: varHeaderMA.containsMouse ? Colors.bgSecondary : "transparent"
+
+                                            RowLayout {
+                                                anchors.fill: parent
+                                                anchors.leftMargin: Metrics.xs
+                                                anchors.rightMargin: Metrics.xs
+                                                spacing: Metrics.xs
+
+                                                Text {
+                                                    text: window.promptVarsExpanded ? "▼" : "▶"
+                                                    font.pixelSize: 9
+                                                    color: Colors.textTertiary
+                                                }
+                                                Text {
+                                                    text: "변수"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.bodySmall
+                                                    font.weight: Typography.weightMedium
+                                                    color: Colors.textPrimary
+                                                }
+                                                Text {
+                                                    text: "동적 데이터를 삽입"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: 10
+                                                    color: Colors.textTertiary
+                                                }
+                                                Item { Layout.fillWidth: true }
+                                            }
+
+                                            MouseArea {
+                                                id: varHeaderMA
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: window.promptVarsExpanded = !window.promptVarsExpanded
+                                            }
                                         }
 
+                                        // --- 변수 칩 목록 (접이식) ---
                                         Item {
                                             Layout.fillWidth: true
-                                            implicitHeight: promptVarFlow.implicitHeight
+                                            visible: window.promptVarsExpanded
+                                            implicitHeight: varChipFlow.implicitHeight
 
                                             Flow {
-                                                id: promptVarFlow
+                                                id: varChipFlow
                                                 width: parent.width
                                                 spacing: Metrics.xs
 
                                                 Repeater {
                                                     model: window.promptVariableInsertItems
 
-                                                    Button {
-                                                        text: modelData.label
-                                                        enabled: !window.currentPromptReadonly()
-                                                        onClicked: window.insertPromptSnippet(modelData.value)
+                                                    Rectangle {
+                                                        implicitWidth: varChipRow.implicitWidth + Metrics.sm * 2
+                                                        implicitHeight: 26
+                                                        radius: Metrics.radiusFull
+                                                        color: varChipMA.containsMouse ? Colors.primary50 : Colors.bgSecondary
+                                                        border.color: varChipMA.containsMouse ? Colors.primary200 : Colors.borderLight
+                                                        border.width: 1
+                                                        opacity: window.currentPromptReadonly() ? 0.5 : 1.0
+
+                                                        Row {
+                                                            id: varChipRow
+                                                            anchors.centerIn: parent
+                                                            spacing: Metrics.xs
+
+                                                            Text {
+                                                                text: modelData.icon
+                                                                font.pixelSize: 12
+                                                                anchors.verticalCenter: parent.verticalCenter
+                                                            }
+                                                            Text {
+                                                                text: modelData.label
+                                                                font.family: Typography.fontPrimary
+                                                                font.pixelSize: 11
+                                                                font.weight: Typography.weightMedium
+                                                                color: Colors.textPrimary
+                                                                anchors.verticalCenter: parent.verticalCenter
+                                                            }
+                                                            Rectangle {
+                                                                implicitWidth: varChipCodeText.implicitWidth + 6
+                                                                implicitHeight: varChipCodeText.implicitHeight + 2
+                                                                radius: 3
+                                                                color: Colors.bgTertiary
+                                                                anchors.verticalCenter: parent.verticalCenter
+
+                                                                Text {
+                                                                    id: varChipCodeText
+                                                                    anchors.centerIn: parent
+                                                                    text: modelData.code
+                                                                    font.family: Typography.fontMono
+                                                                    font.pixelSize: 9
+                                                                    color: Colors.textSecondary
+                                                                }
+                                                            }
+                                                        }
+
+                                                        MouseArea {
+                                                            id: varChipMA
+                                                            anchors.fill: parent
+                                                            hoverEnabled: true
+                                                            cursorShape: window.currentPromptReadonly() ? Qt.ArrowCursor : Qt.PointingHandCursor
+                                                            ToolTip.visible: containsMouse
+                                                            ToolTip.delay: 300
+                                                            ToolTip.text: modelData.description
+                                                            onClicked: {
+                                                                if (!window.currentPromptReadonly()) {
+                                                                    window.insertPromptSnippet(modelData.value)
+                                                                }
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
 
                                         Text {
-                                            text: "기본 프롬프트는 직접 수정할 수 없습니다. 복사해서 수정해주세요."
+                                            text: "작성 샘플은 읽기 전용입니다. '샘플에서 새 프롬프트 만들기'를 눌러 복사본을 만든 뒤 수정하세요."
                                             font.family: Typography.fontPrimary
                                             font.pixelSize: 11
                                             color: Colors.textSecondary
-                                            visible: window.currentAIPromptDocument && window.currentAIPromptDocument.readonly
+                                            wrapMode: Text.Wrap
+                                            visible: window.isPromptSample(window.currentAIPromptDocument)
                                         }
                                     }
                                 }
@@ -4367,6 +4729,7 @@ Window {
                                     // Update AI prompt document cache
                                     if (!window.currentAIPromptDocument) window.currentAIPromptDocument = {}
                                     window.currentAIPromptDocument.content_md = newMarkdown || ""
+                                    window.updatePromptWarnings(newMarkdown || "")
                                     return
                                 }
 
@@ -7354,6 +7717,26 @@ Window {
             folderDeleteFailDialog.folderName = folderName
             folderDeleteFailDialog.failReason = reason
             folderDeleteFailDialog.visible = true
+        }
+    }
+
+    // Prompt delete confirmation dialog
+    MessageDialog {
+        id: promptDeleteDialog
+        property string pendingPromptDocId: ""
+        title: "프롬프트 삭제"
+        buttons: MessageDialog.Ok | MessageDialog.Cancel
+        onAccepted: {
+            if (pendingPromptDocId) {
+                console.log("[Main] Confirming prompt deletion:", pendingPromptDocId)
+                promptDocumentController.deletePromptDocument(pendingPromptDocId)
+                window.selectedAIPromptDocId = ""
+                window.currentAIPromptDocument = null
+            }
+            pendingPromptDocId = ""
+        }
+        onRejected: {
+            pendingPromptDocId = ""
         }
     }
 }

@@ -204,6 +204,22 @@ class AiRagControllerTest(unittest.TestCase):
         results = json.loads(results_json)
         self.assertEqual(len(results), 0)
 
+    def test_indexing_progress_signal_emitted(self):
+        fake_svc = FakeAppService()
+        ctrl = AiRagController(app_service=fake_svc)
+        ctrl.initialize()
+
+        payloads = []
+        ctrl.indexingProgressChanged.connect(lambda payload: payloads.append(payload))
+
+        paths = json.dumps(["/tmp/file1.md", "/tmp/file2.md"])
+        ctrl.indexExternalFilesJson(paths)
+
+        self.assertGreater(len(payloads), 0)
+        first = json.loads(payloads[0])
+        self.assertIn("label", first)
+        self.assertIn("current", first)
+
     def test_get_last_warnings_json(self):
         fake_svc = FakeAppService()
         ctrl = AiRagController(app_service=fake_svc)

@@ -462,17 +462,11 @@ class AssistantController(QObject):
             return ""
 
         try:
-            all_folders = self._folder_controller.getAllFoldersJson()
-            import json
-            folders = json.loads(all_folders) if all_folders else []
-
-            for folder in folders:
-                if folder.get("name") == "AI결과" and not folder.get("parent_id"):
-                    return folder.get("id", "")
-
-            folder_id = self._folder_controller.createFolder("AI결과", "#3B82F6", "")
-            logger.info(f"[AssistantController] Created AI결과 folder: {folder_id}")
-            return folder_id
+            folder_id = self._folder_controller.getAIResultFolderId()
+            if folder_id:
+                return folder_id
+            logger.error("[AssistantController] Failed to obtain AI결과 folder id")
+            return ""
         except Exception as e:
             logger.error(f"[AssistantController] Failed to get/create AI결과 folder: {e}")
             return ""

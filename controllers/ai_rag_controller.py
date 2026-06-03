@@ -43,6 +43,7 @@ class FakeAppService:
         tags: list[str] | None = None,
         created_at: str | None = None,
         updated_at: str | None = None,
+        progress_callback=None,
     ) -> IndexedDocument:
         doc_id = f"note:{note_id}"
         doc = IndexedDocument(
@@ -55,6 +56,8 @@ class FakeAppService:
             tags=tags or [],
         )
         self._indexed_docs[doc_id] = doc
+        if progress_callback:
+            progress_callback("note", title or note_id or "", 1, 1)
         return doc
 
     def search_index(self, query: str, limit: int = 20, offset: int = 0) -> list[SearchResultChunk]:
@@ -138,6 +141,7 @@ class FakeAppService:
         self,
         note_items: list[dict],
         scope_label: str = "manual",
+        progress_callback=None,
     ) -> dict:
         indexed_count = 0
         failed_count = 0
@@ -145,6 +149,14 @@ class FakeAppService:
         document_ids: list[str] = []
 
         for item in note_items:
+            if progress_callback:
+                label = (
+                    item.get("title")
+                    or item.get("note_id")
+                    or item.get("id")
+                    or ""
+                )
+                progress_callback("note", label, indexed_count + failed_count + 1, len(note_items))
             try:
                 note_id = item.get("note_id") or item.get("id")
                 if not note_id:
@@ -180,6 +192,7 @@ class FakeAppService:
     def index_external_files(
         self,
         file_paths: list,
+        progress_callback=None,
     ) -> dict:
         indexed_count = 0
         failed_count = 0
@@ -187,6 +200,8 @@ class FakeAppService:
         document_ids: list[str] = []
 
         for path in file_paths:
+            if progress_callback:
+                progress_callback("file", str(path), indexed_count + failed_count + 1, len(file_paths))
             try:
                 doc_id = f"file:{path}"
                 doc = IndexedDocument(
@@ -218,6 +233,7 @@ class AiRagController(QObject):
     ragCitationsChanged = pyqtSignal()
     ragWarningsChanged = pyqtSignal()
     indexStatusChanged = pyqtSignal(str)
+    indexingProgressChanged = pyqtSignal(str)
     errorOccurred = pyqtSignal(str)
     searchResultsChanged = pyqtSignal()
     _askCompleted = pyqtSignal(object)
@@ -288,6 +304,7 @@ class AiRagController(QObject):
                 title=title or None,
                 content=content,
                 tags=tags if tags else None,
+                progress_callback=self._emit_indexing_progress,
             )
             self.indexStatusChanged.emit("indexed_current_note")
         except Exception as e:
@@ -375,6 +392,18 @@ class AiRagController(QObject):
             logger.error(f"[AiRagController] clearIndex failed: {e}")
             self.errorOccurred.emit(f"초기화 실패: {e}")
 
+    @pyqtSlot(str, result=bool)
+    def removeIndexedDocument(self, document_id: str) -> bool:
+        try:
+            ok = self._get_app_service().remove_document(document_id)
+            if ok:
+                self.indexStatusChanged.emit("document_removed")
+            return ok
+        except Exception as e:
+            logger.error(f"[AiRagController] removeIndexedDocument failed: {e}")
+            self.errorOccurred.emit(f"문서 삭제 실패: {e}")
+            return False
+
     @pyqtSlot(str, str)
     def indexNotesJson(self, notes_json: str, scope_label: str = "") -> None:
         try:
@@ -398,7 +427,11 @@ class AiRagController(QObject):
                 self.indexStatusChanged.emit("indexed_empty")
                 return
 
-            result = self._get_app_service().index_note_items(note_items, scope_label)
+            result = self._get_app_service().index_note_items(
+                note_items,
+                scope_label,
+                progress_callback=self._emit_indexing_progress,
+            )
             self._last_index_result = result
 
             if scope_label == "folder":
@@ -442,7 +475,10 @@ class AiRagController(QObject):
                 self.indexStatusChanged.emit("indexed_empty")
                 return
 
-            result = self._get_app_service().index_external_files(file_paths)
+            result = self._get_app_service().index_external_files(
+                file_paths,
+                progress_callback=self._emit_indexing_progress,
+            )
             self._last_index_result = result
             self.indexStatusChanged.emit("indexed_external_files")
         except Exception as e:
@@ -462,7 +498,10 @@ class AiRagController(QObject):
                 self.indexStatusChanged.emit("indexed_empty")
                 return
 
-            result = self._get_app_service().index_external_folder(folder_path)
+            result = self._get_app_service().index_external_folder(
+                folder_path,
+                progress_callback=self._emit_indexing_progress,
+            )
             self._last_index_result = result
             self.indexStatusChanged.emit("indexed_external_folder")
         except Exception as e:
@@ -476,6 +515,21 @@ class AiRagController(QObject):
         except Exception as e:
             logger.error(f"[AiRagController] getLastIndexResultJson failed: {e}")
             return "{}"
+
+    def _emit_indexing_progress(self, kind: str, label: str, current: int, total: int) -> None:
+        try:
+            payload = json.dumps(
+                {
+                    "kind": kind,
+                    "label": label or "",
+                    "current": current,
+                    "total": total,
+                },
+                ensure_ascii=False,
+            )
+            self.indexingProgressChanged.emit(payload)
+        except Exception as e:
+            logger.debug(f"[AiRagController] Failed to emit progress: {e}")
 
     @pyqtSlot(result=str)
     def getLastAnswerText(self) -> str:
@@ -536,3 +590,29 @@ class AiRagController(QObject):
         except Exception as e:
             logger.error(f"[AiRagController] getSearchResultsJson failed: {e}")
             return "[]"
+
+    @pyqtSlot(int, result=str)
+    def listIndexedDocumentsJson(self, limit: int = 100) -> str:
+        try:
+            safe_limit = max(1, min(limit, 500))
+            summaries, total = self._get_app_service().list_indexed_documents(limit=safe_limit)
+            payload = {
+                "total_count": total,
+                "items": [
+                    {
+                        "document_id": summary.document_id,
+                        "title": summary.title or summary.source_path or summary.note_id or summary.document_id,
+                        "note_id": summary.note_id or "",
+                        "source_path": summary.source_path or "",
+                        "source_type": summary.source_type,
+                        "chunk_count": summary.chunk_count,
+                        "created_at": summary.created_at or "",
+                        "updated_at": summary.updated_at or "",
+                    }
+                    for summary in summaries
+                ],
+            }
+            return json.dumps(payload, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"[AiRagController] listIndexedDocumentsJson failed: {e}")
+            return json.dumps({"error": str(e)}, ensure_ascii=False)

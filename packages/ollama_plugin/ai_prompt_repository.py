@@ -538,6 +538,11 @@ class PromptRepository:
                 (1 if archived else 0, prompt_doc_id),
             )
 
+    def delete_prompt_document(self, prompt_doc_id: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM ai_prompt_documents WHERE prompt_doc_id = ?", (prompt_doc_id,))
+            conn.execute("DELETE FROM ai_action_prompt_bindings WHERE prompt_doc_id = ?", (prompt_doc_id,))
+
     def get_binding(self, action_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute(

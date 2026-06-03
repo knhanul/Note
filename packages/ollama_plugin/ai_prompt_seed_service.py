@@ -24,6 +24,8 @@ class SeedPromptSpec:
     source_file: str
     required_variables: tuple[str, ...]
     sort_order: int
+    source_type: str = "default"
+    readonly: int = 0
 
 
 class PromptSeedService:
@@ -31,13 +33,24 @@ class PromptSeedService:
 
     DB_FILENAME = "ai_prompts.db"
     DB_VERSION = "1"
+    SAMPLE_PROMPT_ID = "prompt_sample_current_doc"
 
     DEFAULT_PROMPTS: tuple[SeedPromptSpec, ...] = (
+        SeedPromptSpec(
+            SAMPLE_PROMPT_ID,
+            "작성 샘플 - 현재 문서 기반 업무 처리",
+            "프롬프트 작성 샘플",
+            "sample_current_note.md",
+            ("CONTENT", "SELECTION", "USER_INPUT", "CONTEXT"),
+            0,
+            "sample",
+            1,
+        ),
         SeedPromptSpec("summarize_note", "문서 요약", "현재 문서를 간단히 요약합니다.", "summarize_note.md", ("CONTENT",), 10),
         SeedPromptSpec("polish_selection", "문장 다듬기", "선택된 텍스트나 문서 내용을 자연스럽게 다듬습니다.", "polish_selection.md", ("CONTENT",), 20),
         SeedPromptSpec("extract_todo", "할 일 추출", "문서에서 해야 할 일을 추출합니다.", "extract_todo.md", ("CONTENT",), 30),
         SeedPromptSpec("suggest_title_tags", "제목/태그 추천", "문서에 어울리는 제목과 태그를 추천합니다.", "suggest_title_tags.md", ("CONTENT",), 40),
-        SeedPromptSpec("current_note_qa", "현재 문서 질문", "현재 문서와 검색 문단을 참고해 질문에 답변합니다.", "current_note_qa.md", ("CONTEXT", "QUESTION"), 50),
+        SeedPromptSpec("current_note_qa", "현재 문서 질문", "현재 문서와 검색 문단을 참고해 질문에 답변합니다.", "current_note_qa.md", ("CONTEXT", "USER_INPUT"), 50),
     )
 
     DEFAULT_ACTIONS: tuple[dict, ...] = (
@@ -82,7 +95,7 @@ class PromptSeedService:
             "name": "현재 문서 질문",
             "description": "현재 문서와 검색 문단을 참고하여 답변합니다.",
             "category": "문서 질문",
-            "required_variables_json": json.dumps(["CONTEXT", "QUESTION"], ensure_ascii=False),
+            "required_variables_json": json.dumps(["CONTEXT", "USER_INPUT"], ensure_ascii=False),
             "enabled": 1,
             "sort_order": 50,
         },
@@ -127,7 +140,16 @@ class PromptSeedService:
             variables = sorted(set(VARIABLE_PATTERN.findall(content_md)))
             existing = self._repo.get_prompt_document(prompt.prompt_doc_id)
 
-            if existing and existing.get("source_type") == "default" and existing.get("content_hash") == content_hash:
+            should_upsert = False
+            if existing is None:
+                should_upsert = True
+            elif int(existing.get("readonly", 0) or 0) == 1:
+                should_upsert = True
+            elif prompt.source_type == "sample":
+                # Sample prompt should always reflect packaged version
+                should_upsert = existing.get("content_hash") != content_hash
+
+            if not should_upsert and existing.get("content_hash") == content_hash:
                 continue
 
             self._repo.upsert_prompt_document({
@@ -135,8 +157,8 @@ class PromptSeedService:
                 "title": prompt.title,
                 "description": prompt.description,
                 "content_md": content_md,
-                "source_type": "default",
-                "readonly": 1,
+                "source_type": prompt.source_type,
+                "readonly": prompt.readonly,
                 "archived": 0,
                 "variables_json": json.dumps(variables, ensure_ascii=False),
                 "content_hash": content_hash,

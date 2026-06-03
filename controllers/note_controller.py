@@ -56,6 +56,7 @@ class NoteController(QObject):
 
     SMART_ALL = "smart:all"
     SMART_FAVORITES = "smart:favorites"
+    SMART_AI_RESULTS = "smart:ai_results"
     
     # Signals
     notesChanged = pyqtSignal()
@@ -158,14 +159,34 @@ class NoteController(QObject):
         self._pagination_offset = 0
         current_folder_id = self._folder_controller.currentFolderId
         tag_filter = self._selected_tag or None
+        ai_folder_id = self._folder_controller.getAIResultFolderId()
 
         if tag_filter:
             # When tag filter is active, search across all folders
-            notes = self._note_service.get_all(tag=tag_filter, offset=0, limit=self._pagination_limit)
+            notes = self._note_service.get_all(
+                tag=tag_filter,
+                offset=0,
+                limit=self._pagination_limit,
+                exclude_folder_ids=[ai_folder_id] if ai_folder_id else None,
+            )
         elif current_folder_id == self.SMART_ALL:
-            notes = self._note_service.get_all(offset=0, limit=self._pagination_limit)
+            notes = self._note_service.get_all(
+                offset=0,
+                limit=self._pagination_limit,
+                exclude_folder_ids=[ai_folder_id] if ai_folder_id else None,
+            )
         elif current_folder_id == self.SMART_FAVORITES:
-            notes = self._note_service.get_pinned(ensure_note_id=self._current_note_id, offset=0, limit=self._pagination_limit)
+            notes = self._note_service.get_pinned(
+                ensure_note_id=self._current_note_id,
+                offset=0,
+                limit=self._pagination_limit,
+            )
+        elif current_folder_id == self.SMART_AI_RESULTS:
+            notes = self._note_service.get_all(
+                folder_id=ai_folder_id or "",
+                offset=0,
+                limit=self._pagination_limit,
+            ) if ai_folder_id else []
         else:
             if self._include_subfolders:
                 folder_ids = [current_folder_id] + self._folder_controller.getDescendantIds(current_folder_id)
@@ -334,7 +355,8 @@ class NoteController(QObject):
     @pyqtProperty(list, notify=notesChanged)
     def allNotes(self):
         """Get all notes as list of dicts for QML."""
-        return self._note_service.get_all()
+        ai_folder_id = self._folder_controller.getAIResultFolderId()
+        return self._note_service.get_all(exclude_folder_ids=[ai_folder_id] if ai_folder_id else None)
     
     @pyqtProperty(list, notify=filteredNotesChanged)
     def filteredNotes(self):
@@ -436,19 +458,39 @@ class NoteController(QObject):
         current_folder_id = self._folder_controller.currentFolderId
         tag_filter = self._selected_tag or None
 
+        ai_folder_id = self._folder_controller.getAIResultFolderId()
+
         if tag_filter:
             # When tag filter is active, search across all folders
-            new_notes = self._note_service.get_all(tag=tag_filter, offset=self._pagination_offset, limit=self._pagination_limit)
+            new_notes = self._note_service.get_all(
+                tag=tag_filter,
+                offset=self._pagination_offset,
+                limit=self._pagination_limit,
+                exclude_folder_ids=[ai_folder_id] if ai_folder_id else None,
+            )
         elif current_folder_id == self.SMART_ALL:
-            new_notes = self._note_service.get_all(offset=self._pagination_offset, limit=self._pagination_limit)
+            new_notes = self._note_service.get_all(
+                offset=self._pagination_offset,
+                limit=self._pagination_limit,
+                exclude_folder_ids=[ai_folder_id] if ai_folder_id else None,
+            )
         elif current_folder_id == self.SMART_FAVORITES:
             new_notes = self._note_service.get_pinned(ensure_note_id=self._current_note_id, offset=self._pagination_offset, limit=self._pagination_limit)
+        elif current_folder_id == self.SMART_AI_RESULTS:
+            new_notes = self._note_service.get_all(
+                folder_id=ai_folder_id or "",
+                offset=self._pagination_offset,
+                limit=self._pagination_limit,
+            ) if ai_folder_id else []
         else:
             if self._include_subfolders:
                 folder_ids = [current_folder_id] + self._folder_controller.getDescendantIds(current_folder_id)
                 all_notes = self._note_service.get_all_by_folder_ids(folder_ids)
             else:
-                all_notes = self._note_service.get_all(folder_id=current_folder_id)
+                all_notes = self._note_service.get_all(
+                    folder_id=current_folder_id,
+                    exclude_folder_ids=[ai_folder_id] if ai_folder_id else None,
+                )
             # Apply pagination client-side for folder queries
             new_notes = all_notes[self._pagination_offset:self._pagination_offset + self._pagination_limit]
 
@@ -976,16 +1018,20 @@ class NoteController(QObject):
     @pyqtSlot(str, result=int)
     def getNoteCountForFolder(self, folder_id: str) -> int:
         """Get note count for a specific folder."""
+        ai_folder_id = self._folder_controller.getAIResultFolderId()
         if folder_id == self.SMART_ALL:
-            return len(self._note_service.get_all())
+            return len(self._note_service.get_all(exclude_folder_ids=[ai_folder_id] if ai_folder_id else None))
         if folder_id == self.SMART_FAVORITES:
             return len(self._note_service.get_pinned())
-        return len(self._note_service.get_all(folder_id=folder_id))
+        if folder_id == self.SMART_AI_RESULTS:
+            return len(self._note_service.get_all(folder_id=ai_folder_id or ""))
+        return len(self._note_service.get_all(folder_id=folder_id, exclude_folder_ids=[ai_folder_id] if ai_folder_id else None))
     
     @pyqtSlot(result=int)
     def getTotalNoteCount(self) -> int:
         """Get total note count."""
-        return len(self._note_service.get_all())
+        ai_folder_id = self._folder_controller.getAIResultFolderId()
+        return len(self._note_service.get_all(exclude_folder_ids=[ai_folder_id] if ai_folder_id else None))
     
     @pyqtSlot(str, result=str)
     def getPreviewText(self, note_id: str) -> str:

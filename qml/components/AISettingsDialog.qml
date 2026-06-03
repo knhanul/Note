@@ -18,6 +18,112 @@ Rectangle {
 
     property int settingsMenuIndex: 0
 
+    // Category management state
+    property var categoryList: []
+    property string newCategoryName: ""
+    property int editingCategoryIndex: -1
+    property string editingCategoryName: ""
+
+    function loadCategoryList() {
+        var ss = typeof settingsService !== "undefined" && settingsService !== null ? settingsService : null
+        var defaults = ["문서 작업", "문서 질문", "요약/정리", "번역", "코드/수식", "기타"]
+        if (!ss) { root.categoryList = defaults; return }
+        try {
+            var raw = ss.get_value("ai_category_list", "")
+            if (raw) {
+                var parsed = JSON.parse(raw)
+                if (Array.isArray(parsed) && parsed.length > 0) { root.categoryList = parsed; return }
+            }
+        } catch (e) {}
+        root.categoryList = defaults
+    }
+
+    function saveCategoryList() {
+        var ss = typeof settingsService !== "undefined" && settingsService !== null ? settingsService : null
+        if (!ss) return
+        ss.set_value("ai_category_list", JSON.stringify(root.categoryList))
+    }
+
+    function addCategory(name) {
+        if (!name || name.trim() === "") return false
+        var trimmed = name.trim()
+        for (var i = 0; i < root.categoryList.length; i++) {
+            if (root.categoryList[i] === trimmed) return false
+        }
+        var arr = root.categoryList.slice()
+        arr.push(trimmed)
+        root.categoryList = arr
+        saveCategoryList()
+        return true
+    }
+
+    function removeCategory(index) {
+        if (index < 0 || index >= root.categoryList.length) return
+        var arr = root.categoryList.slice()
+        arr.splice(index, 1)
+        root.categoryList = arr
+        saveCategoryList()
+    }
+
+    function renameCategory(index, newName) {
+        if (index < 0 || index >= root.categoryList.length) return false
+        if (!newName || newName.trim() === "") return false
+        var trimmed = newName.trim()
+        for (var i = 0; i < root.categoryList.length; i++) {
+            if (i !== index && root.categoryList[i] === trimmed) return false
+        }
+        var oldName = root.categoryList[index]
+        var arr = root.categoryList.slice()
+        arr[index] = trimmed
+        root.categoryList = arr
+        saveCategoryList()
+        // Update actions that had the old category name
+        var c = typeof aiActionController !== "undefined" && aiActionController !== null ? aiActionController : null
+        if (c && oldName !== trimmed) {
+            var actions = c.actionList || []
+            for (var j = 0; j < actions.length; j++) {
+                if (actions[j].category === oldName) {
+                    c.update_action(actions[j].action_id, actions[j].name, actions[j].description || "",
+                                    trimmed, actions[j].input_mode || "auto", !!actions[j].use_rag,
+                                    actions[j].required_variables_json || "[]", !!actions[j].enabled,
+                                    actions[j].response_length || "medium")
+                }
+            }
+        }
+        return true
+    }
+
+    function moveCategoryUp(index) {
+        if (index <= 0 || index >= root.categoryList.length) return
+        var arr = root.categoryList.slice()
+        var tmp = arr[index - 1]
+        arr[index - 1] = arr[index]
+        arr[index] = tmp
+        root.categoryList = arr
+        saveCategoryList()
+    }
+
+    function moveCategoryDown(index) {
+        if (index < 0 || index >= root.categoryList.length - 1) return
+        var arr = root.categoryList.slice()
+        var tmp = arr[index + 1]
+        arr[index + 1] = arr[index]
+        arr[index] = tmp
+        root.categoryList = arr
+        saveCategoryList()
+    }
+
+    function getCategoryActionCount(categoryName) {
+        var c = typeof aiActionController !== "undefined" && aiActionController !== null ? aiActionController : null
+        if (!c) return 0
+        var count = 0
+        var actions = c.actionList || []
+        for (var i = 0; i < actions.length; i++) {
+            if ((actions[i].category || "기타") === categoryName) count++
+        }
+        return count
+    }
+
     property bool aiConnected: typeof aiAssistantController !== "undefined" && aiAssistantController !== null ? aiAssistantController.isConnected : false
     property string aiChatModel: typeof aiAssistantController !== "undefined" && aiAssistantController !== null ? aiAssistantController.chatModel : ""
     property string aiEmbeddingModel: typeof aiAssistantController !== "undefined" && aiAssistantController !== null ? aiAssistantController.embeddingModel : ""
@@ -206,16 +312,15 @@ Rectangle {
                             Layout.fillWidth: true
                             height: 40
                             radius: Metrics.radiusMd
-                            color: root.settingsMenuIndex === 2 ? Colors.primary50 : (refDocsMenuMA.containsMouse ? Colors.bgPrimary : "transparent")
+                            color: root.settingsMenuIndex === 2 ? Colors.primary50 : (categoryMenuMA.containsMouse ? Colors.bgPrimary : "transparent")
                             border.width: 1
                             border.color: root.settingsMenuIndex === 2 ? Colors.primary200 : Colors.borderLight
-                            visible: typeof aiRagController !== "undefined" && aiRagController !== null
 
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
                                 anchors.left: parent.left
                                 anchors.leftMargin: Metrics.md
-                                text: "참고문서 관리"
+                                text: "카테고리 관리"
                                 font.family: Typography.fontPrimary
                                 font.pixelSize: Typography.bodySmall
                                 font.weight: root.settingsMenuIndex === 2 ? Typography.weightSemibold : Typography.weightRegular
@@ -223,10 +328,13 @@ Rectangle {
                             }
 
                             MouseArea {
-                                id: refDocsMenuMA
+                                id: categoryMenuMA
                                 anchors.fill: parent
                                 hoverEnabled: true
-                                onClicked: root.settingsMenuIndex = 2
+                                onClicked: {
+                                    root.settingsMenuIndex = 2
+                                    root.loadCategoryList()
+                                }
                             }
                         }
 
@@ -607,279 +715,348 @@ Rectangle {
                         }
                     }
 
-                    // 참고문서 관리 tab
+                    // 카테고리 관리 tab (index 2)
                     Item {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
 
-                        ScrollView {
-                            anchors.fill: parent
-                            clip: true
-                            ScrollBar.vertical.policy: ScrollBar.AsNeeded
-                            visible: typeof aiRagController !== "undefined" && aiRagController !== null
-
-                            ColumnLayout {
-                                width: parent.width
-                                spacing: Metrics.md
-                                anchors.margins: Metrics.sm
-
-                                Text {
-                                    text: "참고문서 관리"
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.h5
-                                    font.weight: Typography.weightSemibold
-                                    color: Colors.textPrimary
-                                }
-
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: "AI가 여러 문서를 찾아보고 답변하려면 참고문서를 등록해야 합니다.\n등록된 문서는 \"등록된 문서 질문\" 기능에서 활용됩니다.\n※ 등록은 문서를 AI 검색용으로 준비하는 과정입니다."
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.bodySmall
-                                    color: Colors.textSecondary
-                                    wrapMode: Text.Wrap
-                                }
-
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    height: 1
-                                    color: Colors.borderLight
-                                }
-
-                                // 참고문서 등록 section
-                                Text {
-                                    text: "참고문서 등록"
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.bodyRegular
-                                    font.weight: Typography.weightSemibold
-                                    color: Colors.textPrimary
-                                }
-
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: Metrics.sm
-
-                                    Button {
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: 36
-                                        text: "현재 문서 등록"
-                                        enabled: canUseAI
-                                        contentItem: Text {
-                                            text: parent.text
-                                            font.family: Typography.fontPrimary
-                                            font.pixelSize: Typography.bodySmall
-                                            horizontalAlignment: Text.AlignHCenter
-                                            verticalAlignment: Text.AlignVCenter
-                                            color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
-                                        }
-                                        background: Rectangle {
-                                            color: parent.enabled ? Colors.surface : Colors.bgTertiary
-                                            border.color: Colors.borderLight
-                                            radius: Metrics.radiusSm
-                                        }
-                                        onClicked: {
-                                            var ragCtrl = typeof aiRagController !== "undefined" ? aiRagController : null
-                                            if (!ragCtrl) return
-                                            var note = window.currentNote
-                                            if (!note || !note.id) return
-                                            var tagsJson = note.tags && Array.isArray(note.tags) ? JSON.stringify(note.tags) : "[]"
-                                            ragCtrl.indexCurrentNote(note.id, note.title || "", note.content || "", tagsJson)
-                                        }
-                                    }
-
-                                    Button {
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: 36
-                                        text: "현재 폴더 등록"
-                                        enabled: canUseAI
-                                        contentItem: Text {
-                                            text: parent.text
-                                            font.family: Typography.fontPrimary
-                                            font.pixelSize: Typography.bodySmall
-                                            horizontalAlignment: Text.AlignHCenter
-                                            verticalAlignment: Text.AlignVCenter
-                                            color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
-                                        }
-                                        background: Rectangle {
-                                            color: parent.enabled ? Colors.surface : Colors.bgTertiary
-                                            border.color: Colors.borderLight
-                                            radius: Metrics.radiusSm
-                                        }
-                                        onClicked: {
-                                            var ragCtrl = typeof aiRagController !== "undefined" ? aiRagController : null
-                                            var folderCtrl = typeof folderController !== "undefined" ? folderController : null
-                                            if (!ragCtrl || !folderCtrl) return
-                                            var currentFolderId = folderCtrl.currentFolderId
-                                            if (!currentFolderId) return
-                                            try {
-                                                var descendantIds = folderCtrl.getDescendantIds(currentFolderId)
-                                                var folderIds = [currentFolderId].concat(descendantIds || [])
-                                                var notesJson = noteController.getNotesForRagByFolderIdsJson(JSON.stringify(folderIds))
-                                                ragCtrl.indexCurrentFolderNotes(notesJson, currentFolderId)
-                                            } catch (e) {
-                                                console.log("[AISettingsDialog] 폴더 등록 실패: " + e)
-                                            }
-                                        }
-                                    }
-                                }
-
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: Metrics.sm
-
-                                    Button {
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: 36
-                                        text: "전체 노트 등록"
-                                        enabled: canUseAI
-                                        contentItem: Text {
-                                            text: parent.text
-                                            font.family: Typography.fontPrimary
-                                            font.pixelSize: Typography.bodySmall
-                                            horizontalAlignment: Text.AlignHCenter
-                                            verticalAlignment: Text.AlignVCenter
-                                            color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
-                                        }
-                                        background: Rectangle {
-                                            color: parent.enabled ? Colors.surface : Colors.bgTertiary
-                                            border.color: Colors.borderLight
-                                            radius: Metrics.radiusSm
-                                        }
-                                        onClicked: {
-                                            var ragCtrl = typeof aiRagController !== "undefined" ? aiRagController : null
-                                            if (!ragCtrl) return
-                                            try {
-                                                var notesJson = noteController.getAllNotesForRagJson()
-                                                ragCtrl.indexAllNotesJson(notesJson)
-                                            } catch (e) {
-                                                console.log("[AISettingsDialog] 전체 노트 등록 실패: " + e)
-                                            }
-                                        }
-                                    }
-
-                                    Button {
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: 36
-                                        text: "외부 파일 등록"
-                                        enabled: canUseAI
-                                        contentItem: Text {
-                                            text: parent.text
-                                            font.family: Typography.fontPrimary
-                                            font.pixelSize: Typography.bodySmall
-                                            horizontalAlignment: Text.AlignHCenter
-                                            verticalAlignment: Text.AlignVCenter
-                                            color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
-                                        }
-                                        background: Rectangle {
-                                            color: parent.enabled ? Colors.surface : Colors.bgTertiary
-                                            border.color: Colors.borderLight
-                                            radius: Metrics.radiusSm
-                                        }
-                                        onClicked: {
-                                            externalFileDialog.open()
-                                        }
-                                    }
-                                }
-
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    height: 1
-                                    color: Colors.borderLight
-                                }
-
-                                // 등록 상태 section
-                                Text {
-                                    text: "등록 상태"
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.bodyRegular
-                                    font.weight: Typography.weightSemibold
-                                    color: Colors.textPrimary
-                                }
-
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: "등록 상태 상세 정보는 다음 단계에서 표시됩니다."
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.bodySmall
-                                    color: Colors.textTertiary
-                                    wrapMode: Text.Wrap
-                                }
-
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    height: 1
-                                    color: Colors.borderLight
-                                }
-
-                                // 관리 section
-                                Text {
-                                    text: "관리"
-                                    font.family: Typography.fontPrimary
-                                    font.pixelSize: Typography.bodyRegular
-                                    font.weight: Typography.weightSemibold
-                                    color: Colors.textPrimary
-                                }
-
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: Metrics.sm
-
-                                    Button {
-                                        Layout.preferredWidth: 120
-                                        Layout.preferredHeight: 36
-                                        text: "새로고침"
-                                        enabled: canUseAI
-                                        contentItem: Text {
-                                            text: parent.text
-                                            font.family: Typography.fontPrimary
-                                            font.pixelSize: Typography.bodySmall
-                                            horizontalAlignment: Text.AlignHCenter
-                                            verticalAlignment: Text.AlignVCenter
-                                            color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
-                                        }
-                                        background: Rectangle {
-                                            color: parent.enabled ? Colors.surface : Colors.bgTertiary
-                                            border.color: Colors.borderLight
-                                            radius: Metrics.radiusSm
-                                        }
-                                        onClicked: {
-                                            // Refresh status - trigger a status check
-                                            var ragCtrl = typeof aiRagController !== "undefined" ? aiRagController : null
-                                            if (ragCtrl && ragCtrl.indexStatusChanged) {
-                                                ragCtrl.indexStatusChanged("ready")
-                                            }
-                                        }
-                                    }
-                                }
-
-                                Item {
-                                    Layout.fillHeight: true
-                                    Layout.minimumHeight: Metrics.md
-                                }
-                            }
-                        }
-
                         ColumnLayout {
                             anchors.fill: parent
-                            spacing: Metrics.sm
-                            visible: typeof aiRagController === "undefined" || aiRagController === null
+                            anchors.margins: Metrics.md
+                            spacing: Metrics.md
+
+                            Text {
+                                text: "카테고리 관리"
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.h5
+                                font.weight: Typography.weightSemibold
+                                color: Colors.textPrimary
+                            }
 
                             Text {
                                 Layout.fillWidth: true
-                                text: "참고문서 관리를 사용할 수 없습니다."
+                                text: "AI 기능을 분류하는 카테고리를 추가, 수정, 삭제, 정렬할 수 있습니다."
                                 font.family: Typography.fontPrimary
                                 font.pixelSize: Typography.bodySmall
                                 color: Colors.textSecondary
-                                horizontalAlignment: Text.AlignHCenter
+                                wrapMode: Text.Wrap
+                            }
+
+                            Rectangle { Layout.fillWidth: true; height: 1; color: Colors.borderLight }
+
+                            // Add new category
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: Metrics.sm
+
+                                TextField {
+                                    id: newCategoryInput
+                                    Layout.fillWidth: true
+                                    placeholderText: "새 카테고리 이름"
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: Typography.bodySmall
+                                    color: Colors.textPrimary
+                                    background: Rectangle {
+                                        color: Colors.bgPrimary
+                                        radius: Metrics.radiusSm
+                                        border.color: Colors.borderLight
+                                        border.width: 1
+                                    }
+                                    onAccepted: {
+                                        if (root.addCategory(text)) {
+                                            text = ""
+                                        }
+                                    }
+                                }
+
+                                Rectangle {
+                                    width: 70
+                                    height: 32
+                                    radius: Metrics.radiusSm
+                                    color: addCatBtnMA.containsMouse ? Colors.primary600 : Colors.primary500
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "추가"
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.bodySmall
+                                        font.weight: Typography.weightMedium
+                                        color: Colors.textInverse
+                                    }
+
+                                    MouseArea {
+                                        id: addCatBtnMA
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            if (root.addCategory(newCategoryInput.text)) {
+                                                newCategoryInput.text = ""
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle { Layout.fillWidth: true; height: 1; color: Colors.borderLight }
+
+                            // Category list
+                            ScrollView {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                clip: true
+                                ScrollBar.vertical.policy: ScrollBar.AsNeeded
+
+                                ColumnLayout {
+                                    width: parent.width
+                                    spacing: Metrics.xs
+
+                                    Repeater {
+                                        model: root.categoryList
+
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            implicitHeight: 44
+                                            radius: Metrics.radiusSm
+                                            color: catItemMA.containsMouse ? Colors.bgSecondary : Colors.surface
+                                            border.color: Colors.borderLight
+                                            border.width: 1
+
+                                            property int catIndex: index
+                                            property string catName: modelData
+
+                                            RowLayout {
+                                                anchors.fill: parent
+                                                anchors.leftMargin: Metrics.md
+                                                anchors.rightMargin: Metrics.sm
+                                                spacing: Metrics.sm
+
+                                                // Inline rename field (visible only when editing this row)
+                                                TextField {
+                                                    id: renameCatInput
+                                                    Layout.fillWidth: true
+                                                    visible: root.editingCategoryIndex === catIndex
+                                                    text: root.editingCategoryName
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.bodySmall
+                                                    color: Colors.textPrimary
+                                                    background: Rectangle {
+                                                        color: Colors.bgPrimary
+                                                        radius: Metrics.radiusSm
+                                                        border.color: Colors.primary300
+                                                        border.width: 1
+                                                    }
+                                                    onAccepted: {
+                                                        if (root.renameCategory(catIndex, text)) {
+                                                            root.editingCategoryIndex = -1
+                                                        }
+                                                    }
+                                                    Keys.onEscapePressed: root.editingCategoryIndex = -1
+                                                }
+
+                                                // Normal display
+                                                Text {
+                                                    Layout.fillWidth: true
+                                                    visible: root.editingCategoryIndex !== catIndex
+                                                    text: catName
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.bodySmall
+                                                    font.weight: Typography.weightMedium
+                                                    color: Colors.textPrimary
+                                                    elide: Text.ElideRight
+                                                }
+
+                                                // Action count badge
+                                                Rectangle {
+                                                    visible: root.editingCategoryIndex !== catIndex
+                                                    implicitWidth: countText.implicitWidth + 10
+                                                    implicitHeight: 20
+                                                    radius: 10
+                                                    color: Colors.bgTertiary
+                                                    Layout.alignment: Qt.AlignVCenter
+
+                                                    Text {
+                                                        id: countText
+                                                        anchors.centerIn: parent
+                                                        text: root.getCategoryActionCount(catName)
+                                                        font.family: Typography.fontPrimary
+                                                        font.pixelSize: 10
+                                                        color: Colors.textSecondary
+                                                    }
+                                                }
+
+                                                // Move up
+                                                Rectangle {
+                                                    width: 24; height: 24; radius: 12
+                                                    color: moveUpMA.containsMouse ? Colors.bgTertiary : "transparent"
+                                                    visible: root.editingCategoryIndex !== catIndex
+                                                    Layout.alignment: Qt.AlignVCenter
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        text: "\u25B2"
+                                                        font.pixelSize: 10
+                                                        color: catIndex > 0 ? Colors.textSecondary : Colors.textTertiary
+                                                    }
+                                                    MouseArea {
+                                                        id: moveUpMA
+                                                        anchors.fill: parent
+                                                        hoverEnabled: true
+                                                        cursorShape: Qt.PointingHandCursor
+                                                        onClicked: root.moveCategoryUp(catIndex)
+                                                    }
+                                                }
+
+                                                // Move down
+                                                Rectangle {
+                                                    width: 24; height: 24; radius: 12
+                                                    color: moveDownMA.containsMouse ? Colors.bgTertiary : "transparent"
+                                                    visible: root.editingCategoryIndex !== catIndex
+                                                    Layout.alignment: Qt.AlignVCenter
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        text: "\u25BC"
+                                                        font.pixelSize: 10
+                                                        color: catIndex < root.categoryList.length - 1 ? Colors.textSecondary : Colors.textTertiary
+                                                    }
+                                                    MouseArea {
+                                                        id: moveDownMA
+                                                        anchors.fill: parent
+                                                        hoverEnabled: true
+                                                        cursorShape: Qt.PointingHandCursor
+                                                        onClicked: root.moveCategoryDown(catIndex)
+                                                    }
+                                                }
+
+                                                // Rename button
+                                                Rectangle {
+                                                    width: 24; height: 24; radius: 12
+                                                    color: renameMA.containsMouse ? Colors.bgTertiary : "transparent"
+                                                    visible: root.editingCategoryIndex !== catIndex
+                                                    Layout.alignment: Qt.AlignVCenter
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        text: "\u270E"
+                                                        font.pixelSize: 12
+                                                        color: Colors.textSecondary
+                                                    }
+                                                    MouseArea {
+                                                        id: renameMA
+                                                        anchors.fill: parent
+                                                        hoverEnabled: true
+                                                        cursorShape: Qt.PointingHandCursor
+                                                        onClicked: {
+                                                            root.editingCategoryIndex = catIndex
+                                                            root.editingCategoryName = catName
+                                                        }
+                                                    }
+                                                }
+
+                                                // Confirm rename
+                                                Rectangle {
+                                                    width: 24; height: 24; radius: 12
+                                                    color: confirmRenameMA.containsMouse ? Colors.success : Colors.bgTertiary
+                                                    visible: root.editingCategoryIndex === catIndex
+                                                    Layout.alignment: Qt.AlignVCenter
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        text: "\u2713"
+                                                        font.pixelSize: 12
+                                                        font.weight: Typography.weightBold
+                                                        color: confirmRenameMA.containsMouse ? Colors.textInverse : Colors.textSecondary
+                                                    }
+                                                    MouseArea {
+                                                        id: confirmRenameMA
+                                                        anchors.fill: parent
+                                                        hoverEnabled: true
+                                                        cursorShape: Qt.PointingHandCursor
+                                                        onClicked: {
+                                                            if (root.renameCategory(catIndex, renameCatInput.text))
+                                                                root.editingCategoryIndex = -1
+                                                        }
+                                                    }
+                                                }
+
+                                                // Cancel rename
+                                                Rectangle {
+                                                    width: 24; height: 24; radius: 12
+                                                    color: cancelRenameMA.containsMouse ? Colors.bgTertiary : "transparent"
+                                                    visible: root.editingCategoryIndex === catIndex
+                                                    Layout.alignment: Qt.AlignVCenter
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        text: "\u2715"
+                                                        font.pixelSize: 10
+                                                        color: Colors.textSecondary
+                                                    }
+                                                    MouseArea {
+                                                        id: cancelRenameMA
+                                                        anchors.fill: parent
+                                                        hoverEnabled: true
+                                                        cursorShape: Qt.PointingHandCursor
+                                                        onClicked: root.editingCategoryIndex = -1
+                                                    }
+                                                }
+
+                                                // Delete button
+                                                Rectangle {
+                                                    width: 24; height: 24; radius: 12
+                                                    color: delCatMA.containsMouse ? Colors.error50 : "transparent"
+                                                    visible: root.editingCategoryIndex !== catIndex
+                                                    Layout.alignment: Qt.AlignVCenter
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        text: "\u2715"
+                                                        font.pixelSize: 10
+                                                        color: delCatMA.containsMouse ? Colors.error : Colors.textTertiary
+                                                    }
+                                                    MouseArea {
+                                                        id: delCatMA
+                                                        anchors.fill: parent
+                                                        hoverEnabled: true
+                                                        cursorShape: Qt.PointingHandCursor
+                                                        onClicked: {
+                                                            // Reassign actions in this category to "기타"
+                                                            var c = typeof aiActionController !== "undefined" && aiActionController !== null ? aiActionController : null
+                                                            if (c) {
+                                                                var actions = c.actionList || []
+                                                                for (var i = 0; i < actions.length; i++) {
+                                                                    if ((actions[i].category || "기타") === catName) {
+                                                                        c.update_action(actions[i].action_id, actions[i].name, actions[i].description || "",
+                                                                                        "기타", actions[i].input_mode || "auto", !!actions[i].use_rag,
+                                                                                        actions[i].required_variables_json || "[]", !!actions[i].enabled,
+                                                                                        actions[i].response_length || "medium")
+                                                                    }
+                                                                }
+                                                            }
+                                                            root.removeCategory(catIndex)
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            MouseArea {
+                                                id: catItemMA
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                z: -1
+                                            }
+                                        }
+                                    }
+
+                                    Item {
+                                        Layout.fillHeight: true
+                                        Layout.minimumHeight: Metrics.md
+                                    }
+                                }
                             }
 
                             Text {
                                 Layout.fillWidth: true
-                                text: "이 탭은 work_ai_editor에서만 활성화됩니다."
+                                text: "카테고리를 삭제하면 해당 카테고리의 기능은 '기타'로 이동합니다."
                                 font.family: Typography.fontPrimary
                                 font.pixelSize: Typography.caption
                                 color: Colors.textTertiary
-                                horizontalAlignment: Text.AlignHCenter
+                                wrapMode: Text.Wrap
                             }
                         }
                     }
@@ -888,25 +1065,4 @@ Rectangle {
         }
     }
 
-    FileDialog {
-        id: externalFileDialog
-        title: "외부 문서 선택"
-        nameFilters: ["Markdown (*.md *.markdown)", "HWPX (*.hwpx)", "HWP (*.hwp)", "All files (*)"]
-        fileMode: FileDialog.OpenFiles
-        onAccepted: {
-            var paths = []
-            for (var i = 0; i < selectedFiles.length; i++) {
-                paths.push(fileUrlToLocalPath(selectedFiles[i]))
-            }
-            var ragCtrl = typeof aiRagController !== "undefined" ? aiRagController : null
-            if (ragCtrl) {
-                try {
-                    var pathsJson = JSON.stringify(paths)
-                    ragCtrl.indexExternalFilesJson(pathsJson)
-                } catch (e) {
-                    console.log("[AISettingsDialog] 외부 파일 등록 실패: " + e)
-                }
-            }
-        }
-    }
 }

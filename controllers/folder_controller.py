@@ -2,6 +2,7 @@
 from typing import List, Optional, Dict, Any
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtProperty, pyqtSlot, QVariant
 import uuid
+import logging
 
 from services.database import Database
 from services.folder_service import FolderService
@@ -9,13 +10,22 @@ from services.library_service import LibraryService
 from services.settings_service import SettingsService
 
 
+logger = logging.getLogger(__name__)
+
+
 class FolderController(QObject):
     """Controller for folder management with SQLite persistence and QML integration."""
 
     SMART_FOLDER_PREFIX = "smart:"
+    SMART_ALL_ID = "smart:all"
+    SMART_FAVORITES_ID = "smart:favorites"
+    SMART_AI_RESULTS_ID = "smart:ai_results"
+    AI_RESULT_FOLDER_NAME = "AI결과"
+    AI_RESULT_FOLDER_COLOR = "#2563EB"
     SMART_FOLDERS = [
-        {"id": "smart:all", "name": "전체 노트", "color": "#64748B"},
-        {"id": "smart:favorites", "name": "즐겨 찾기", "color": "#F59E0B"},
+        {"id": SMART_ALL_ID, "name": "전체 노트", "color": "#64748B"},
+        {"id": SMART_FAVORITES_ID, "name": "즐겨 찾기", "color": "#F59E0B"},
+        {"id": SMART_AI_RESULTS_ID, "name": "AI 결과", "color": AI_RESULT_FOLDER_COLOR},
     ]
     
     # Signals
@@ -36,6 +46,7 @@ class FolderController(QObject):
         self._collapsed_folder_ids: set = set()  # Track collapsed (hidden) folders
         self._db = None
         self._folder_service = None
+        self._ai_result_folder_id: Optional[str] = None
 
         # Connect to library changes
         self._library_service.currentLibraryChanged.connect(self._on_library_changed)
@@ -49,6 +60,7 @@ class FolderController(QObject):
         if db:
             self._db = db
             self._folder_service = FolderService(self._db)
+            self._ensure_ai_result_folder()
             self._load_folders()
             # Restore last folder if it still exists, otherwise pick first folder
             last_folder_id = self._settings.get_last_folder_id() if self._settings else None
@@ -122,6 +134,38 @@ class FolderController(QObject):
 
         self.foldersChanged.emit()
 
+    def _ensure_ai_result_folder(self) -> None:
+        """Ensure dedicated AI 결과 folder exists in the current library."""
+        if not self._folder_service:
+            self._ai_result_folder_id = None
+            return
+
+        folders = self._folder_service.get_all()
+        for folder in folders:
+            if (
+                folder.get("name") == self.AI_RESULT_FOLDER_NAME
+                and not folder.get("parent_id")
+            ):
+                self._ai_result_folder_id = folder.get("id")
+                return
+
+        folder_id = str(uuid.uuid4())[:8]
+        created = self._folder_service.create(
+            folder_id,
+            self.AI_RESULT_FOLDER_NAME,
+            self.AI_RESULT_FOLDER_COLOR,
+            None,
+        )
+        if created:
+            self._ai_result_folder_id = folder_id
+        else:
+            self._ai_result_folder_id = None
+
+    def _get_ai_result_folder_id(self) -> str:
+        if not self._ai_result_folder_id:
+            self._ensure_ai_result_folder()
+        return self._ai_result_folder_id or ""
+
     def _is_smart_folder_id(self, folder_id: Optional[str]) -> bool:
         return bool(folder_id) and folder_id.startswith(self.SMART_FOLDER_PREFIX)
     
@@ -149,7 +193,12 @@ class FolderController(QObject):
     @pyqtProperty(list, notify=foldersChanged)
     def folders(self):
         """Get all folders as list of dicts for QML with hierarchy info, filtered by collapsed state."""
+        if not self._folder_service:
+            return []
+        ai_folder_id = self._get_ai_result_folder_id()
         folders = self._folder_service.get_all()
+        if ai_folder_id:
+            folders = [f for f in folders if f.get('id') != ai_folder_id]
 
         # Build id -> folder map for depth calculation
         folders_map = {f['id']: f for f in folders}
@@ -192,7 +241,7 @@ class FolderController(QObject):
 
         smart_folders = []
         for smart in self.SMART_FOLDERS:
-            smart_folders.append({
+            entry = {
                 "id": smart["id"],
                 "name": smart["name"],
                 "color": smart["color"],
@@ -201,7 +250,11 @@ class FolderController(QObject):
                 "has_children": False,
                 "parent_id": None,
                 "is_smart": True,
-            })
+            }
+            if smart["id"] == self.SMART_AI_RESULTS_ID and ai_folder_id:
+                entry["note_count"] = self._folder_service.get_note_count(ai_folder_id)
+                entry["ai_folder_id"] = ai_folder_id
+            smart_folders.append(entry)
 
         return smart_folders + sorted_folders
     
@@ -581,3 +634,8 @@ class FolderController(QObject):
         except Exception as e:
             logger.error(f"[FolderController] getAllFoldersJson failed: {e}")
             return "[]"
+
+    @pyqtSlot(result=str)
+    def getAIResultFolderId(self) -> str:
+        """Return the physical folder id used for AI 결과 notes."""
+        return self._get_ai_result_folder_id()

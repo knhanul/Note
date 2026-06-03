@@ -61,6 +61,32 @@ ColumnLayout {
             root.requestAutosave()
         }
     }
+
+    Timer {
+        id: editorReadyProbeTimer
+        interval: 120
+        repeat: true
+        property int attempts: 0
+        onTriggered: {
+            attempts += 1
+            webView.runJavaScript(
+                "(function(){ return !!(window.editorAPI && window.editorAPI.setContent); })();",
+                function(result) {
+                    if (!!result) {
+                        root._editorReady = true
+                        attempts = 0
+                        stop()
+                        setContentTimer.restart()
+                        syncEditorMode()
+                        console.log("[WebNoteEditor] editor ready confirmed (probe)")
+                    } else if (attempts >= 30) {
+                        stop()
+                        console.log("[WebNoteEditor] editor ready probe timeout")
+                    }
+                }
+            )
+        }
+    }
     
     // File dialog for selecting local images
     FileDialog {
@@ -115,9 +141,25 @@ ColumnLayout {
             
             // Inject content when loaded
             onLoadProgressChanged: {
+                if (loadProgress < 100) {
+                    root._editorReady = false
+                }
                 if (loadProgress === 100) {
-                    setContentTimer.start()
-                    syncEditorMode()
+                    webView.runJavaScript(
+                        "(function(){ return !!(window.editorAPI && window.editorAPI.setContent); })();",
+                        function(result) {
+                            root._editorReady = !!result
+                            if (root._editorReady) {
+                                setContentTimer.start()
+                                syncEditorMode()
+                                console.log("[WebNoteEditor] editor ready confirmed (load)")
+                            } else {
+                                editorReadyProbeTimer.attempts = 0
+                                editorReadyProbeTimer.restart()
+                                console.log("[WebNoteEditor] editor not ready at load; probing")
+                            }
+                        }
+                    )
                 }
             }
 

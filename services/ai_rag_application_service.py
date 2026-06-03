@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable
 
 from services.ai_index_database import AiIndexDatabase
 from services.ai_document_index_repository import AiDocumentIndexRepository
@@ -10,7 +10,7 @@ from services.ai_rag_prompt_builder import AiRagPromptBuilder
 from services.ai_rag_service import AiRagService, RagQueryOptions
 from services.ai_llm_client import LlmClient, LlmGenerateOptions, LlmGenerateResult
 from services.ollama_llm_client import OllamaLlmClient
-from services.document_chunk_model import IndexedDocument
+from services.document_chunk_model import IndexedDocument, IndexedDocumentSummary
 from services.ai_search_service import SearchResultChunk
 from services.ai_rag_service import RagAnswer, RagCitation
 from packages.ollama_plugin.ai_settings import AISettingsManager
@@ -38,6 +38,9 @@ class FakeLlmClient(LlmClient):
         self, payload, options: LlmGenerateOptions | None = None
     ) -> LlmGenerateResult:
         return self.generate(payload.system_prompt, payload.user_prompt, options)
+
+
+ProgressCallback = Callable[[str, str, int, int], None]
 
 
 class AiRagApplicationService:
@@ -113,6 +116,14 @@ class AiRagApplicationService:
         self._repo.clear_all()
         self._last_answer = None
 
+    def remove_document(self, document_id: str) -> bool:
+        self._ensure_initialized()
+        try:
+            self._repo.delete_document(document_id)
+            return True
+        except Exception:
+            return False
+
     def index_current_note(
         self,
         note_id: str,
@@ -121,9 +132,10 @@ class AiRagApplicationService:
         tags: list[str] | None = None,
         created_at: str | None = None,
         updated_at: str | None = None,
+        progress_callback: ProgressCallback | None = None,
     ) -> IndexedDocument:
         self._ensure_initialized()
-        return self._index_service.index_note_content(
+        result = self._index_service.index_note_content(
             note_id=note_id,
             title=title,
             content=content,
@@ -131,6 +143,8 @@ class AiRagApplicationService:
             created_at=created_at,
             updated_at=updated_at,
         )
+        self._notify_progress(progress_callback, "note", title or note_id or "", 1, 1)
+        return result
 
     def index_markdown_file(self, path: str | Path) -> IndexedDocument:
         self._ensure_initialized()
@@ -144,9 +158,25 @@ class AiRagApplicationService:
         self._ensure_initialized()
         return self._index_service.index_hwp_file(path)
 
+    def _notify_progress(
+        self,
+        callback: ProgressCallback | None,
+        kind: str,
+        label: str,
+        current: int,
+        total: int,
+    ) -> None:
+        if not callback:
+            return
+        try:
+            callback(kind, label, current, total)
+        except Exception:
+            pass
+
     def index_external_files(
         self,
         file_paths: list[str | Path],
+        progress_callback: ProgressCallback | None = None,
     ) -> dict:
         self._ensure_initialized()
 
@@ -154,8 +184,13 @@ class AiRagApplicationService:
         failed_count = 0
         warnings: list[str] = []
         document_ids: list[str] = []
+        total = len(file_paths)
+        processed = 0
 
         for path in file_paths:
+            processed += 1
+            label = Path(path).name or str(path)
+            self._notify_progress(progress_callback, "file", label, processed, total or processed)
             try:
                 path_obj = Path(path)
                 ext = path_obj.suffix.lower()
@@ -186,7 +221,19 @@ class AiRagApplicationService:
             "document_ids": document_ids,
         }
 
-    def index_external_folder(self, folder_path: str | Path) -> dict:
+    def list_indexed_documents(
+        self,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> tuple[list[IndexedDocumentSummary], int]:
+        self._ensure_initialized()
+        return self._repo.list_document_summaries(limit=limit, offset=offset)
+
+    def index_external_folder(
+        self,
+        folder_path: str | Path,
+        progress_callback: ProgressCallback | None = None,
+    ) -> dict:
         self._ensure_initialized()
 
         folder = Path(folder_path)
@@ -213,7 +260,7 @@ class AiRagApplicationService:
                 "document_ids": [],
             }
 
-        return self.index_external_files(file_paths)
+        return self.index_external_files(file_paths, progress_callback=progress_callback)
 
     def search_index(self, query: str, limit: int = 20, offset: int = 0) -> list[SearchResultChunk]:
         self._ensure_initialized()
@@ -245,6 +292,7 @@ class AiRagApplicationService:
         self,
         note_items: list[dict],
         scope_label: str = "manual",
+        progress_callback: ProgressCallback | None = None,
     ) -> dict:
         self._ensure_initialized()
 
@@ -252,8 +300,19 @@ class AiRagApplicationService:
         failed_count = 0
         warnings: list[str] = []
         document_ids: list[str] = []
+        total_items = len(note_items)
+        processed = 0
 
         for item in note_items:
+            processed += 1
+            label = (
+                item.get("title")
+                or item.get("source_path")
+                or item.get("note_id")
+                or item.get("id")
+                or ""
+            )
+            self._notify_progress(progress_callback, "note", label, processed, total_items or processed)
             try:
                 note_id = item.get("note_id") or item.get("id")
                 if not note_id:

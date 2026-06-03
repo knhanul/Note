@@ -263,7 +263,7 @@ class PromptService:
     def list_prompt_documents(self, include_archived: bool = False) -> list[dict[str, Any]]:
         docs = self._repo.list_prompt_documents(include_archived=include_archived)
         docs = [doc for doc in docs if doc.get("prompt_doc_id") != "_schema_meta"]
-        return [self._document_to_summary(doc) for doc in docs]
+        return [self._document_to_summary(doc, include_content=True) for doc in docs]
 
     def get_prompt_document(self, prompt_doc_id: str) -> dict[str, Any] | None:
         doc = self._repo.get_prompt_document(prompt_doc_id)
@@ -406,6 +406,15 @@ class PromptService:
         if int(current.get("readonly", 0)) and archived:
             return False
         self._repo.archive_prompt_document(prompt_doc_id, archived=archived)
+        return True
+
+    def delete_prompt_document(self, prompt_doc_id: str) -> bool:
+        current = self._repo.get_prompt_document(prompt_doc_id)
+        if not current:
+            return False
+        if int(current.get("readonly", 0)):
+            return False
+        self._repo.delete_prompt_document(prompt_doc_id)
         return True
 
     def validate_prompt_for_action(self, action_id: str, prompt_doc_id: str) -> dict[str, Any]:

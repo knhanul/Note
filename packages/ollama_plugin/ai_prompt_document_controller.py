@@ -258,6 +258,44 @@ class AIPromptDocumentController(QObject):
             self.errorOccurred.emit(f"프롬프트 삭제 중 오류가 발생했습니다: {e}")
             return False
 
+    @pyqtSlot(str, result=bool)
+    def deletePromptDocument(self, prompt_doc_id: str) -> bool:
+        """Permanently delete a prompt document."""
+        if not prompt_doc_id:
+            logger.warning("[AIPromptDocumentController] deletePromptDocument: no prompt_doc_id")
+            return False
+
+        doc = self._prompt_service.get_prompt_document(prompt_doc_id)
+        if not doc:
+            logger.warning(f"[AIPromptDocumentController] deletePromptDocument: document not found: {prompt_doc_id}")
+            return False
+
+        if doc.get("source_type") == "default" or int(doc.get("readonly", 0)):
+            logger.warning(f"[AIPromptDocumentController] deletePromptDocument: cannot delete default or readonly: {prompt_doc_id}")
+            self.errorOccurred.emit("기본 프롬프트는 삭제할 수 없습니다.")
+            return False
+
+        try:
+            success = self._prompt_service.delete_prompt_document(prompt_doc_id)
+            if success:
+                logger.info(f"[AIPromptDocumentController] Permanently deleted prompt document: {prompt_doc_id}")
+                self.loadPromptDocuments()
+                self.infoMessage.emit("프롬프트가 삭제되었습니다.")
+                if self._selected_prompt_doc_id == prompt_doc_id:
+                    self._selected_prompt_doc_id = ""
+                    self._current_prompt_document = None
+                    self.selectedPromptDocIdChanged.emit()
+                    self.currentPromptDocumentChanged.emit()
+                return True
+            else:
+                logger.error(f"[AIPromptDocumentController] Failed to delete prompt document: {prompt_doc_id}")
+                self.errorOccurred.emit("프롬프트 삭제에 실패했습니다.")
+                return False
+        except Exception as e:
+            logger.error(f"[AIPromptDocumentController] Error deleting prompt document: {e}")
+            self.errorOccurred.emit(f"프롬프트 삭제 중 오류가 발생했습니다: {e}")
+            return False
+
     @pyqtSlot(str, result=int)
     def countBindingsForPrompt(self, prompt_doc_id: str) -> int:
         """Count how many AI actions are bound to this prompt."""

@@ -144,7 +144,7 @@ class PromptService:
 
     def validate_prompt_content(self, prompt_id: str, content_md: str) -> dict[str, Any]:
         details = self.get_prompt_details(prompt_id) or {}
-        known_vars = set(details.get("variables", [])) | {"CONTENT", "SELECTION", "QUESTION", "TITLE", "TAGS", "CONTEXT"}
+        known_vars = set(details.get("variables", [])) | {"CONTENT", "SELECTION", "QUESTION", "TITLE", "TAGS", "CONTEXT", "USER_INPUT"}
         found_vars = set(self._extract_variables(content_md))
         unknown_vars = sorted(found_vars - known_vars)
         missing_required = sorted(self._required_variables_for_prompt(prompt_id) - found_vars)
@@ -199,7 +199,7 @@ class PromptService:
     def _required_variables_for_prompt(self, prompt_id: str) -> set[str]:
         prompt_id = prompt_id or ""
         if prompt_id == "current_note_qa":
-            return {"QUESTION"}
+            return {"USER_INPUT"}
         if prompt_id == "summarize_note":
             return {"CONTENT"}
         if prompt_id == "polish_selection":

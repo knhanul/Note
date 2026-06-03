@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Controls
 import theme
 
 Item {
@@ -18,6 +19,7 @@ Item {
     property bool isPinned: false
     property bool showPinButton: true
     property bool showDeleteButton: true
+    property string folderPath: ""
 
     signal clicked()
     signal selectionClicked()
@@ -26,6 +28,7 @@ Item {
 
     height: 56
     Layout.fillWidth: true
+    focus: root.isSelected
 
     GlassCard {
         id: card
@@ -122,6 +125,10 @@ Item {
         onEntered: root.isHovered = true
         onExited: root.isHovered = false
         onClicked: root.clicked()
+        ToolTip.visible: root.folderPath !== "" && (containsMouse || root.isSelected)
+        ToolTip.delay: 0
+        ToolTip.timeout: 2500
+        ToolTip.text: root.folderPath
     }
 
     // Delete button - visible on hover, left of star

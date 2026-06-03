@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timezone
 
 from services.ai_index_database import AiIndexDatabase
-from services.document_chunk_model import DocumentChunk, IndexedDocument
+from services.document_chunk_model import DocumentChunk, IndexedDocument, IndexedDocumentSummary
 
 
 class AiDocumentIndexRepository:
@@ -134,6 +134,63 @@ class AiDocumentIndexRepository:
             )
             for row in rows
         ]
+
+    def list_document_summaries(
+        self,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> tuple[list[IndexedDocumentSummary], int]:
+        conn = self._db.get_connection()
+        total = conn.execute("SELECT COUNT(*) AS cnt FROM ai_documents").fetchone()["cnt"]
+
+        query = (
+            """
+            SELECT d.document_id, d.source_type, d.source_path, d.note_id, d.title,
+                   d.created_at, d.updated_at,
+                   COUNT(c.chunk_id) AS chunk_count
+            FROM ai_documents d
+            LEFT JOIN ai_document_chunks c ON c.document_id = d.document_id
+            GROUP BY d.document_id
+            ORDER BY d.indexed_at DESC, d.document_id ASC
+            LIMIT ? OFFSET ?
+            """
+            if limit is not None
+            else
+            """
+            SELECT d.document_id, d.source_type, d.source_path, d.note_id, d.title,
+                   d.created_at, d.updated_at,
+                   COUNT(c.chunk_id) AS chunk_count
+            FROM ai_documents d
+            LEFT JOIN ai_document_chunks c ON c.document_id = d.document_id
+            GROUP BY d.document_id
+            ORDER BY d.indexed_at DESC, d.document_id ASC
+            OFFSET ?
+            """
+        )
+
+        params: tuple[int, ...]
+        if limit is not None:
+            params = (limit, offset)
+        else:
+            params = (offset,)
+
+        rows = conn.execute(query, params).fetchall()
+
+        summaries = [
+            IndexedDocumentSummary(
+                document_id=row["document_id"],
+                source_type=row["source_type"],
+                source_path=row["source_path"],
+                note_id=row["note_id"],
+                title=row["title"],
+                chunk_count=row["chunk_count"] or 0,
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
+
+        return summaries, total
 
     def get_chunks(self, document_id: str) -> list[DocumentChunk]:
         conn = self._db.get_connection()

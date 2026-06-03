@@ -31,3 +31,15 @@ class IndexedDocument:
     warnings: list[str] = field(default_factory=list)
     created_at: str | None = None
     updated_at: str | None = None
+
+
+@dataclass
+class IndexedDocumentSummary:
+    document_id: str
+    source_type: str
+    source_path: str | None
+    note_id: str | None
+    title: str | None
+    chunk_count: int
+    created_at: str | None = None
+    updated_at: str | None = None

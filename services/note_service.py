@@ -26,7 +26,8 @@ class NoteService:
     def get_all(self, folder_id: Optional[str] = None,
                 include_deleted: bool = False,
                 tag: Optional[str] = None,
-                offset: int = 0, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+                offset: int = 0, limit: Optional[int] = None,
+                exclude_folder_ids: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         """Get all notes, optionally filtered by folder and/or tag with pagination."""
         query = "SELECT * FROM notes WHERE 1=1"
         params = []
@@ -34,6 +35,11 @@ class NoteService:
         if folder_id:
             query += " AND folder_id = ?"
             params.append(folder_id)
+
+        if exclude_folder_ids:
+            placeholders = ",".join(["?"] * len(exclude_folder_ids))
+            query += f" AND folder_id NOT IN ({placeholders})"
+            params.extend(exclude_folder_ids)
         
         if not include_deleted:
             query += " AND deleted_at IS NULL"
