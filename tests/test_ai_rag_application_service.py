@@ -3,6 +3,7 @@ import tempfile
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, Optional
+from unittest.mock import MagicMock, patch
 
 from services.ai_rag_application_service import AiRagApplicationService, FakeLlmClient
 from services.ai_llm_client import LlmClient, LlmGenerateOptions, LlmGenerateResult
@@ -180,6 +181,37 @@ class AiRagApplicationServiceTest(unittest.TestCase):
                 self.assertTrue(result.document_id.startswith("file:markdown_file:"))
             finally:
                 Path(path).unlink()
+        finally:
+            svc.close()
+
+    def test_index_external_files_supports_text_html_docx(self):
+        llm = TestLlmClient("답변")
+        svc = AiRagApplicationService(db_path=":memory:", llm_client=llm)
+        svc.initialize()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_path = Path(tmp)
+                txt_path = tmp_path / "notes.txt"
+                html_path = tmp_path / "page.html"
+                docx_path = tmp_path / "report.docx"
+                txt_path.write_text("plain text", encoding="utf-8")
+                html_path.write_text("<html><body>body</body></html>", encoding="utf-8")
+                docx_path.write_bytes(b"fake-docx")
+
+                def make_doc(document_id: str):
+                    return MagicMock(document_id=document_id)
+
+                with patch.object(svc._index_service, "index_text_file", return_value=make_doc("text-id")) as mock_text, \
+                     patch.object(svc._index_service, "index_html_file", return_value=make_doc("html-id")) as mock_html, \
+                     patch.object(svc._index_service, "index_docx_file", return_value=make_doc("docx-id")) as mock_docx:
+                    result = svc.index_external_files([txt_path, html_path, docx_path])
+
+                self.assertEqual(result["indexed_count"], 3)
+                self.assertEqual(result["failed_count"], 0)
+                self.assertEqual(result["document_ids"], ["text-id", "html-id", "docx-id"])
+                mock_text.assert_called_once()
+                mock_html.assert_called_once()
+                mock_docx.assert_called_once()
         finally:
             svc.close()
 

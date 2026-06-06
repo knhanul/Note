@@ -199,6 +199,18 @@ class AiRagApplicationService:
                     doc = self._index_service.index_markdown_file(path)
                     indexed_count += 1
                     document_ids.append(doc.document_id)
+                elif ext in (".txt",):
+                    doc = self._index_service.index_text_file(path)
+                    indexed_count += 1
+                    document_ids.append(doc.document_id)
+                elif ext in (".html", ".htm"):
+                    doc = self._index_service.index_html_file(path)
+                    indexed_count += 1
+                    document_ids.append(doc.document_id)
+                elif ext == ".docx":
+                    doc = self._index_service.index_docx_file(path)
+                    indexed_count += 1
+                    document_ids.append(doc.document_id)
                 elif ext == ".hwpx":
                     doc = self._index_service.index_hwpx_file(path)
                     indexed_count += 1
@@ -245,7 +257,7 @@ class AiRagApplicationService:
                 "document_ids": [],
             }
 
-        supported_extensions = {".md", ".markdown", ".hwpx", ".hwp"}
+        supported_extensions = {".md", ".markdown", ".txt", ".html", ".htm", ".docx", ".hwpx", ".hwp"}
         file_paths = []
 
         for path in folder.rglob("*"):

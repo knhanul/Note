@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from services.ai_document_index_repository import AiDocumentIndexRepository
 from services.ai_index_database import AiIndexDatabase
@@ -72,6 +73,56 @@ class AiDocumentIndexServiceTest(unittest.TestCase):
                 self.assertEqual(indexed.source_type, "markdown_file")
                 self.assertIn("test.md", indexed.source_path or "")
 
+                chunks = service._repo.get_chunks(indexed.document_id)
+                self.assertGreater(len(chunks), 0)
+        finally:
+            db.close()
+
+    def test_index_text_file(self):
+        service, db = self._make_service()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                txt_path = Path(tmp) / "notes.txt"
+                txt_path.write_text("Plain text content", encoding="utf-8")
+
+                indexed = service.index_text_file(txt_path)
+
+                self.assertEqual(indexed.source_type, "text_file")
+                self.assertIn("notes.txt", indexed.source_path or "")
+                chunks = service._repo.get_chunks(indexed.document_id)
+                self.assertGreater(len(chunks), 0)
+        finally:
+            db.close()
+
+    def test_index_html_file(self):
+        service, db = self._make_service()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                html_path = Path(tmp) / "page.html"
+                html_path.write_text("<html><body><h1>Title</h1><p>Body</p></body></html>", encoding="utf-8")
+
+                indexed = service.index_html_file(html_path)
+
+                self.assertEqual(indexed.source_type, "html_file")
+                self.assertIn("page.html", indexed.source_path or "")
+                chunks = service._repo.get_chunks(indexed.document_id)
+                self.assertGreater(len(chunks), 0)
+        finally:
+            db.close()
+
+    def test_index_docx_file_uses_docx_converter(self):
+        service, db = self._make_service()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                docx_path = Path(tmp) / "report.docx"
+                docx_path.write_bytes(b"fake-docx")
+
+                with patch("services.ai_document_index_service.FolderImportService._docx_to_markdown", return_value="# Docx\n\nBody") as mocked:
+                    indexed = service.index_docx_file(docx_path)
+
+                mocked.assert_called_once()
+                self.assertEqual(indexed.source_type, "docx_file")
+                self.assertIn("report.docx", indexed.source_path or "")
                 chunks = service._repo.get_chunks(indexed.document_id)
                 self.assertGreater(len(chunks), 0)
         finally:

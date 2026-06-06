@@ -1,8 +1,11 @@
 """Assistant controller for AI operations."""
 
+import json
 import logging
 from pathlib import Path
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot, pyqtProperty
+
+from packages.import_export import convert_hwp_to_markdown_text, convert_hwpx_to_markdown_text, load_markdown_document
 
 from .action_registry import ActionRegistry
 from .ai_settings import AISettingsManager
@@ -11,11 +14,14 @@ from .ai_prompt_service import PromptService
 from .prompt_renderer import PromptRenderer
 from .simple_chunker import SimpleChunker
 from .simple_retriever import SimpleRetriever
+from services.folder_import_service import FolderImportService
 
 logger = logging.getLogger(__name__)
 
 MAX_CONTENT_LENGTH = 4000
 MAX_OUTPUT_LENGTH = 500
+MAX_EXTERNAL_FOLDER_FILES = 30
+MAX_EXTERNAL_FOLDER_CONTENT_LENGTH = 50000
 RESPONSE_LENGTH_TO_NUM_PREDICT = {
     "short": 512,
     "medium": 1024,
@@ -390,6 +396,184 @@ class AssistantController(QObject):
 
         self._last_query = question
         self.runTask("current_note_qa", content)
+
+    @pyqtSlot(str, result=str)
+    def loadExternalDocumentJson(self, file_path: str) -> str:
+        """Load a single external document and return normalized content as JSON."""
+        if not file_path or not str(file_path).strip():
+            return json.dumps({"ok": False, "error": "파일 경로가 비어 있습니다."}, ensure_ascii=False)
+
+        path = Path(file_path).expanduser()
+        try:
+            path = path.resolve()
+        except Exception:
+            path = path.absolute()
+
+        if not path.exists() or not path.is_file():
+            return json.dumps({"ok": False, "error": "파일을 찾을 수 없습니다.", "source_path": str(path)}, ensure_ascii=False)
+
+        ext = path.suffix.lower()
+        title = path.stem
+        content = ""
+        warnings: list[str] = []
+        source_type = "external_file"
+
+        try:
+            if ext in (".md", ".markdown"):
+                doc, asset_warnings = load_markdown_document(str(path))
+                title = doc.metadata.title or title
+                content = doc.body_markdown or ""
+                warnings.extend(asset_warnings)
+                warnings.extend(doc.warnings or [])
+                source_type = "markdown"
+            elif ext == ".txt":
+                content = FolderImportService._read_text(path)
+                source_type = "text"
+            elif ext in (".html", ".htm"):
+                raw_html = FolderImportService._read_text(path)
+                content = FolderImportService._html_to_markdown(raw_html)
+                source_type = "html"
+            elif ext == ".docx":
+                content = FolderImportService._docx_to_markdown(path)
+                source_type = "docx"
+                if not content.strip():
+                    warnings.append("DOCX 변환 결과가 비어 있습니다.")
+            elif ext == ".hwpx":
+                content, hwpx_warnings = convert_hwpx_to_markdown_text(str(path))
+                warnings.extend(hwpx_warnings)
+                source_type = "hwpx"
+            elif ext == ".hwp":
+                content, hwp_warnings = convert_hwp_to_markdown_text(str(path))
+                warnings.extend(hwp_warnings)
+                source_type = "hwp"
+            else:
+                return json.dumps(
+                    {
+                        "ok": False,
+                        "error": f"지원하지 않는 파일 형식입니다: {ext or '(확장자 없음)'}",
+                        "source_path": str(path),
+                    },
+                    ensure_ascii=False,
+                )
+        except Exception as e:
+            logger.error(f"[AssistantController] Failed to load external document: {e}")
+            warnings.append(str(e))
+            content = ""
+
+        content = content or ""
+        result = {
+            "ok": bool(content.strip()),
+            "title": title,
+            "content": content,
+            "source_path": str(path),
+            "source_type": source_type,
+            "file_extension": ext,
+            "warnings": warnings,
+        }
+        if not result["ok"] and "error" not in result:
+            result["error"] = "문서 내용을 읽지 못했습니다."
+        return json.dumps(result, ensure_ascii=False)
+
+    @pyqtSlot(str, result=str)
+    def loadExternalFolderJson(self, folder_path: str) -> str:
+        """Load supported documents from a folder and return merged markdown JSON."""
+        if not folder_path or not str(folder_path).strip():
+            return json.dumps({"ok": False, "error": "폴더 경로가 비어 있습니다."}, ensure_ascii=False)
+
+        folder = Path(folder_path).expanduser()
+        try:
+            folder = folder.resolve()
+        except Exception:
+            folder = folder.absolute()
+
+        if not folder.exists() or not folder.is_dir():
+            return json.dumps({"ok": False, "error": "폴더를 찾을 수 없습니다.", "source_path": str(folder)}, ensure_ascii=False)
+
+        supported_extensions = {".md", ".markdown", ".txt", ".html", ".htm", ".docx", ".hwp", ".hwpx"}
+        file_paths = [p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() in supported_extensions]
+        file_paths.sort(key=lambda p: str(p).lower())
+        total_supported_count = len(file_paths)
+
+        warnings: list[str] = []
+        failed_files: list[dict[str, str]] = []
+        if not file_paths:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": "지원되는 문서 파일이 없습니다.",
+                    "source_path": str(folder),
+                    "source_type": "external_folder",
+                    "failed_count": 0,
+                    "warnings": warnings,
+                    "failed_files": failed_files,
+                },
+                ensure_ascii=False,
+            )
+
+        if len(file_paths) > MAX_EXTERNAL_FOLDER_FILES:
+            warnings.append(f"폴더 내 파일이 많아 상위 {MAX_EXTERNAL_FOLDER_FILES}개만 사용합니다.")
+            file_paths = file_paths[:MAX_EXTERNAL_FOLDER_FILES]
+        selected_count = len(file_paths)
+
+        merged_parts: list[str] = []
+        processed_count = 0
+
+        for file_path in file_paths:
+            payload = json.loads(self.loadExternalDocumentJson(str(file_path)))
+            if not payload.get("ok"):
+                error_text = payload.get("error", "알 수 없는 오류")
+                warnings.append(f"파일 로드 실패: {file_path.name} - {error_text}")
+                failed_files.append(
+                    {
+                        "path": str(file_path.relative_to(folder)).replace("\\", "/"),
+                        "error": str(error_text),
+                    }
+                )
+                continue
+
+            content = (payload.get("content") or "").strip()
+            if not content:
+                warnings.append(f"파일 내용 비어 있음: {file_path.name}")
+                failed_files.append(
+                    {
+                        "path": str(file_path.relative_to(folder)).replace("\\", "/"),
+                        "error": "파일 내용 비어 있음",
+                    }
+                )
+                continue
+
+            source_name = str(file_path.relative_to(folder)).replace("\\", "/")
+            merged_parts.append(f"## {source_name}\n\n{content}")
+            processed_count += 1
+            warnings.extend(payload.get("warnings") or [])
+
+        merged_content = "\n\n---\n\n".join(merged_parts).strip()
+        content_truncated = False
+        if len(merged_content) > MAX_EXTERNAL_FOLDER_CONTENT_LENGTH:
+            merged_content = merged_content[:MAX_EXTERNAL_FOLDER_CONTENT_LENGTH]
+            content_truncated = True
+            warnings.append(
+                f"입력 길이를 줄이기 위해 폴더 내용을 {MAX_EXTERNAL_FOLDER_CONTENT_LENGTH}자까지 사용합니다."
+            )
+
+        result = {
+            "ok": bool(merged_content),
+            "title": folder.name,
+            "content": merged_content,
+            "source_path": str(folder),
+            "source_type": "external_folder",
+            "file_count": selected_count,
+            "selected_count": selected_count,
+            "total_supported_count": total_supported_count,
+            "processed_count": processed_count,
+            "failed_count": len(failed_files),
+            "content_truncated": content_truncated,
+            "warnings": warnings,
+            "failed_files": failed_files,
+        }
+        if not result["ok"]:
+            result["error"] = "폴더에서 읽을 수 있는 문서 내용을 찾지 못했습니다."
+        return json.dumps(result, ensure_ascii=False)
 
     @pyqtProperty(str)
     def retrievedContext(self) -> str:

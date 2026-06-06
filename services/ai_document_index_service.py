@@ -4,6 +4,7 @@ from typing import Optional
 
 from services.ai_document_index_repository import AiDocumentIndexRepository
 from services.document_chunker import build_indexed_document, chunk_markdown_document
+from services.folder_import_service import FolderImportService
 from services.markdown_document_model import MarkdownDocument, MarkdownMetadata
 
 
@@ -88,6 +89,79 @@ class AiDocumentIndexService:
             note_id=None,
         )
 
+    def index_text_file(
+        self,
+        file_path: str | Path,
+        document_id: Optional[str] = None,
+    ) -> "IndexedDocument":
+        path = Path(file_path).resolve()
+        content = self._read_text_with_fallback(path)
+
+        if document_id is None:
+            document_id = _make_file_document_id("text_file", path)
+
+        document = MarkdownDocument(
+            metadata=MarkdownMetadata(title=path.stem),
+            body_markdown=content,
+            source_path=str(path),
+        )
+        return self.index_markdown_document(
+            document=document,
+            document_id=document_id,
+            source_type="text_file",
+            source_path=str(path),
+            note_id=None,
+        )
+
+    def index_html_file(
+        self,
+        file_path: str | Path,
+        document_id: Optional[str] = None,
+    ) -> "IndexedDocument":
+        path = Path(file_path).resolve()
+        raw_html = self._read_text_with_fallback(path)
+        markdown_text = FolderImportService._html_to_markdown(raw_html)
+
+        if document_id is None:
+            document_id = _make_file_document_id("html_file", path)
+
+        document = MarkdownDocument(
+            metadata=MarkdownMetadata(title=path.stem),
+            body_markdown=markdown_text,
+            source_path=str(path),
+        )
+        return self.index_markdown_document(
+            document=document,
+            document_id=document_id,
+            source_type="html_file",
+            source_path=str(path),
+            note_id=None,
+        )
+
+    def index_docx_file(
+        self,
+        file_path: str | Path,
+        document_id: Optional[str] = None,
+    ) -> "IndexedDocument":
+        path = Path(file_path).resolve()
+        markdown_text = FolderImportService._docx_to_markdown(path)
+
+        if document_id is None:
+            document_id = _make_file_document_id("docx_file", path)
+
+        document = MarkdownDocument(
+            metadata=MarkdownMetadata(title=path.stem),
+            body_markdown=markdown_text,
+            source_path=str(path),
+        )
+        return self.index_markdown_document(
+            document=document,
+            document_id=document_id,
+            source_type="docx_file",
+            source_path=str(path),
+            note_id=None,
+        )
+
     def index_hwpx_file(
         self,
         file_path: str | Path,
@@ -138,6 +212,15 @@ class AiDocumentIndexService:
             source_path=str(path),
             note_id=None,
         )
+
+    @staticmethod
+    def _read_text_with_fallback(path: Path) -> str:
+        for encoding in ("utf-8", "utf-8-sig", "cp949", "euc-kr", "latin-1"):
+            try:
+                return path.read_text(encoding=encoding)
+            except Exception:
+                continue
+        return ""
 
 
 def _make_note_document_id(note_id: str) -> str:
