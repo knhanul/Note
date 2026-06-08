@@ -1,16 +1,38 @@
-"""Seed service for bootstrapping AI prompts and actions into SQLite."""
+"""Seed service for bootstrapping AI prompts and actions into SQLite.
+
+.. deprecated::
+    This module is part of the legacy prompt management path.
+
+    Current standard path:
+    - ai_prompt_seed_service.py (PromptSeedService)
+
+    New code should NOT use this module. Use the ai_prompt_seed_service instead.
+
+    Deletion will be performed in a separate step after confirming no external
+    repository dependencies exist. Until then, this module remains for
+    compatibility only.
+"""
 
 from __future__ import annotations
 
 import hashlib
 import json
 import logging
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
 from .prompt_repository import PromptRepository
 
 logger = logging.getLogger(__name__)
+
+# Emit deprecation warning once when module is imported
+warnings.warn(
+    "[LegacyPrompt] prompt_seed_service.py is deprecated. "
+    "Use ai_prompt_seed_service.py instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 
 @dataclass(frozen=True)
@@ -24,7 +46,11 @@ class SeedPromptSpec:
 
 
 class PromptSeedService:
-    """Seeds default prompts and built-in actions into the prompt database."""
+    """Seeds default prompts and built-in actions into the prompt database.
+
+    Deprecated: do not use in new code. Use PromptSeedService from ai_prompt_seed_service.py.
+    """
+    # Deprecated: do not use in new code. Use PromptSeedService from ai_prompt_seed_service.py.
 
     DB_FILENAME = "ai_prompts.db"
     DB_VERSION = "1"

@@ -1,9 +1,23 @@
-"""Qt-facing prompt controller for QML prompt management UI."""
+"""Qt-facing prompt controller for QML prompt management UI.
+
+.. deprecated::
+    This module is part of the legacy prompt management path.
+
+    Current standard path:
+    - ai_prompt_controller.py (PromptController)
+
+    New code should NOT use this module. Use the ai_prompt_controller instead.
+
+    Deletion will be performed in a separate step after confirming no external
+    repository dependencies exist. Until then, this module remains for
+    compatibility only.
+"""
 
 from __future__ import annotations
 
 import json
 import logging
+import warnings
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, pyqtProperty, pyqtSignal, pyqtSlot
@@ -12,9 +26,21 @@ from .prompt_service import PromptService
 
 logger = logging.getLogger(__name__)
 
+# Emit deprecation warning once when module is imported
+warnings.warn(
+    "[LegacyPrompt] prompt_controller.py is deprecated. "
+    "Use ai_prompt_controller.py instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 
 class PromptController(QObject):
-    """Expose AI prompt data and editing actions to QML."""
+    """Expose AI prompt data and editing actions to QML.
+
+    Deprecated: do not use in new code. Use PromptController from ai_prompt_controller.py.
+    """
+    # Deprecated: do not use in new code. Use PromptController from ai_prompt_controller.py.
 
     promptsChanged = pyqtSignal()
     currentPromptChanged = pyqtSignal()

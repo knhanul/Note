@@ -720,6 +720,9 @@ class NoteController(QObject):
             if self._current_note_id == note_id:
                 self._current_note_id = None
             
+            # Remove from loaded notes list
+            self._loaded_notes = [n for n in self._loaded_notes if n.get("id") != note_id]
+            
             self.notesChanged.emit()
             self.filteredNotesChanged.emit()
             self.tagsChanged.emit()
@@ -844,6 +847,10 @@ class NoteController(QObject):
                 self._is_dirty = False
                 self._save_status = "saved"
                 self.saveStatusChanged.emit()
+
+            # Remove from loaded notes list
+            clean_ids_set = set(clean_ids)
+            self._loaded_notes = [n for n in self._loaded_notes if n.get("id") not in clean_ids_set]
 
             self.notesChanged.emit()
             self.filteredNotesChanged.emit()

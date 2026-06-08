@@ -511,6 +511,9 @@ Rectangle {
         if (root.filteredActionList.length > 0) {
 
             root.selectedAction = root.filteredActionList[0]
+            if (root.aiModeIndex === 0 && typeof actionInput !== "undefined") {
+                root.applyExampleInputIfEmpty(root.filteredActionList[0], actionInput)
+            }
 
         } else {
 
@@ -752,7 +755,8 @@ Rectangle {
 
 
 
-    function getInputModePlaceholder(mode) {
+    function getInputModePlaceholder(mode, inputPlaceholder) {
+        if (inputPlaceholder) return inputPlaceholder
 
         if (!mode || mode === "auto") return "선택한 AI 기능을 실행할 내용을 입력하세요."
 
@@ -768,6 +772,20 @@ Rectangle {
 
         return "선택한 AI 기능을 실행할 내용을 입력하세요."
 
+    }
+
+    function applyExampleInputIfEmpty(action, inputField) {
+        if (!action || !inputField) return
+
+        var exampleInput = action.example_input
+        if (!exampleInput) return
+
+        if (inputField.text.trim() === "") {
+            inputField.text = exampleInput
+            console.log("[AIAssistantPanel] Applied example input for action: " + (action.name || action.action_id))
+        } else {
+            console.log("[AIAssistantPanel] Skip example input because user input already exists")
+        }
     }
 
 
@@ -1347,6 +1365,13 @@ Rectangle {
 
 
     function runSelectedAction() {
+
+        // 참고문서 AI 탭에서는 RAG 전용 경로로 실행
+        if (root.aiModeIndex === 1) {
+            console.log("[AIAssistantPanel] Reference AI tab - calling askIndexedDocuments")
+            askIndexedDocuments()
+            return
+        }
 
         var action = root.selectedAction
 
@@ -2209,6 +2234,7 @@ Rectangle {
         prepareRagIndexingProgress([note.title || note.id || "제목 없음"], 1)
 
         root.ragIndexingRunning = true
+        if (typeof window !== "undefined") window.ragIndexingBusy = true
 
 
 
@@ -2246,11 +2272,40 @@ Rectangle {
 
             }
 
+            console.log("[AIAssistantPanel] RAG controller not available")
+
             return
 
         }
 
+        // 참고문서가 색인되어 있는지 확인
+        if (root.ragTargetDocumentsTotalCount === 0) {
 
+            root.ragRunStatus = {
+
+                lastQuestion: questionText || "",
+
+                lastSuccess: false,
+
+                lastElapsedMs: 0,
+
+                lastResourceText: "",
+
+                lastResultNoteId: "",
+
+                lastResultNoteTitle: "",
+
+                lastErrorMessage: "먼저 참고문서를 등록/색인해주세요.",
+
+                lastExecutedAt: new Date().toLocaleTimeString()
+
+            }
+
+            console.log("[AIAssistantPanel] No indexed documents for RAG")
+
+            return
+
+        }
 
         var question = questionText || (root.aiModeIndex === 0 ? actionInput.text : ragActionInput.text) || ""
 
@@ -2326,7 +2381,7 @@ Rectangle {
 
         root.currentStreamingContent = ""
 
-        root.currentStreamingTitle = "RAG 답변: " + question
+        root.currentStreamingTitle = "RAG답변 - " + truncateText(question, 25)
 
         ensureStreamingNote()
 
@@ -2423,6 +2478,7 @@ Rectangle {
         prepareRagIndexingProgress([], 0)
 
         root.ragIndexingRunning = true
+        if (typeof window !== "undefined") window.ragIndexingBusy = true
 
         console.log("[AIAssistantPanel] 참고문서 등록 중...")
 
@@ -2447,6 +2503,7 @@ Rectangle {
         } catch (e) {
 
             root.ragIndexingRunning = false
+            if (typeof window !== "undefined") window.ragIndexingBusy = false
 
             clearRagIndexingProgress()
 
@@ -2509,6 +2566,7 @@ Rectangle {
         prepareRagIndexingProgress([], 0)
 
         root.ragIndexingRunning = true
+        if (typeof window !== "undefined") window.ragIndexingBusy = true
 
         console.log("[AIAssistantPanel] 참고문서 등록 중...")
 
@@ -2529,6 +2587,7 @@ Rectangle {
         } catch (e) {
 
             root.ragIndexingRunning = false
+            if (typeof window !== "undefined") window.ragIndexingBusy = false
 
             clearRagIndexingProgress()
 
@@ -2850,6 +2909,100 @@ Rectangle {
 
 
 
+    function truncateText(text, maxLen) {
+        if (!text || text.length <= maxLen) return text
+        return text.substring(0, maxLen) + "..."
+    }
+
+    function getAiModeLabel() {
+        if (root.aiModeIndex === 1) {
+            return "참고문서 AI"
+        }
+        if (root.currentDocumentSourceMode === "external_file") {
+            if (root.currentExternalDocumentType === "external_folder") {
+                return "현재문서 AI - 외부 폴더"
+            }
+            return "현재문서 AI - 외부 파일"
+        }
+        return "현재문서 AI - 열린 노트"
+    }
+
+    function getInputSourceLabel() {
+        if (root.aiModeIndex === 1) {
+            return "색인된 참고문서"
+        }
+        if (root.currentDocumentSourceMode === "external_file") {
+            if (root.currentExternalDocumentType === "external_folder") {
+                return "외부 폴더"
+            }
+            return "외부 파일"
+        }
+        return "열린 노트"
+    }
+
+    function formatAiResultTitle() {
+        var actionName = root.currentAiRunStatus && root.currentAiRunStatus.lastActionName
+                         ? root.currentAiRunStatus.lastActionName
+                         : ""
+        var question = root.lastAskedQuestion || ""
+        
+        if (root.currentStreamingIsRag || root.aiModeIndex === 1) {
+            var truncated = truncateText(question, 25)
+            return "RAG답변 - " + (truncated || "질문")
+        }
+        
+        if (actionName) {
+            return "AI결과 - " + actionName
+        }
+        return "AI결과"
+    }
+
+    function formatAiResultHeader() {
+        var now = new Date()
+        var dateStr = now.getFullYear() + "." +
+                      String(now.getMonth() + 1).padStart(2, "0") + "." +
+                      String(now.getDate()).padStart(2, "0") + " " +
+                      String(now.getHours()).padStart(2, "0") + ":" +
+                      String(now.getMinutes()).padStart(2, "0")
+        
+        var aiModeLabel = getAiModeLabel()
+        var inputSource = getInputSourceLabel()
+        var actionName = root.currentAiRunStatus && root.currentAiRunStatus.lastActionName
+                         ? root.currentAiRunStatus.lastActionName
+                         : "기본 실행"
+        var question = root.lastAskedQuestion || ""
+        
+        var header = "# AI 결과\n\n"
+        header += "- 실행 시각: " + dateStr + "\n"
+        header += "- 실행 모드: " + aiModeLabel + "\n"
+        header += "- 입력 소스: " + inputSource + "\n"
+        header += "- 실행 기능: " + actionName + "\n"
+        if (question) {
+            header += "- 요청 내용: " + question + "\n"
+        }
+        header += "\n---\n\n## 답변\n\n"
+        return header
+    }
+
+    function formatRagResultHeader() {
+        var now = new Date()
+        var dateStr = now.getFullYear() + "." +
+                      String(now.getMonth() + 1).padStart(2, "0") + "." +
+                      String(now.getDate()).padStart(2, "0") + " " +
+                      String(now.getHours()).padStart(2, "0") + ":" +
+                      String(now.getMinutes()).padStart(2, "0")
+        
+        var question = root.lastAskedQuestion || ""
+        
+        var header = "# RAG 답변\n\n"
+        header += "- 실행 시각: " + dateStr + "\n"
+        header += "- 실행 모드: 참고문서 AI\n"
+        header += "- 입력 소스: 색인된 참고문서\n"
+        header += "- 질문: " + question + "\n"
+        header += "\n---\n\n## 답변\n\n"
+        return header
+    }
+
     function ensureStreamingNote() {
 
         if (root.currentStreamingNoteId !== "") {
@@ -2859,7 +3012,6 @@ Rectangle {
             return root.currentStreamingNoteId
 
         }
-
 
 
         var ac = getAssistantController()
@@ -2873,40 +3025,13 @@ Rectangle {
         }
 
 
-
-        var now = new Date()
-
-        var dateStr = now.getFullYear() + "." +
-
-                      String(now.getMonth() + 1).padStart(2, "0") + "." +
-
-                      String(now.getDate()).padStart(2, "0") + " " +
-
-                      String(now.getHours()).padStart(2, "0") + ":" +
-
-                      String(now.getMinutes()).padStart(2, "0")
-
-
-
-        var aiMode = root.aiModeIndex === 1
-
-            ? "참고문서AI"
-
-            : (root.currentDocumentSourceMode === "external_file"
-
-                ? (root.currentExternalDocumentType === "external_folder" ? "현재문서AI(외부폴더)" : "현재문서AI(외부파일)")
-
-                : "현재문서AI")
-
-        var question = root.lastAskedQuestion || ""
-
-        var title = "AI결과 (" + dateStr + ")"
-
+        var title = formatAiResultTitle()
         
+        var header = root.currentStreamingIsRag ? formatRagResultHeader() : formatAiResultHeader()
 
         root.currentStreamingTitle = title
 
-        root.currentStreamingContent = title + "\n" + aiMode + "\n" + question + "\n"
+        root.currentStreamingContent = header
 
         
 
@@ -2976,21 +3101,9 @@ Rectangle {
 
         } else {
 
-            // If it's a full replacement (like RAG answer), keep the header
-
-            var aiMode = root.aiModeIndex === 1
-
-                ? "참고문서AI"
-
-                : (root.currentDocumentSourceMode === "external_file"
-
-                    ? (root.currentExternalDocumentType === "external_folder" ? "현재문서AI(외부폴더)" : "현재문서AI(외부파일)")
-
-                    : "현재문서AI")
-
-            var question = root.lastAskedQuestion || ""
-
-            root.currentStreamingContent = root.currentStreamingTitle + "\n" + aiMode + "\n" + question + "\n" + newText
+            // Full replacement: keep the header, replace content after ## 답변
+            var header = root.currentStreamingIsRag ? formatRagResultHeader() : formatAiResultHeader()
+            root.currentStreamingContent = header + newText
 
         }
 
@@ -3233,6 +3346,7 @@ Rectangle {
         prepareRagIndexingProgress(buildLabelsFromPaths(paths), paths.length)
 
         root.ragIndexingRunning = true
+        if (typeof window !== "undefined") window.ragIndexingBusy = true
 
         console.log("[AIAssistantPanel] 참고문서 등록 중...")
 
@@ -3309,6 +3423,7 @@ Rectangle {
         prepareRagIndexingProgress([folderPath], 0)
 
         root.ragIndexingRunning = true
+        if (typeof window !== "undefined") window.ragIndexingBusy = true
 
         console.log("[AIAssistantPanel] 참고문서 등록 중...")
 
@@ -4486,7 +4601,12 @@ Rectangle {
 
                                                         hoverEnabled: true
 
-                                                        onClicked: root.selectedAction = modelData
+                                                        onClicked: {
+                                                            root.selectedAction = modelData
+                                                            if (root.aiModeIndex === 0 && typeof actionInput !== "undefined") {
+                                                                root.applyExampleInputIfEmpty(modelData, actionInput)
+                                                            }
+                                                        }
 
                                                     }
 
@@ -4964,7 +5084,7 @@ Rectangle {
 
                                             Layout.preferredHeight: 30
 
-                                            text: "현재 노트 사용"
+                                            text: "열린 노트"
 
                                             enabled: root.currentDocumentSourceMode !== "note" || root.currentExternalDocumentPath !== ""
 
@@ -4976,19 +5096,21 @@ Rectangle {
 
                                                 font.pixelSize: Typography.caption
 
+                                                font.weight: Typography.weightMedium
+
                                                 horizontalAlignment: Text.AlignHCenter
 
                                                 verticalAlignment: Text.AlignVCenter
 
-                                                color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
+                                                color: (parent.enabled && root.currentDocumentSourceMode === "note") ? Colors.white : (parent.enabled ? Colors.textPrimary : Colors.textTertiary)
 
                                             }
 
                                             background: Rectangle {
 
-                                                color: parent.enabled ? Colors.surface : Colors.bgTertiary
+                                                color: parent.enabled ? (root.currentDocumentSourceMode === "note" ? Colors.primary500 : Colors.surface) : Colors.bgTertiary
 
-                                                border.color: Colors.borderLight
+                                                border.color: root.currentDocumentSourceMode === "note" ? Colors.primary500 : Colors.borderLight
 
                                                 radius: Metrics.radiusSm
 
@@ -5010,7 +5132,7 @@ Rectangle {
 
                                             Layout.preferredHeight: 30
 
-                                            text: "외부 파일 불러오기"
+                                            text: "파일 불러오기"
 
                                             enabled: canUseAI() && !root.aiRunning
 
@@ -5022,19 +5144,21 @@ Rectangle {
 
                                                 font.pixelSize: Typography.caption
 
+                                                font.weight: Typography.weightMedium
+
                                                 horizontalAlignment: Text.AlignHCenter
 
                                                 verticalAlignment: Text.AlignVCenter
 
-                                                color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
+                                                color: (parent.enabled && root.currentDocumentSourceMode === "external_file") ? Colors.white : (parent.enabled ? Colors.textPrimary : Colors.textTertiary)
 
                                             }
 
                                             background: Rectangle {
 
-                                                color: parent.enabled ? Colors.surface : Colors.bgTertiary
+                                                color: parent.enabled ? (root.currentDocumentSourceMode === "external_file" ? Colors.primary500 : Colors.surface) : Colors.bgTertiary
 
-                                                border.color: Colors.borderLight
+                                                border.color: root.currentDocumentSourceMode === "external_file" ? Colors.primary500 : Colors.borderLight
 
                                                 radius: Metrics.radiusSm
 
@@ -5043,52 +5167,6 @@ Rectangle {
                                             onClicked: {
 
                                                 currentDocumentFileDialog.open()
-
-                                            }
-
-                                        }
-
-
-
-                                        Button {
-
-                                            Layout.fillWidth: true
-
-                                            Layout.preferredHeight: 30
-
-                                            text: "외부 폴더 불러오기"
-
-                                            enabled: canUseAI() && !root.aiRunning
-
-                                            contentItem: Text {
-
-                                                text: parent.text
-
-                                                font.family: Typography.fontPrimary
-
-                                                font.pixelSize: Typography.caption
-
-                                                horizontalAlignment: Text.AlignHCenter
-
-                                                verticalAlignment: Text.AlignVCenter
-
-                                                color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
-
-                                            }
-
-                                            background: Rectangle {
-
-                                                color: parent.enabled ? Colors.surface : Colors.bgTertiary
-
-                                                border.color: Colors.borderLight
-
-                                                radius: Metrics.radiusSm
-
-                                            }
-
-                                            onClicked: {
-
-                                                currentDocumentFolderDialog.open()
 
                                             }
 
@@ -5113,7 +5191,7 @@ Rectangle {
 
                                 height: 36
 
-                                placeholderText: root.selectedAction ? (root.selectedAction.action_id === "current_note_qa" ? "현재 문서에 대해 질문하세요." : getInputModePlaceholder(root.selectedAction.input_mode)) : "AI 기능을 선택하세요"
+                                placeholderText: root.selectedAction ? (root.selectedAction.action_id === "current_note_qa" ? "현재 문서에 대해 질문하세요." : getInputModePlaceholder(root.selectedAction.input_mode, root.selectedAction.input_placeholder)) : "AI 기능을 선택하세요"
 
                                 font.family: Typography.fontPrimary
 

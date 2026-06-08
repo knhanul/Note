@@ -185,6 +185,9 @@ Rectangle {
         actionFormCategory.currentIndex = 0
         actionFormResponseLength.currentIndex = 1
         actionFormPromptBinding.currentIndex = -1
+        actionFormExampleInput.text = ""
+        actionFormInputPlaceholder.text = ""
+        actionFormEnabled.checked = true
     }
 
     function cancelEdit() {
@@ -237,10 +240,12 @@ Rectangle {
         var inputMode = "auto"
         var useRag = false
         var responseLength = root.selectedResponseLength(actionFormResponseLength)
-        var enabled = true
+        var enabled = actionFormEnabled.checked
         var requiredVars = "[]"
+        var exampleInput = actionFormExampleInput.text.trim()
+        var inputPlaceholder = actionFormInputPlaceholder.text.trim()
 
-        var result = c.create_action(name, actionId, description, category, inputMode, useRag, requiredVars, enabled, responseLength)
+        var result = c.create_action(name, actionId, description, category, inputMode, useRag, requiredVars, enabled, responseLength, exampleInput, inputPlaceholder)
         if (result && result.action_id) {
             var promptDoc = root.selectedPromptFromCombo(actionFormPromptBinding)
             if (promptDoc)
@@ -274,6 +279,10 @@ Rectangle {
         actionFormResponseLength.currentIndex = root.responseLengthIndex(root.currentAction.response_length || "medium")
         actionFormPromptBinding.currentIndex = root.indexOfPromptDocId(root.currentAction.binding_prompt_doc_id || "")
 
+        actionFormExampleInput.text = root.currentAction.example_input || ""
+        actionFormInputPlaceholder.text = root.currentAction.input_placeholder || ""
+        actionFormEnabled.checked = root.currentAction.enabled !== false
+
         // Update prompt preview
         if (actionFormPromptBinding.currentIndex >= 0 && actionFormPromptBinding.currentIndex < root.promptDocumentList.length) {
             var selectedPrompt = root.promptDocumentList[actionFormPromptBinding.currentIndex]
@@ -299,10 +308,12 @@ Rectangle {
         var inputMode = "auto"
         var useRag = false
         var responseLength = root.selectedResponseLength(actionFormResponseLength)
-        var enabled = true
+        var enabled = actionFormEnabled.checked
         var requiredVars = root.currentAction.required_variables_json || "[]"
+        var exampleInput = actionFormExampleInput.text.trim()
+        var inputPlaceholder = actionFormInputPlaceholder.text.trim()
 
-        var result = c.update_action(action.action_id, name, description, category, inputMode, useRag, requiredVars, enabled, responseLength)
+        var result = c.update_action(action.action_id, name, description, category, inputMode, useRag, requiredVars, enabled, responseLength, exampleInput, inputPlaceholder)
         if (result && result.action_id) {
             var promptDoc = root.selectedPromptFromCombo(actionFormPromptBinding)
             if (promptDoc)
@@ -935,6 +946,38 @@ Rectangle {
                                     font.pixelSize: Typography.caption
                                     color: Colors.textTertiary
                                     wrapMode: Text.Wrap
+                                }
+                            }
+
+                            Text { text: "예시 입력"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                            TextField {
+                                id: actionFormExampleInput
+                                Layout.fillWidth: true
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodySmall
+                                selectByMouse: true
+                                placeholderText: "기능 선택 시 입력창에 넣을 수 있는 예시 문장"
+                            }
+
+                            Text { text: "입력창 안내 문구"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                            TextField {
+                                id: actionFormInputPlaceholder
+                                Layout.fillWidth: true
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.bodySmall
+                                selectByMouse: true
+                                placeholderText: "입력창이 비어 있을 때 보여줄 안내 문구"
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+
+                                CheckBox {
+                                    id: actionFormEnabled
+                                    checked: true
+                                    text: "기능 사용 여부"
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: Typography.bodySmall
                                 }
                             }
                         }

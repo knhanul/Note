@@ -67,6 +67,7 @@ Window {
     property bool importStatusError: false
     property bool importBusy: false
     property bool exportBusy: false
+    property bool ragIndexingBusy: false
     property bool importIncludeSubfolders: true
     property int importProgressValue: 0
     property int importProgressTotal: 0
@@ -6539,7 +6540,7 @@ Window {
     // ── Busy Indicator Overlay ───────────────────────────────────────────────
     Rectangle {
         id: busyOverlay
-        visible: window.importBusy || window.exportBusy
+        visible: window.importBusy || window.exportBusy || window.ragIndexingBusy
         anchors.fill: parent
         color: Qt.rgba(0, 0, 0, 0.35)
         z: 20000
@@ -6560,14 +6561,19 @@ Window {
 
                 BusyIndicator {
                     Layout.alignment: Qt.AlignHCenter
-                    running: window.importBusy || window.exportBusy
+                    running: window.importBusy || window.exportBusy || window.ragIndexingBusy
                     implicitWidth: 48
                     implicitHeight: 48
                 }
 
                 Text {
                     Layout.alignment: Qt.AlignHCenter
-                    text: window.importBusy ? "가져오는 중..." : "내보내는 중..."
+                    text: {
+                        if (window.importBusy) return "가져오는 중..."
+                        if (window.exportBusy) return "내보내는 중..."
+                        if (window.ragIndexingBusy) return "참고문서 등록 중..."
+                        return ""
+                    }
                     font.family: Typography.fontPrimary
                     font.pixelSize: Typography.bodySmall
                     color: Colors.textSecondary

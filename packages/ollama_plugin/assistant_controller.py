@@ -56,6 +56,12 @@ class AssistantController(QObject):
         self._note_controller = None
         self._folder_controller = None
         self._app_data_dir = app_data_dir
+        self._legacy_fallback_stats = {
+            "runTask_hits": 0,
+            "listActions_hits": 0,
+            "last_action_id": None,
+            "last_reason": None,
+        }
 
     def set_note_controller(self, controller):
         """Set note controller for creating notes."""
@@ -78,6 +84,23 @@ class AssistantController(QObject):
         top_k = settings.top_k or SimpleRetriever.DEFAULT_TOP_K
         self._retriever.top_k = top_k
         return settings
+
+    def _get_legacy_fallback_stats(self) -> dict:
+        """Get legacy fallback statistics (debug helper, not exposed to QML)."""
+        return {
+            "runTask_hits": self._legacy_fallback_stats["runTask_hits"],
+            "listActions_hits": self._legacy_fallback_stats["listActions_hits"],
+            "last_action_id": self._legacy_fallback_stats["last_action_id"],
+            "last_reason": self._legacy_fallback_stats["last_reason"],
+        }
+
+    def _log_legacy_fallback_summary(self) -> None:
+        """Log cumulative fallback statistics."""
+        logger.info(
+            f"[AssistantController] Legacy fallback summary: "
+            f"runTask_hits={self._legacy_fallback_stats['runTask_hits']}, "
+            f"listActions_hits={self._legacy_fallback_stats['listActions_hits']}"
+        )
 
     def _on_worker_finished(self):
         """Handle worker finished."""
@@ -179,50 +202,70 @@ class AssistantController(QObject):
             self.errorOccurred.emit("현재 노트를 선택한 뒤 실행해주세요.")
             return
 
-        action = self._action_registry.get_action(action_id)
-        if not action:
-            logger.warning(f"[AssistantController] Action not found: {action_id}")
-            self.errorOccurred.emit(f"알 수 없는 작업: {action_id}")
-            return
-
         truncated_content = content[:MAX_CONTENT_LENGTH]
 
-        # Get prompt summary with fallback info for logging
-        summary = self._prompt_service._repo.get_prompt_summary_for_action(action.id)
-        if summary:
-            prompt_doc_id = summary.get("prompt_doc_id", action.id)
-            prompt = summary.get("prompt")
-            fallback_used = summary.get("fallback_used", False)
-            fallback_reason = summary.get("fallback_reason", "")
-        else:
-            prompt_doc_id = action.id
-            prompt = None
-            fallback_used = True
-            fallback_reason = "summary_not_found"
+        # DB-first: try PromptService first, fallback to ActionRegistry
+        db_action = self._prompt_service.get_action(action_id)
+        action = None
+        fallback_used = False
+        fallback_reason = "none"
 
-        # Log runtime prompt resolution
-        if prompt:
+        if db_action:
+            action = db_action
             logger.info(
-                f"[AssistantController] AI task: action_id={action.id}, "
-                f"prompt_doc_id={prompt_doc_id}, "
-                f"title={prompt.get('title', '')[:50]}, "
-                f"source_type={prompt.get('source_type', '')}, "
-                f"fallback_used={fallback_used}, "
-                f"fallback_reason={fallback_reason if fallback_reason else 'none'}"
+                f"[AssistantController] AI task: action_id={action_id}, "
+                f"prompt_doc_id={db_action.get('prompt_doc_id', action_id)}, "
+                f"source_type=db, "
+                f"input_mode={db_action.get('input_mode', 'auto')}, "
+                f"use_rag={db_action.get('use_rag', False)}, "
+                f"fallback_used=False, "
+                f"fallback_reason=none"
             )
         else:
-            logger.warning(
-                f"[AssistantController] AI task fallback: action_id={action.id}, "
-                f"prompt_doc_id={prompt_doc_id}, "
-                f"fallback_used={fallback_used}, "
-                f"fallback_reason={fallback_reason}"
-            )
+            # Fallback to legacy ActionRegistry (JSON)
+            legacy_action = self._action_registry.get_action(action_id)
+            if legacy_action:
+                fallback_used = True
+                fallback_reason = "db_action_not_found"
+                self._legacy_fallback_stats["runTask_hits"] += 1
+                self._legacy_fallback_stats["last_action_id"] = action_id
+                self._legacy_fallback_stats["last_reason"] = fallback_reason
+                # Convert legacy action to dict format for compatibility
+                action = {
+                    "id": legacy_action.id,
+                    "name": legacy_action.name,
+                    "rag": legacy_action.rag,
+                    "response_length": "medium",
+                    "enabled": True,
+                    "archived": False,
+                    "input_mode": "auto",
+                    "use_rag": legacy_action.rag,  # rag -> use_rag mapping
+                }
+                logger.warning(
+                    f"[AssistantController] Legacy fallback hit: path=runTask, action_id={action_id}, "
+                    f"reason={fallback_reason}, source_type=legacy_action_registry, "
+                    f"fallback_hit_count={self._legacy_fallback_stats['runTask_hits']}"
+                )
+            else:
+                logger.warning(f"[AssistantController] Action not found in both DB and legacy registry: {action_id}")
+                self.errorOccurred.emit(f"알 수 없는 작업: {action_id}")
+                return
 
-        prompt_template = self._prompt_service.get_effective_prompt(action.id)
+        # Get prompt from DB
+        prompt_template = self._prompt_service.get_effective_prompt(action_id)
         if not prompt_template:
-            logger.warning(f"[AssistantController] Prompt template not found: {action.id}")
-            self.errorOccurred.emit(f"프롬프트를 찾을 수 없습니다: {action.id}")
+            logger.warning(f"[AssistantController] Prompt template not found: {action_id}")
+            self.errorOccurred.emit(f"프롬프트를 찾을 수 없습니다: {action_id}")
             return
+
+        # Check enabled/archived status for DB actions
+        if db_action:
+            if not db_action.get("enabled", True):
+                self.errorOccurred.emit("이 AI 기능은 비활성화되어 있습니다.")
+                return
+            if db_action.get("archived", False):
+                self.errorOccurred.emit("이 AI 기능은 삭제되었습니다.")
+                return
 
         context = {
             "current_note": truncated_content,
@@ -235,7 +278,8 @@ class AssistantController(QObject):
             "QUESTION": "",
         }
 
-        if action.rag and action_id == "current_note_qa":
+        use_rag = action.get("use_rag", False)
+        if use_rag and action_id == "current_note_qa":
             chunks = self._chunker.chunk_text(truncated_content)
             retrieved_chunks = self._retriever.retrieve(chunks, self._last_query or "")
             self._retrieved_context = self._retriever.format_context(retrieved_chunks)
@@ -244,15 +288,19 @@ class AssistantController(QObject):
             context["CONTEXT"] = self._retrieved_context
             context["QUESTION"] = self._last_query or ""
 
-        prompt = self._prompt_service.render_prompt(action.id, context)
+        prompt = self._prompt_service.render_prompt(action_id, context)
         logger.info(
-            f"[AssistantController] Task prepared: action_id={action.id}, "
-            f"content_len={len(truncated_content)}, prompt_len={len(prompt)}"
+            f"[AssistantController] Task prepared: action_id={action_id}, "
+            f"source_type={'db' if not fallback_used else 'legacy'}, "
+            f"fallback_used={fallback_used}, "
+            f"fallback_reason={fallback_reason}, "
+            f"content_len={len(truncated_content)}, "
+            f"prompt_len={len(prompt)}"
         )
         action_dict = {
-            "response_length": getattr(action, "response_length", "medium"),
+            "response_length": action.get("response_length", "medium"),
         }
-        self._run_ai_task(prompt, action_id=action.id, action=action_dict)
+        self._run_ai_task(prompt, action_id=action_id, action=action_dict)
 
     @pyqtSlot(str, str, str, str, str)
     def runCustomAction(
@@ -366,8 +414,11 @@ class AssistantController(QObject):
         logger.info(
             f"[AssistantController] runCustomAction: action_id={action_id}, "
             f"prompt_doc_id={prompt_doc.get('prompt_doc_id')}, "
+            f"source_type=db, "
             f"input_mode={inferred_input_mode}, "
             f"use_rag={use_rag}, "
+            f"fallback_used=False, "
+            f"fallback_reason=none, "
             f"variables={validation.get('variables', [])}, "
             f"content_len={len(context.get('CONTENT', ''))}, "
             f"user_input_len={len(context.get('USER_INPUT', ''))}, "
@@ -583,7 +634,21 @@ class AssistantController(QObject):
     @pyqtSlot(str, result=list)
     def listActions(self) -> list:
         """List all available actions."""
-        return self._action_registry.list_actions()
+        # DB-first: use PromptService, fallback to ActionRegistry
+        db_actions = self._prompt_service.list_actions(include_archived=False, enabled_only=False)
+        if db_actions:
+            logger.info(f"[AssistantController] listActions: using DB, count={len(db_actions)}")
+            return db_actions
+        # Fallback to legacy ActionRegistry
+        self._legacy_fallback_stats["listActions_hits"] += 1
+        self._legacy_fallback_stats["last_reason"] = "db_actions_empty"
+        legacy_actions = self._action_registry.list_actions()
+        logger.warning(
+            f"[AssistantController] Legacy fallback hit: path=listActions, "
+            f"reason=db_actions_empty, legacy_action_count={len(legacy_actions)}, "
+            f"fallback_hit_count={self._legacy_fallback_stats['listActions_hits']}"
+        )
+        return legacy_actions
 
     @pyqtSlot(str)
     def testPrompt(self, prompt: str):

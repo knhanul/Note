@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import re
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -33,73 +34,13 @@ class PromptSeedService:
 
     DB_FILENAME = "ai_prompts.db"
     DB_VERSION = "1"
-    SAMPLE_PROMPT_ID = "prompt_sample_current_doc"
 
-    DEFAULT_PROMPTS: tuple[SeedPromptSpec, ...] = (
-        SeedPromptSpec(
-            SAMPLE_PROMPT_ID,
-            "작성 샘플 - 현재 문서 기반 업무 처리",
-            "프롬프트 작성 샘플",
-            "sample_current_note.md",
-            ("CONTENT", "SELECTION", "USER_INPUT", "CONTEXT"),
-            0,
-            "sample",
-            1,
-        ),
-        SeedPromptSpec("summarize_note", "문서 요약", "현재 문서를 간단히 요약합니다.", "summarize_note.md", ("CONTENT",), 10),
-        SeedPromptSpec("polish_selection", "문장 다듬기", "선택된 텍스트나 문서 내용을 자연스럽게 다듬습니다.", "polish_selection.md", ("CONTENT",), 20),
-        SeedPromptSpec("extract_todo", "할 일 추출", "문서에서 해야 할 일을 추출합니다.", "extract_todo.md", ("CONTENT",), 30),
-        SeedPromptSpec("suggest_title_tags", "제목/태그 추천", "문서에 어울리는 제목과 태그를 추천합니다.", "suggest_title_tags.md", ("CONTENT",), 40),
-        SeedPromptSpec("current_note_qa", "현재 문서 질문", "현재 문서와 검색 문단을 참고해 질문에 답변합니다.", "current_note_qa.md", ("CONTEXT", "USER_INPUT"), 50),
-    )
+    _seeded_paths: set[str] = set()
+    _seed_lock = threading.Lock()
 
-    DEFAULT_ACTIONS: tuple[dict, ...] = (
-        {
-            "action_id": "summarize_note",
-            "name": "문서 요약",
-            "description": "현재 문서를 간단히 요약합니다.",
-            "category": "문서 처리",
-            "required_variables_json": json.dumps(["CONTENT"], ensure_ascii=False),
-            "enabled": 1,
-            "sort_order": 10,
-        },
-        {
-            "action_id": "polish_selection",
-            "name": "문장 다듬기",
-            "description": "선택된 텍스트를 자연스럽게 다듬습니다.",
-            "category": "문서 처리",
-            "required_variables_json": json.dumps(["CONTENT"], ensure_ascii=False),
-            "enabled": 1,
-            "sort_order": 20,
-        },
-        {
-            "action_id": "extract_todo",
-            "name": "할 일 추출",
-            "description": "문서에서 할 일을 추출합니다.",
-            "category": "문서 처리",
-            "required_variables_json": json.dumps(["CONTENT"], ensure_ascii=False),
-            "enabled": 1,
-            "sort_order": 30,
-        },
-        {
-            "action_id": "suggest_title_tags",
-            "name": "제목/태그 추천",
-            "description": "문서의 제목과 태그를 추천합니다.",
-            "category": "문서 처리",
-            "required_variables_json": json.dumps(["CONTENT"], ensure_ascii=False),
-            "enabled": 1,
-            "sort_order": 40,
-        },
-        {
-            "action_id": "current_note_qa",
-            "name": "현재 문서 질문",
-            "description": "현재 문서와 검색 문단을 참고하여 답변합니다.",
-            "category": "문서 질문",
-            "required_variables_json": json.dumps(["CONTEXT", "USER_INPUT"], ensure_ascii=False),
-            "enabled": 1,
-            "sort_order": 50,
-        },
-    )
+    DEFAULT_PROMPTS: tuple[SeedPromptSpec, ...] = ()
+
+    DEFAULT_ACTIONS: tuple[dict, ...] = ()
 
     def __init__(self, app_data_dir: Path, prompt_package_dir: Path | None = None):
         self._app_data_dir = Path(app_data_dir)
@@ -116,17 +57,202 @@ class PromptSeedService:
     def db_path(self) -> Path:
         return self._db_path
 
+    def _is_db_missing_or_empty(self) -> bool:
+        """Check if DB is missing or has no data."""
+        if not self._db_path.exists():
+            return True
+        action_ids = self._repo.get_action_ids()
+        prompt_ids = self._repo.get_prompt_doc_ids()
+        return len(action_ids) == 0 and len(prompt_ids) == 0
+
+    def _try_json_bootstrap(self) -> bool:
+        """Try JSON bootstrap. Returns True if bootstrap succeeded."""
+        from .ai_prompt_bootstrap_service import PromptBootstrapService
+
+        bootstrap = PromptBootstrapService()
+        data = bootstrap.load_json_pack()
+        if data is None:
+            return False
+
+        actions = data.get("actions", [])
+        prompts = data.get("prompts", [])
+
+        if not actions and not prompts:
+            logger.info("[PromptBootstrap] JSON prompt pack has no actions/prompts. Use built-in seed fallback.")
+            return False
+
+        error = bootstrap.validate_pack(data)
+        if error:
+            logger.warning(f"[PromptBootstrap] Failed JSON bootstrap: {error}. Use built-in seed fallback.")
+            return False
+
+        try:
+            self._repo.ensure_schema()
+            with self._repo._connect() as conn:
+                for prompt in prompts:
+                    record = bootstrap.convert_prompt(prompt)
+                    self._repo.upsert_prompt_document(record)
+
+                for action in actions:
+                    record = bootstrap.convert_action(action)
+                    self._repo.upsert_action(record)
+
+                bindings = bootstrap.get_bindings(actions, prompts)
+                for action_id, prompt_doc_id in bindings:
+                    self._repo.set_binding(action_id, prompt_doc_id)
+
+            logger.info(
+                f"[PromptBootstrap] Completed JSON bootstrap: actions={len(actions)}, prompts={len(prompts)}, bindings={len(bindings)}"
+            )
+            return True
+        except Exception as e:
+            logger.warning(f"[PromptBootstrap] Failed JSON bootstrap: {e}. Use built-in seed fallback.")
+            return False
+
     def ensure_seeded(self) -> PromptRepository:
-        self._repo.ensure_schema()
-        for action in self.DEFAULT_ACTIONS:
-            self._repo.upsert_action(action)
-        self._seed_prompt_documents()
-        self._seed_bindings()
+        normalized_path = str(self._app_data_dir.resolve())
+
+        with self._seed_lock:
+            if normalized_path in self._seeded_paths:
+                logger.info(f"[PromptSeedService] Seed already completed for app_data_dir={normalized_path}, skip repeated seed")
+                return self._repo
+
+            try:
+                self._repo.ensure_schema()
+
+                if self._is_db_missing_or_empty():
+                    logger.info("[PromptBootstrap] Prompt DB missing or empty. Start JSON prompt pack bootstrap.")
+                    if self._try_json_bootstrap():
+                        self._seeded_paths.add(normalized_path)
+                        return self._repo
+
+                for action in self.DEFAULT_ACTIONS:
+                    self._repo.upsert_action(action)
+                self._seed_prompt_documents()
+                self._seed_bindings()
+                logger.info(
+                    f"[PromptSeedService] Seed import completed: "
+                    f"default_actions={len(self.DEFAULT_ACTIONS)}, "
+                    f"default_prompts={len(self.DEFAULT_PROMPTS)}"
+                )
+                self._validate_seed_integrity()
+                self._seeded_paths.add(normalized_path)
+            except Exception:
+                raise
+
         return self._repo
 
+    def _validate_seed_integrity(self) -> dict[str, Any]:
+        """Validate that all default actions, prompts, and bindings exist in DB.
+
+        Returns a dict with validation results:
+        - ok: bool - True if all checks pass
+        - missing_actions: list - action_ids missing from DB
+        - missing_prompts: list - prompt_doc_ids missing from DB
+        - missing_bindings: list - action_ids missing bindings
+        - broken_bindings: list - action_ids where binding points to non-existent prompt
+        - default_actions_count: int
+        - default_prompts_count: int
+        - warnings: list
+        """
+        result: dict[str, Any] = {
+            "ok": True,
+            "missing_actions": [],
+            "missing_prompts": [],
+            "missing_bindings": [],
+            "broken_bindings": [],
+            "default_actions_count": len(self.DEFAULT_ACTIONS),
+            "default_prompts_count": len(self.DEFAULT_PROMPTS),
+            "warnings": [],
+        }
+
+        db_action_ids = set(self._repo.get_action_ids())
+        db_prompt_ids = set(self._repo.get_prompt_doc_ids())
+        binding_map = self._repo.get_binding_map()
+
+        expected_action_ids = {action["action_id"] for action in self.DEFAULT_ACTIONS}
+        expected_prompt_ids = {prompt.prompt_doc_id for prompt in self.DEFAULT_PROMPTS}
+
+        missing_actions = expected_action_ids - db_action_ids
+        if missing_actions:
+            result["ok"] = False
+            result["missing_actions"] = sorted(missing_actions)
+            result["warnings"].append(f"Missing actions: {sorted(missing_actions)}")
+
+        # Only check for missing prompts if DEFAULT_PROMPTS is not empty
+        if expected_prompt_ids:
+            missing_prompts = expected_prompt_ids - db_prompt_ids
+            if missing_prompts:
+                result["ok"] = False
+                result["missing_prompts"] = sorted(missing_prompts)
+                result["warnings"].append(f"Missing prompts: {sorted(missing_prompts)}")
+
+        for action_id in expected_action_ids:
+            if action_id not in binding_map:
+                result["ok"] = False
+                result["missing_bindings"].append(action_id)
+            elif binding_map.get(action_id) not in db_prompt_ids:
+                result["ok"] = False
+                result["broken_bindings"].append(action_id)
+
+        if result["missing_bindings"]:
+            result["warnings"].append(f"Missing bindings: {result['missing_bindings']}")
+        if result["broken_bindings"]:
+            result["warnings"].append(f"Broken bindings: {result['broken_bindings']}")
+
+        if result["ok"]:
+            logger.info(
+                f"[PromptSeedService] Seed integrity OK: "
+                f"actions={len(self.DEFAULT_ACTIONS)}, "
+                f"prompts={len(expected_prompt_ids)}, "
+                f"bindings={len(expected_action_ids)}"
+            )
+        else:
+            logger.warning(
+                f"[PromptSeedService] Seed integrity warning: "
+                f"missing_actions={result['missing_actions']}, "
+                f"missing_prompts={result['missing_prompts']}, "
+                f"missing_bindings={result['missing_bindings']}, "
+                f"broken_bindings={result['broken_bindings']}"
+            )
+
+        return result
+
     def _seed_bindings(self) -> None:
+        """Seed bindings with user protection."""
+        # Skip if no default prompts
+        if not self.DEFAULT_PROMPTS:
+            logger.info("[PromptSeedService] Skip binding seed: no default prompts")
+            return
+
         for action in self.DEFAULT_ACTIONS:
-            self._repo.reset_binding(action["action_id"])
+            action_id = action["action_id"]
+            existing_binding = self._repo.get_binding(action_id)
+
+            # Check if existing binding points to user-created prompt
+            if existing_binding:
+                bound_prompt_id = existing_binding.get("prompt_doc_id")
+                if bound_prompt_id:
+                    prompt = self._repo.get_prompt_document(bound_prompt_id)
+                    # Protect user prompts
+                    if prompt and prompt.get("source_type") == "user":
+                        logger.info(
+                            f"[PromptSeedService] Skip user binding: action_id={action_id}, "
+                            f"prompt_doc_id={bound_prompt_id}, source_type=user"
+                        )
+                        continue
+                    # Protect valid existing bindings (even if pointing to different default prompt)
+                    # User may have intentionally selected a different default prompt
+                    if prompt:
+                        logger.info(
+                            f"[PromptSeedService] Preserve existing binding: action_id={action_id}, "
+                            f"prompt_doc_id={bound_prompt_id}"
+                        )
+                        continue
+
+            # Only reset binding if there's no existing binding or target prompt is missing
+            self._repo.reset_binding(action_id)
+            logger.info(f"[PromptSeedService] Reset default binding: action_id={action_id}")
 
     def _seed_prompt_documents(self) -> None:
         for prompt in self.DEFAULT_PROMPTS:
@@ -140,18 +266,25 @@ class PromptSeedService:
             variables = sorted(set(VARIABLE_PATTERN.findall(content_md)))
             existing = self._repo.get_prompt_document(prompt.prompt_doc_id)
 
-            should_upsert = False
-            if existing is None:
-                should_upsert = True
-            elif int(existing.get("readonly", 0) or 0) == 1:
-                should_upsert = True
-            elif prompt.source_type == "sample":
-                # Sample prompt should always reflect packaged version
-                should_upsert = existing.get("content_hash") != content_hash
-
-            if not should_upsert and existing.get("content_hash") == content_hash:
+            # Check content_hash to skip unnecessary updates
+            if existing and existing.get("content_hash") == content_hash:
+                logger.info(
+                    f"[PromptSeedService] Skip unchanged prompt: prompt_doc_id={prompt.prompt_doc_id}, "
+                    f"content_hash_unchanged=True"
+                )
                 continue
 
+            # Log operation
+            is_new = existing is None
+            if is_new:
+                logger.info(f"[PromptSeedService] Insert default prompt: prompt_doc_id={prompt.prompt_doc_id}")
+            else:
+                logger.info(
+                    f"[PromptSeedService] Update default prompt: prompt_doc_id={prompt.prompt_doc_id}, "
+                    f"content_hash_changed=True"
+                )
+
+            # archived is not set here - repository will preserve existing value via COALESCE
             self._repo.upsert_prompt_document({
                 "prompt_doc_id": prompt.prompt_doc_id,
                 "title": prompt.title,
@@ -159,7 +292,7 @@ class PromptSeedService:
                 "content_md": content_md,
                 "source_type": prompt.source_type,
                 "readonly": prompt.readonly,
-                "archived": 0,
+                "archived": None,  # Let repository preserve existing value
                 "variables_json": json.dumps(variables, ensure_ascii=False),
                 "content_hash": content_hash,
             })

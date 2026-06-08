@@ -1,4 +1,20 @@
-"""High-level AI prompt service used by controllers and UI."""
+"""High-level AI prompt service used by controllers and UI.
+
+.. deprecated::
+    This module is part of the legacy prompt management path.
+
+    Current standard path:
+    - ai_prompt_service.py (PromptService)
+    - ai_prompt_repository.py (PromptRepository)
+    - ai_prompt_seed_service.py (PromptSeedService)
+    - ai_prompt_controller.py (PromptController)
+
+    New code should NOT use this module. Use the ai_prompt_* series instead.
+
+    Deletion will be performed in a separate step after confirming no external
+    repository dependencies exist. Until then, this module remains for
+    compatibility only.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +22,7 @@ import hashlib
 import json
 import logging
 import re
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -15,6 +32,14 @@ from .prompt_seed_service import PromptSeedService
 from .prompt_renderer import PromptRenderer
 
 logger = logging.getLogger(__name__)
+
+# Emit deprecation warning once when module is imported
+warnings.warn(
+    "[LegacyPrompt] prompt_service.py is deprecated. "
+    "Use ai_prompt_service.py instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 VARIABLE_PATTERN = re.compile(r"\{\{([A-Z_]+)\}\}")
 
@@ -35,7 +60,11 @@ class PromptRecord:
 
 
 class PromptService:
-    """Business logic for prompt listing, retrieval and override handling."""
+    """Business logic for prompt listing, retrieval and override handling.
+
+    Deprecated: do not use in new code. Use PromptService from ai_prompt_service.py.
+    """
+    # Deprecated: do not use in new code. Use PromptService from ai_prompt_service.py.
 
     def __init__(self, app_data_dir: Path, prompt_package_dir: Path | None = None):
         self._seed_service = PromptSeedService(app_data_dir, prompt_package_dir)

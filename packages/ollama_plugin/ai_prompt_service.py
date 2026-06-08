@@ -59,6 +59,8 @@ class PromptService:
                 "use_rag": bool(action.get("use_rag", 0)),
                 "response_length": action.get("response_length", "medium"),
                 "icon": action.get("icon", ""),
+                "example_input": action.get("example_input", ""),
+                "input_placeholder": action.get("input_placeholder", ""),
                 "prompt_doc_id": prompt_doc_id,
                 "binding_prompt_doc_id": binding.get("prompt_doc_id") if binding else prompt_doc_id,
                 "binding_updated_at": binding.get("updated_at") if binding else "",
@@ -90,6 +92,8 @@ class PromptService:
             "use_rag": bool(action.get("use_rag", 0)),
             "response_length": action.get("response_length", "medium"),
             "icon": action.get("icon", ""),
+            "example_input": action.get("example_input", ""),
+            "input_placeholder": action.get("input_placeholder", ""),
             "created_at": action.get("created_at", ""),
             "updated_at": action.get("updated_at", ""),
             "prompt_doc_id": prompt_doc_id,
@@ -152,6 +156,8 @@ class PromptService:
             "use_rag": data.get("use_rag", 0),
             "response_length": data.get("response_length", "medium"),
             "icon": data.get("icon", ""),
+            "example_input": data.get("example_input", ""),
+            "input_placeholder": data.get("input_placeholder", ""),
         }
 
         if self._repo.create_action(record):
@@ -183,6 +189,8 @@ class PromptService:
             "use_rag": data.get("use_rag", action.get("use_rag", 0)),
             "response_length": data.get("response_length", action.get("response_length", "medium")),
             "icon": data.get("icon", action.get("icon", "")),
+            "example_input": data.get("example_input", action.get("example_input", "")),
+            "input_placeholder": data.get("input_placeholder", action.get("input_placeholder", "")),
         }
 
         if self._repo.update_action(action_id, record):

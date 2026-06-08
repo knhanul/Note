@@ -32,7 +32,29 @@ Rectangle {
             var raw = ss.get_value("ai_category_list", "")
             if (raw) {
                 var parsed = JSON.parse(raw)
-                if (Array.isArray(parsed) && parsed.length > 0) { root.categoryList = parsed; return }
+                if (Array.isArray(parsed)) {
+                    if (parsed.length > 0) {
+                        root.categoryList = parsed
+                        return
+                    }
+                    // Empty array - extract categories from existing actions
+                    var c = typeof aiActionController !== "undefined" && aiActionController !== null ? aiActionController : null
+                    if (c) {
+                        var actions = c.actionList || []
+                        var categorySet = {}
+                        for (var i = 0; i < actions.length; i++) {
+                            var cat = actions[i].category || "기타"
+                            categorySet[cat] = true
+                        }
+                        var extractedCats = Object.keys(categorySet)
+                        if (extractedCats.length > 0) {
+                            root.categoryList = extractedCats.sort()
+                            return
+                        }
+                    }
+                    root.categoryList = []
+                    return
+                }
             }
         } catch (e) {}
         root.categoryList = defaults
@@ -86,7 +108,7 @@ Rectangle {
                     c.update_action(actions[j].action_id, actions[j].name, actions[j].description || "",
                                     trimmed, actions[j].input_mode || "auto", !!actions[j].use_rag,
                                     actions[j].required_variables_json || "[]", !!actions[j].enabled,
-                                    actions[j].response_length || "medium")
+                                    actions[j].response_length || "medium", actions[j].example_input || "", actions[j].input_placeholder || "")
                 }
             }
         }
@@ -1043,7 +1065,7 @@ Rectangle {
                                                                         c.update_action(actions[i].action_id, actions[i].name, actions[i].description || "",
                                                                                         "기타", actions[i].input_mode || "auto", !!actions[i].use_rag,
                                                                                         actions[i].required_variables_json || "[]", !!actions[i].enabled,
-                                                                                        actions[i].response_length || "medium")
+                                                                                        actions[i].response_length || "medium", actions[i].example_input || "", actions[i].input_placeholder || "")
                                                                     }
                                                                 }
                                                             }

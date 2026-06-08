@@ -142,7 +142,7 @@ class AIActionController(QObject):
     def get_action(self, action_id: str) -> dict:
         return self._service.get_action(action_id) or {}
 
-    @pyqtSlot(str, str, str, str, str, bool, str, bool, str, result="QVariantMap")
+    @pyqtSlot(str, str, str, str, str, bool, str, bool, str, str, str, result="QVariantMap")
     def create_action(
         self,
         name: str,
@@ -154,6 +154,8 @@ class AIActionController(QObject):
         required_variables_json: str,
         enabled: bool,
         response_length: str,
+        example_input: str,
+        input_placeholder: str,
     ) -> dict:
         if not name:
             self.errorOccurred.emit("기능 이름은 필수입니다")
@@ -169,6 +171,8 @@ class AIActionController(QObject):
             "required_variables_json": required_variables_json or "[]",
             "enabled": 1 if enabled else 0,
             "response_length": response_length or "medium",
+            "example_input": example_input or "",
+            "input_placeholder": input_placeholder or "",
         }
 
         result = self._service.create_action(data)
@@ -180,7 +184,7 @@ class AIActionController(QObject):
             self.errorOccurred.emit("기능 생성에 실패했습니다.")
             return {}
 
-    @pyqtSlot(str, str, str, str, str, bool, str, bool, str, result="QVariantMap")
+    @pyqtSlot(str, str, str, str, str, bool, str, bool, str, str, str, result="QVariantMap")
     def update_action(
         self,
         action_id: str,
@@ -192,6 +196,8 @@ class AIActionController(QObject):
         required_variables_json: str,
         enabled: bool,
         response_length: str,
+        example_input: str,
+        input_placeholder: str,
     ) -> dict:
         action = self._service.get_action(action_id)
         if not action:
@@ -211,6 +217,8 @@ class AIActionController(QObject):
             "required_variables_json": required_variables_json,
             "enabled": 1 if enabled else 0,
             "response_length": response_length or "medium",
+            "example_input": example_input or "",
+            "input_placeholder": input_placeholder or "",
         }
 
         result = self._service.update_action(action_id, data)

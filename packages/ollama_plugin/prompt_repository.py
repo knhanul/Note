@@ -1,17 +1,43 @@
-"""SQLite repository for AI prompt metadata and overrides."""
+"""SQLite repository for AI prompt metadata and overrides.
+
+.. deprecated::
+    This module is part of the legacy prompt management path.
+
+    Current standard path:
+    - ai_prompt_repository.py (PromptRepository)
+
+    New code should NOT use this module. Use the ai_prompt_repository instead.
+
+    Deletion will be performed in a separate step after confirming no external
+    repository dependencies exist. Until then, this module remains for
+    compatibility only.
+"""
 
 from __future__ import annotations
 
 import logging
 import sqlite3
+import warnings
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Emit deprecation warning once when module is imported
+warnings.warn(
+    "[LegacyPrompt] prompt_repository.py is deprecated. "
+    "Use ai_prompt_repository.py instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 
 class PromptRepository:
-    """Low-level persistence layer for AI prompt storage."""
+    """Low-level persistence layer for AI prompt storage.
+
+    Deprecated: do not use in new code. Use PromptRepository from ai_prompt_repository.py.
+    """
+    # Deprecated: do not use in new code. Use PromptRepository from ai_prompt_repository.py.
 
     def __init__(self, db_path: Path | str):
         self._db_path = Path(db_path)

@@ -57,12 +57,13 @@ class PromptRepository:
         expected_columns = {
             "ai_prompt_documents": {
                 "prompt_doc_id", "title", "description", "content_md", "source_type",
-                "readonly", "archived", "variables_json", "content_hash", "created_at", "updated_at"
+                "readonly", "archived", "variables_json", "content_hash", "created_at", "updated_at",
             },
             "ai_actions": {
                 "action_id", "name", "description", "category", "required_variables_json",
                 "enabled", "sort_order", "source_type", "readonly", "archived",
-                "input_mode", "use_rag", "response_length", "icon", "created_at", "updated_at"
+                "input_mode", "use_rag", "response_length", "icon", "created_at", "updated_at",
+                "example_input", "input_placeholder"
             },
             "ai_action_prompt_bindings": {
                 "action_id", "prompt_doc_id", "updated_at"
@@ -138,6 +139,8 @@ class PromptRepository:
                 "use_rag": "INTEGER DEFAULT 0",
                 "response_length": "TEXT DEFAULT 'medium'",
                 "icon": "TEXT DEFAULT ''",
+                "example_input": "TEXT DEFAULT ''",
+                "input_placeholder": "TEXT DEFAULT ''",
             }
             for col_name, col_def in new_action_columns.items():
                 if col_name not in current_action_cols:
@@ -218,10 +221,10 @@ class PromptRepository:
             cols = self._table_columns(conn, "ai_actions")
             select_cols = ["action_id", "name", "description", "category", "required_variables_json",
                           "enabled", "sort_order"]
-            for col in ["source_type", "readonly", "archived", "input_mode", "use_rag", "response_length", "icon", "created_at", "updated_at"]:
+            for col in ["source_type", "readonly", "archived", "input_mode", "use_rag", "response_length", "icon", "created_at", "updated_at", "example_input", "input_placeholder"]:
                 if col in cols:
                     select_cols.append(col)
-            
+
             rows = conn.execute(
                 f"""
                 SELECT {', '.join(select_cols)}
@@ -238,10 +241,10 @@ class PromptRepository:
             cols = self._table_columns(conn, "ai_actions")
             select_cols = ["action_id", "name", "description", "category", "required_variables_json",
                           "enabled", "sort_order"]
-            for col in ["source_type", "readonly", "archived", "input_mode", "use_rag", "response_length", "icon", "created_at", "updated_at"]:
+            for col in ["source_type", "readonly", "archived", "input_mode", "use_rag", "response_length", "icon", "created_at", "updated_at", "example_input", "input_placeholder"]:
                 if col in cols:
                     select_cols.append(col)
-            
+
             row = conn.execute(
                 f"""
                 SELECT {', '.join(select_cols)}
@@ -252,37 +255,72 @@ class PromptRepository:
             ).fetchone()
             return self._row_to_dict(row)
 
+    def get_action_fields(self) -> list[str]:
+        """Get list of available action fields for dynamic queries."""
+        with self._connect() as conn:
+            cols = self._table_columns(conn, "ai_actions")
+            return list(cols)
+
     def action_exists(self, action_id: str) -> bool:
         with self._connect() as conn:
             row = conn.execute("SELECT 1 FROM ai_actions WHERE action_id = ?", (action_id,)).fetchone()
             return row is not None
 
+    def get_action_ids(self) -> list[str]:
+        """Get all action IDs in the database."""
+        with self._connect() as conn:
+            rows = conn.execute("SELECT action_id FROM ai_actions").fetchall()
+            return [row[0] for row in rows]
+
+    def get_prompt_doc_ids(self) -> list[str]:
+        """Get all prompt document IDs in the database."""
+        with self._connect() as conn:
+            rows = conn.execute("SELECT prompt_doc_id FROM ai_prompt_documents").fetchall()
+            return [row[0] for row in rows]
+
+    def get_binding_map(self) -> dict[str, str]:
+        """Get all action-to-prompt bindings as a dict."""
+        with self._connect() as conn:
+            rows = conn.execute("SELECT action_id, prompt_doc_id FROM ai_action_prompt_bindings").fetchall()
+            return {row[0]: row[1] for row in rows}
+
     def create_action(self, record: dict[str, Any]) -> bool:
         with self._connect() as conn:
             try:
+                cols = self._table_columns(conn, "ai_actions")
+                base_cols = ["action_id", "name", "description", "category", "required_variables_json",
+                             "enabled", "sort_order", "source_type", "readonly", "archived", "input_mode", "use_rag", "response_length", "icon"]
+                placeholders = ["?" for _ in base_cols]
+                values = [
+                    record.get("action_id", ""),
+                    record.get("name", ""),
+                    record.get("description", ""),
+                    record.get("category", ""),
+                    record.get("required_variables_json", "[]"),
+                    int(bool(record.get("enabled", True))),
+                    int(record.get("sort_order", 0)),
+                    record.get("source_type", "user"),
+                    int(record.get("readonly", 0)),
+                    int(record.get("archived", 0)),
+                    record.get("input_mode", "auto"),
+                    int(record.get("use_rag", 0)),
+                    record.get("response_length", "medium"),
+                    record.get("icon", ""),
+                ]
+                if "example_input" in cols:
+                    base_cols.append("example_input")
+                    placeholders.append("?")
+                    values.append(record.get("example_input", ""))
+                if "input_placeholder" in cols:
+                    base_cols.append("input_placeholder")
+                    placeholders.append("?")
+                    values.append(record.get("input_placeholder", ""))
                 conn.execute(
-                    """
-                    INSERT INTO ai_actions (
-                        action_id, name, description, category, required_variables_json,
-                        enabled, sort_order, source_type, readonly, archived, input_mode, use_rag, response_length, icon
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    f"""
+                    INSERT INTO ai_actions ({', '.join(base_cols)})
+                    VALUES ({', '.join(placeholders)})
                     """,
-                    (
-                        record.get("action_id", ""),
-                        record.get("name", ""),
-                        record.get("description", ""),
-                        record.get("category", ""),
-                        record.get("required_variables_json", "[]"),
-                        int(bool(record.get("enabled", True))),
-                        int(record.get("sort_order", 0)),
-                        record.get("source_type", "user"),
-                        int(record.get("readonly", 0)),
-                        int(record.get("archived", 0)),
-                        record.get("input_mode", "auto"),
-                        int(record.get("use_rag", 0)),
-                        record.get("response_length", "medium"),
-                        record.get("icon", ""),
-                    ),
+                    tuple(values),
                 )
                 return True
             except sqlite3.Error as e:
@@ -292,45 +330,61 @@ class PromptRepository:
     def update_action(self, action_id: str, record: dict[str, Any]) -> bool:
         with self._connect() as conn:
             try:
+                cols = self._table_columns(conn, "ai_actions")
+                set_clauses = [
+                    "name = excluded.name",
+                    "description = excluded.description",
+                    "category = excluded.category",
+                    "required_variables_json = excluded.required_variables_json",
+                    "enabled = excluded.enabled",
+                    "sort_order = excluded.sort_order",
+                    "source_type = excluded.source_type",
+                    "readonly = excluded.readonly",
+                    "archived = excluded.archived",
+                    "input_mode = excluded.input_mode",
+                    "use_rag = excluded.use_rag",
+                    "response_length = excluded.response_length",
+                    "icon = excluded.icon",
+                    "updated_at = CURRENT_TIMESTAMP",
+                ]
+                if "example_input" in cols:
+                    set_clauses.append("example_input = excluded.example_input")
+                if "input_placeholder" in cols:
+                    set_clauses.append("input_placeholder = excluded.input_placeholder")
+                excluded_cols = ["action_id", "name", "description", "category",
+                                 "required_variables_json", "enabled", "sort_order",
+                                 "source_type", "readonly", "archived",
+                                 "input_mode", "use_rag", "response_length", "icon"]
+                excluded_values = [
+                    action_id,
+                    record.get("name", ""),
+                    record.get("description", ""),
+                    record.get("category", ""),
+                    record.get("required_variables_json", "[]"),
+                    int(bool(record.get("enabled", True))),
+                    int(record.get("sort_order", 0)),
+                    record.get("source_type", "user"),
+                    int(record.get("readonly", 0)),
+                    int(record.get("archived", 0)),
+                    record.get("input_mode", "auto"),
+                    int(record.get("use_rag", 0)),
+                    record.get("response_length", "medium"),
+                    record.get("icon", ""),
+                ]
+                if "example_input" in cols:
+                    excluded_cols.append("example_input")
+                    excluded_values.append(record.get("example_input", ""))
+                if "input_placeholder" in cols:
+                    excluded_cols.append("input_placeholder")
+                    excluded_values.append(record.get("input_placeholder", ""))
                 conn.execute(
-                    """
+                    f"""
                     UPDATE ai_actions SET
-                        name = excluded.name,
-                        description = excluded.description,
-                        category = excluded.category,
-                        required_variables_json = excluded.required_variables_json,
-                        enabled = excluded.enabled,
-                        sort_order = excluded.sort_order,
-                        source_type = excluded.source_type,
-                        readonly = excluded.readonly,
-                        archived = excluded.archived,
-                        input_mode = excluded.input_mode,
-                        use_rag = excluded.use_rag,
-                        response_length = excluded.response_length,
-                        icon = excluded.icon,
-                        updated_at = CURRENT_TIMESTAMP
-                    FROM (SELECT ? AS action_id, ? AS name, ? AS description, ? AS category,
-                                 ? AS required_variables_json, ? AS enabled, ? AS sort_order,
-                                 ? AS source_type, ? AS readonly, ? AS archived,
-                                 ? AS input_mode, ? AS use_rag, ? AS response_length, ? AS icon) AS excluded
+                        {', '.join(set_clauses)}
+                    FROM (SELECT {', '.join(excluded_cols)}) AS excluded
                     WHERE ai_actions.action_id = excluded.action_id
                     """,
-                    (
-                        action_id,
-                        record.get("name", ""),
-                        record.get("description", ""),
-                        record.get("category", ""),
-                        record.get("required_variables_json", "[]"),
-                        int(bool(record.get("enabled", True))),
-                        int(record.get("sort_order", 0)),
-                        record.get("source_type", "user"),
-                        int(record.get("readonly", 0)),
-                        int(record.get("archived", 0)),
-                        record.get("input_mode", "auto"),
-                        int(record.get("use_rag", 0)),
-                        record.get("response_length", "medium"),
-                        record.get("icon", ""),
-                    ),
+                    tuple(excluded_values),
                 )
                 return True
             except sqlite3.Error as e:
@@ -413,66 +467,115 @@ class PromptRepository:
 
     def upsert_action(self, record: dict[str, Any]) -> None:
         with self._connect() as conn:
+            cols = self._table_columns(conn, "ai_actions")
+            select_cols = ["source_type", "readonly", "archived", "input_mode", "use_rag", "response_length", "icon"]
+            if "example_input" in cols:
+                select_cols.append("example_input")
+            if "input_placeholder" in cols:
+                select_cols.append("input_placeholder")
             existing = conn.execute(
-                "SELECT source_type, readonly, archived, input_mode, use_rag, response_length, icon FROM ai_actions WHERE action_id = ?",
+                f"SELECT {', '.join(select_cols)} FROM ai_actions WHERE action_id = ?",
                 (record.get("action_id", ""),)
             ).fetchone()
+            existing_dict = dict(existing) if existing else None
 
-            source_type = record.get("source_type") or (existing["source_type"] if existing else "default")
-            readonly = record.get("readonly") if record.get("readonly") is not None else (existing["readonly"] if existing else 0)
-            archived = record.get("archived") if record.get("archived") is not None else (existing["archived"] if existing else 0)
-            input_mode = record.get("input_mode") or (existing["input_mode"] if existing else "auto")
-            use_rag = record.get("use_rag") if record.get("use_rag") is not None else (existing["use_rag"] if existing else 0)
-            response_length = record.get("response_length") or (existing["response_length"] if existing else "medium")
-            icon = record.get("icon") or (existing["icon"] if existing else "")
+            # Check if existing is user-created - protect user actions
+            if existing_dict and existing_dict.get("source_type") == "user":
+                logger.info(
+                    f"[PromptRepository] Skip user action: action_id={record.get('action_id')}, "
+                    f"source_type=user"
+                )
+                return
+
+            # Preserve existing archived state (seed import never restores archived=true)
+            source_type = record.get("source_type") or (existing_dict.get("source_type", "default") if existing_dict else "default")
+            readonly = record.get("readonly") if record.get("readonly") is not None else (existing_dict.get("readonly", 0) if existing_dict else 0)
+            archived = record.get("archived") if record.get("archived") is not None else (existing_dict.get("archived", 0) if existing_dict else 0)
+            input_mode = record.get("input_mode") or (existing_dict.get("input_mode", "auto") if existing_dict else "auto")
+            use_rag = record.get("use_rag") if record.get("use_rag") is not None else (existing_dict.get("use_rag", 0) if existing_dict else 0)
+            response_length = record.get("response_length") or (existing_dict.get("response_length", "medium") if existing_dict else "medium")
+            icon = record.get("icon") or (existing_dict.get("icon", "") if existing_dict else "")
+            example_input = record.get("example_input") if record.get("example_input") is not None else (existing_dict.get("example_input", "") if existing_dict else "")
+            input_placeholder = record.get("input_placeholder") if record.get("input_placeholder") is not None else (existing_dict.get("input_placeholder", "") if existing_dict else "")
+
+            # Log seed operation
+            is_new = existing_dict is None
+            content_changed = existing_dict and existing_dict.get("source_type") in ("default", "seed", "sample")
+            if is_new:
+                logger.info(f"[PromptRepository] Insert default action: action_id={record.get('action_id')}")
+            elif content_changed:
+                logger.info(f"[PromptRepository] Update default action: action_id={record.get('action_id')}, archived_preserved={bool(archived)}")
+
+            # Build dynamic INSERT based on available columns
+            cols = self._table_columns(conn, "ai_actions")
+            base_cols = ["action_id", "name", "description", "category", "required_variables_json",
+                         "enabled", "sort_order", "source_type", "readonly", "archived", "input_mode", "use_rag", "response_length", "icon"]
+            placeholders = ["?" for _ in base_cols]
+            values = [
+                record.get("action_id", ""),
+                record.get("name", ""),
+                record.get("description", ""),
+                record.get("category", ""),
+                record.get("required_variables_json", "[]"),
+                int(bool(record.get("enabled", True))),
+                int(record.get("sort_order", 0)),
+                source_type,
+                int(readonly),
+                int(archived),
+                input_mode,
+                int(use_rag),
+                response_length,
+                icon,
+            ]
+            if "example_input" in cols:
+                base_cols.append("example_input")
+                placeholders.append("?")
+                values.append(example_input)
+            if "input_placeholder" in cols:
+                base_cols.append("input_placeholder")
+                placeholders.append("?")
+                values.append(input_placeholder)
+
+            set_clauses = [
+                "name = excluded.name",
+                "description = excluded.description",
+                "category = excluded.category",
+                "required_variables_json = excluded.required_variables_json",
+                "enabled = excluded.enabled",
+                "sort_order = excluded.sort_order",
+                "source_type = COALESCE(NULLIF(excluded.source_type, ''), ai_actions.source_type)",
+                "readonly = COALESCE(excluded.readonly, ai_actions.readonly)",
+                "archived = COALESCE(excluded.archived, ai_actions.archived)",
+                "input_mode = COALESCE(NULLIF(excluded.input_mode, ''), ai_actions.input_mode)",
+                "use_rag = COALESCE(excluded.use_rag, ai_actions.use_rag)",
+                "response_length = COALESCE(NULLIF(excluded.response_length, ''), ai_actions.response_length)",
+                "icon = COALESCE(NULLIF(excluded.icon, ''), ai_actions.icon)",
+            ]
+            if "example_input" in cols:
+                set_clauses.append("example_input = COALESCE(NULLIF(excluded.example_input, ''), ai_actions.example_input)")
+            if "input_placeholder" in cols:
+                set_clauses.append("input_placeholder = COALESCE(NULLIF(excluded.input_placeholder, ''), ai_actions.input_placeholder)")
 
             conn.execute(
-                """
-                INSERT INTO ai_actions (
-                    action_id, name, description, category, required_variables_json,
-                    enabled, sort_order, source_type, readonly, archived, input_mode, use_rag, response_length, icon
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                f"""
+                INSERT INTO ai_actions ({', '.join(base_cols)})
+                VALUES ({', '.join(placeholders)})
                 ON CONFLICT(action_id) DO UPDATE SET
-                    name = excluded.name,
-                    description = excluded.description,
-                    category = excluded.category,
-                    required_variables_json = excluded.required_variables_json,
-                    enabled = excluded.enabled,
-                    sort_order = excluded.sort_order,
-                    source_type = COALESCE(NULLIF(excluded.source_type, ''), ai_actions.source_type),
-                    readonly = COALESCE(excluded.readonly, ai_actions.readonly),
-                    archived = COALESCE(excluded.archived, ai_actions.archived),
-                    input_mode = COALESCE(NULLIF(excluded.input_mode, ''), ai_actions.input_mode),
-                    use_rag = COALESCE(excluded.use_rag, ai_actions.use_rag),
-                    response_length = COALESCE(NULLIF(excluded.response_length, ''), ai_actions.response_length),
-                    icon = COALESCE(NULLIF(excluded.icon, ''), ai_actions.icon)
+                    {', '.join(set_clauses)}
                 """,
-                (
-                    record.get("action_id", ""),
-                    record.get("name", ""),
-                    record.get("description", ""),
-                    record.get("category", ""),
-                    record.get("required_variables_json", "[]"),
-                    int(bool(record.get("enabled", True))),
-                    int(record.get("sort_order", 0)),
-                    source_type,
-                    int(readonly),
-                    int(archived),
-                    input_mode,
-                    int(use_rag),
-                    response_length,
-                    icon,
-                ),
+                tuple(values),
             )
 
     def list_prompt_documents(self, include_archived: bool = False) -> list[dict[str, Any]]:
         where_clause = "" if include_archived else "WHERE archived = 0"
         with self._connect() as conn:
+            cols = self._table_columns(conn, "ai_prompt_documents")
+            select_cols = ["prompt_doc_id", "title", "description", "content_md", "source_type",
+                           "readonly", "archived", "variables_json", "content_hash",
+                           "created_at", "updated_at"]
             rows = conn.execute(
                 f"""
-                SELECT prompt_doc_id, title, description, content_md, source_type,
-                       readonly, archived, variables_json, content_hash,
-                       created_at, updated_at
+                SELECT {', '.join(select_cols)}
                 FROM ai_prompt_documents
                 {where_clause}
                 ORDER BY archived ASC, 
@@ -485,11 +588,13 @@ class PromptRepository:
 
     def get_prompt_document(self, prompt_doc_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
+            cols = self._table_columns(conn, "ai_prompt_documents")
+            select_cols = ["prompt_doc_id", "title", "description", "content_md", "source_type",
+                           "readonly", "archived", "variables_json", "content_hash",
+                           "created_at", "updated_at"]
             row = conn.execute(
-                """
-                SELECT prompt_doc_id, title, description, content_md, source_type,
-                       readonly, archived, variables_json, content_hash,
-                       created_at, updated_at
+                f"""
+                SELECT {', '.join(select_cols)}
                 FROM ai_prompt_documents
                 WHERE prompt_doc_id = ?
                 """,
@@ -499,11 +604,13 @@ class PromptRepository:
 
     def get_prompt_document_by_title(self, title: str) -> dict[str, Any] | None:
         with self._connect() as conn:
+            cols = self._table_columns(conn, "ai_prompt_documents")
+            select_cols = ["prompt_doc_id", "title", "description", "content_md", "source_type",
+                           "readonly", "archived", "variables_json", "content_hash",
+                           "created_at", "updated_at"]
             row = conn.execute(
-                """
-                SELECT prompt_doc_id, title, description, content_md, source_type,
-                       readonly, archived, variables_json, content_hash,
-                       created_at, updated_at
+                f"""
+                SELECT {', '.join(select_cols)}
                 FROM ai_prompt_documents
                 WHERE title = ? AND archived = 0
                 """,
@@ -513,35 +620,62 @@ class PromptRepository:
 
     def upsert_prompt_document(self, record: dict[str, Any]) -> None:
         with self._connect() as conn:
+            existing = conn.execute(
+                "SELECT source_type, readonly, archived FROM ai_prompt_documents WHERE prompt_doc_id = ?",
+                (record.get("prompt_doc_id", ""),)
+            ).fetchone()
+            existing_dict = dict(existing) if existing else None
+
+            # Check if existing is user-created - protect user prompts
+            if existing_dict and existing_dict.get("source_type") == "user":
+                logger.info(
+                    f"[PromptRepository] Skip user prompt: prompt_doc_id={record.get('prompt_doc_id')}, "
+                    f"source_type=user"
+                )
+                return
+
+            # Preserve existing archived state (seed import never restores archived=true)
+            archived = record.get("archived") if record.get("archived") is not None else (existing_dict.get("archived", 0) if existing_dict else 0)
+            readonly = record.get("readonly") if record.get("readonly") is not None else (existing_dict.get("readonly", 0) if existing_dict else 0)
+            source_type = record.get("source_type") or (existing_dict.get("source_type", "default") if existing_dict else "default")
+
+            # Build dynamic INSERT based on available columns
+            cols = self._table_columns(conn, "ai_prompt_documents")
+            base_cols = ["prompt_doc_id", "title", "description", "content_md", "source_type",
+                         "readonly", "archived", "variables_json", "content_hash", "created_at", "updated_at"]
+            placeholders = ["?", "?", "?", "?", "?", "?", "?", "?", "?", "CURRENT_TIMESTAMP", "CURRENT_TIMESTAMP"]
+            values = [
+                record.get("prompt_doc_id", ""),
+                record.get("title", ""),
+                record.get("description", ""),
+                record.get("content_md", ""),
+                source_type,
+                int(readonly),
+                int(archived),
+                record.get("variables_json", "[]"),
+                record.get("content_hash", ""),
+            ]
+
+            set_clauses = [
+                "title = excluded.title",
+                "description = excluded.description",
+                "content_md = excluded.content_md",
+                "source_type = COALESCE(NULLIF(excluded.source_type, ''), ai_prompt_documents.source_type)",
+                "readonly = COALESCE(excluded.readonly, ai_prompt_documents.readonly)",
+                "archived = COALESCE(excluded.archived, ai_prompt_documents.archived)",
+                "variables_json = excluded.variables_json",
+                "content_hash = excluded.content_hash",
+                "updated_at = CURRENT_TIMESTAMP",
+            ]
+
             conn.execute(
-                """
-                INSERT INTO ai_prompt_documents (
-                    prompt_doc_id, title, description, content_md, source_type,
-                    readonly, archived, variables_json, content_hash,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                f"""
+                INSERT INTO ai_prompt_documents ({', '.join(base_cols)})
+                VALUES ({', '.join(placeholders)})
                 ON CONFLICT(prompt_doc_id) DO UPDATE SET
-                    title = excluded.title,
-                    description = excluded.description,
-                    content_md = excluded.content_md,
-                    source_type = excluded.source_type,
-                    readonly = excluded.readonly,
-                    archived = excluded.archived,
-                    variables_json = excluded.variables_json,
-                    content_hash = excluded.content_hash,
-                    updated_at = CURRENT_TIMESTAMP
+                    {', '.join(set_clauses)}
                 """,
-                (
-                    record.get("prompt_doc_id", ""),
-                    record.get("title", ""),
-                    record.get("description", ""),
-                    record.get("content_md", ""),
-                    record.get("source_type", "user"),
-                    int(bool(record.get("readonly", 0))),
-                    int(bool(record.get("archived", 0))),
-                    record.get("variables_json", "[]"),
-                    record.get("content_hash", ""),
-                ),
+                tuple(values),
             )
 
     def archive_prompt_document(self, prompt_doc_id: str, archived: bool = True) -> None:
