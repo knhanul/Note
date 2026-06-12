@@ -3363,6 +3363,7 @@ Rectangle {
         } catch (e) {
 
             root.ragIndexingRunning = false
+            if (typeof window !== "undefined") window.ragIndexingBusy = false
 
             clearRagIndexingProgress()
 
@@ -3438,6 +3439,7 @@ Rectangle {
         } catch (e) {
 
             root.ragIndexingRunning = false
+            if (typeof window !== "undefined") window.ragIndexingBusy = false
 
             clearRagIndexingProgress()
 
@@ -3660,6 +3662,7 @@ Rectangle {
                 console.log("[AIAssistantPanel] RAG index status: " + status)
 
                 root.ragIndexingRunning = false
+                if (typeof window !== "undefined") window.ragIndexingBusy = false
 
                 clearRagIndexingProgress()
 
@@ -3742,6 +3745,7 @@ Rectangle {
                 root.ragRequestRunning = false
 
                 root.ragIndexingRunning = false
+                if (typeof window !== "undefined") window.ragIndexingBusy = false
 
                 clearRagIndexingProgress()
 
