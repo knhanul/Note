@@ -4051,11 +4051,25 @@ Rectangle {
 
                         radius: Metrics.radiusSm
 
-                        color: root.aiModeIndex === 0 ? Colors.primary500 : Colors.bgSecondary
+                        color: root.aiModeIndex === 0 ? Colors.primary50 : (currentDocTabMA.containsMouse ? Colors.bgSecondary : "transparent")
 
-                        border.color: root.aiModeIndex === 0 ? Colors.primary500 : Colors.borderLight
+                        border.width: 0
 
-                        border.width: 1
+                        Rectangle {
+                            anchors.bottom: parent.bottom
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            height: 2
+                            color: Colors.primary500
+                            radius: Metrics.radiusSm
+                            visible: root.aiModeIndex === 0
+                        }
+
+                        MouseArea {
+                            id: currentDocTabMA
+                            anchors.fill: parent
+                            hoverEnabled: true
+                        }
 
                     }
 
@@ -4069,13 +4083,14 @@ Rectangle {
 
                         font.pixelSize: Typography.caption
 
-                        font.weight: root.aiModeIndex === 0 ? Typography.weightMedium : Typography.weightRegular
+                        font.weight: root.aiModeIndex === 0 ? Typography.weightSemibold : Typography.weightRegular
 
-                        color: root.aiModeIndex === 0 ? Colors.white : Colors.textSecondary
+                        color: root.aiModeIndex === 0 ? Colors.primary700 : Colors.textSecondary
 
                     }
 
                 }
+
 
 
 
@@ -4095,11 +4110,25 @@ Rectangle {
 
                         radius: Metrics.radiusSm
 
-                        color: root.aiModeIndex === 1 ? Colors.primary500 : Colors.bgSecondary
+                        color: root.aiModeIndex === 1 ? Colors.primary50 : (referenceDocTabMA.containsMouse ? Colors.bgSecondary : "transparent")
 
-                        border.color: root.aiModeIndex === 1 ? Colors.primary500 : Colors.borderLight
+                        border.width: 0
 
-                        border.width: 1
+                        Rectangle {
+                            anchors.bottom: parent.bottom
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            height: 2
+                            color: Colors.primary500
+                            radius: Metrics.radiusSm
+                            visible: root.aiModeIndex === 1
+                        }
+
+                        MouseArea {
+                            id: referenceDocTabMA
+                            anchors.fill: parent
+                            hoverEnabled: true
+                        }
 
                     }
 
@@ -4113,9 +4142,9 @@ Rectangle {
 
                         font.pixelSize: Typography.caption
 
-                        font.weight: root.aiModeIndex === 1 ? Typography.weightMedium : Typography.weightRegular
+                        font.weight: root.aiModeIndex === 1 ? Typography.weightSemibold : Typography.weightRegular
 
-                        color: root.aiModeIndex === 1 ? Colors.white : Colors.textSecondary
+                        color: root.aiModeIndex === 1 ? Colors.primary700 : Colors.textSecondary
 
                     }
 

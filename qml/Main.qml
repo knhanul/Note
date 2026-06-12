@@ -2258,16 +2258,24 @@ Window {
                                 height: 26
                                 width: 54
                                 radius: Metrics.radiusMd
-                                color: sidebar.sidebarTabIdx === 0 ? Colors.primary500 : (folderTabMA.containsMouse ? Colors.primary50 : "transparent")
-                                border.color: sidebar.sidebarTabIdx === 0 ? Colors.primary600 : (folderTabMA.containsMouse ? Colors.primary200 : Colors.borderLight)
-                                border.width: 1
+                                color: sidebar.sidebarTabIdx === 0 ? Colors.primary50 : (folderTabMA.containsMouse ? Colors.bgSecondary : "transparent")
+                                border.width: 0
                                 Text {
                                     anchors.centerIn: parent
                                     text: "폴더"
                                     font.family: Typography.fontPrimary
                                     font.weight: sidebar.sidebarTabIdx === 0 ? Typography.weightSemibold : Typography.weightRegular
                                     font.pixelSize: 11
-                                    color: sidebar.sidebarTabIdx === 0 ? "white" : Colors.textSecondary
+                                    color: sidebar.sidebarTabIdx === 0 ? Colors.primary700 : Colors.textSecondary
+                                }
+                                Rectangle {
+                                    anchors.bottom: parent.bottom
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    height: 2
+                                    color: Colors.primary500
+                                    radius: Metrics.radiusMd
+                                    visible: sidebar.sidebarTabIdx === 0
                                 }
                                 MouseArea {
                                     id: folderTabMA
@@ -2285,16 +2293,24 @@ Window {
                                 height: 26
                                 width: 54
                                 radius: Metrics.radiusMd
-                                color: sidebar.sidebarTabIdx === 1 ? Colors.primary500 : (tagTabMA.containsMouse ? Colors.primary50 : "transparent")
-                                border.color: sidebar.sidebarTabIdx === 1 ? Colors.primary600 : (tagTabMA.containsMouse ? Colors.primary200 : Colors.borderLight)
-                                border.width: 1
+                                color: sidebar.sidebarTabIdx === 1 ? Colors.primary50 : (tagTabMA.containsMouse ? Colors.bgSecondary : "transparent")
+                                border.width: 0
                                 Text {
                                     anchors.centerIn: parent
                                     text: "태그"
                                     font.family: Typography.fontPrimary
                                     font.weight: sidebar.sidebarTabIdx === 1 ? Typography.weightSemibold : Typography.weightRegular
                                     font.pixelSize: 11
-                                    color: sidebar.sidebarTabIdx === 1 ? "white" : Colors.textSecondary
+                                    color: sidebar.sidebarTabIdx === 1 ? Colors.primary700 : Colors.textSecondary
+                                }
+                                Rectangle {
+                                    anchors.bottom: parent.bottom
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    height: 2
+                                    color: Colors.primary500
+                                    radius: Metrics.radiusMd
+                                    visible: sidebar.sidebarTabIdx === 1
                                 }
                                 MouseArea {
                                     id: tagTabMA
@@ -3232,16 +3248,28 @@ Window {
                                             Layout.fillWidth: true
                                             Layout.fillHeight: true
                                             radius: Metrics.radiusSm
-                                            color: noteController && noteController.sortField === "updated_at" && !(noteController && noteController.isFilterActive) ? Colors.primary500 : "transparent"
+                                            color: noteController && noteController.sortField === "updated_at" && !(noteController && noteController.isFilterActive) ? "transparent" : (updatedSortMA.containsMouse ? Colors.bgSecondary : "transparent")
                                             Text {
                                                 anchors.centerIn: parent
                                                 text: "수정일"
                                                 font.family: Typography.fontPrimary
                                                 font.pixelSize: 11
-                                                color: noteController && noteController.sortField === "updated_at" && !(noteController && noteController.isFilterActive) ? "white" : Colors.textTertiary
+                                                font.weight: noteController && noteController.sortField === "updated_at" && !(noteController && noteController.isFilterActive) ? Typography.weightSemibold : Typography.weightRegular
+                                                color: noteController && noteController.sortField === "updated_at" && !(noteController && noteController.isFilterActive) ? Colors.primary700 : Colors.textTertiary
+                                            }
+                                            Rectangle {
+                                                anchors.bottom: parent.bottom
+                                                anchors.left: parent.left
+                                                anchors.right: parent.right
+                                                height: 2
+                                                color: Colors.primary500
+                                                radius: Metrics.radiusSm
+                                                visible: noteController && noteController.sortField === "updated_at" && !(noteController && noteController.isFilterActive)
                                             }
                                             MouseArea {
+                                                id: updatedSortMA
                                                 anchors.fill: parent
+                                                hoverEnabled: true
                                                 onClicked: if (noteController && !noteController.isFilterActive) noteController.setSortField("updated_at")
                                             }
                                         }
@@ -3249,16 +3277,28 @@ Window {
                                             Layout.fillWidth: true
                                             Layout.fillHeight: true
                                             radius: Metrics.radiusSm
-                                            color: noteController && noteController.sortField === "created_at" && !(noteController && noteController.isFilterActive) ? Colors.primary500 : "transparent"
+                                            color: noteController && noteController.sortField === "created_at" && !(noteController && noteController.isFilterActive) ? "transparent" : (createdSortMA.containsMouse ? Colors.bgSecondary : "transparent")
                                             Text {
                                                 anchors.centerIn: parent
                                                 text: "생성일"
                                                 font.family: Typography.fontPrimary
                                                 font.pixelSize: 11
-                                                color: noteController && noteController.sortField === "created_at" && !(noteController && noteController.isFilterActive) ? "white" : Colors.textTertiary
+                                                font.weight: noteController && noteController.sortField === "created_at" && !(noteController && noteController.isFilterActive) ? Typography.weightSemibold : Typography.weightRegular
+                                                color: noteController && noteController.sortField === "created_at" && !(noteController && noteController.isFilterActive) ? Colors.primary700 : Colors.textTertiary
+                                            }
+                                            Rectangle {
+                                                anchors.bottom: parent.bottom
+                                                anchors.left: parent.left
+                                                anchors.right: parent.right
+                                                height: 2
+                                                color: Colors.primary500
+                                                radius: Metrics.radiusSm
+                                                visible: noteController && noteController.sortField === "created_at" && !(noteController && noteController.isFilterActive)
                                             }
                                             MouseArea {
+                                                id: createdSortMA
                                                 anchors.fill: parent
+                                                hoverEnabled: true
                                                 onClicked: if (noteController && !noteController.isFilterActive) noteController.setSortField("created_at")
                                             }
                                         }
@@ -3266,16 +3306,28 @@ Window {
                                             Layout.fillWidth: true
                                             Layout.fillHeight: true
                                             radius: Metrics.radiusSm
-                                            color: noteController && noteController.sortField === "title" && !(noteController && noteController.isFilterActive) ? Colors.primary500 : "transparent"
+                                            color: noteController && noteController.sortField === "title" && !(noteController && noteController.isFilterActive) ? "transparent" : (titleSortMA.containsMouse ? Colors.bgSecondary : "transparent")
                                             Text {
                                                 anchors.centerIn: parent
                                                 text: "제목"
                                                 font.family: Typography.fontPrimary
                                                 font.pixelSize: 11
-                                                color: noteController && noteController.sortField === "title" && !(noteController && noteController.isFilterActive) ? "white" : Colors.textTertiary
+                                                font.weight: noteController && noteController.sortField === "title" && !(noteController && noteController.isFilterActive) ? Typography.weightSemibold : Typography.weightRegular
+                                                color: noteController && noteController.sortField === "title" && !(noteController && noteController.isFilterActive) ? Colors.primary700 : Colors.textTertiary
+                                            }
+                                            Rectangle {
+                                                anchors.bottom: parent.bottom
+                                                anchors.left: parent.left
+                                                anchors.right: parent.right
+                                                height: 2
+                                                color: Colors.primary500
+                                                radius: Metrics.radiusSm
+                                                visible: noteController && noteController.sortField === "title" && !(noteController && noteController.isFilterActive)
                                             }
                                             MouseArea {
+                                                id: titleSortMA
                                                 anchors.fill: parent
+                                                hoverEnabled: true
                                                 onClicked: if (noteController && !noteController.isFilterActive) noteController.setSortField("title")
                                             }
                                         }
@@ -3283,16 +3335,28 @@ Window {
                                             Layout.fillWidth: true
                                             Layout.fillHeight: true
                                             radius: Metrics.radiusSm
-                                            color: noteController && noteController.sortField === "content" && !(noteController && noteController.isFilterActive) ? Colors.primary500 : "transparent"
+                                            color: noteController && noteController.sortField === "content" && !(noteController && noteController.isFilterActive) ? "transparent" : (contentSortMA.containsMouse ? Colors.bgSecondary : "transparent")
                                             Text {
                                                 anchors.centerIn: parent
                                                 text: "내용"
                                                 font.family: Typography.fontPrimary
                                                 font.pixelSize: 11
-                                                color: noteController && noteController.sortField === "content" && !(noteController && noteController.isFilterActive) ? "white" : Colors.textTertiary
+                                                font.weight: noteController && noteController.sortField === "content" && !(noteController && noteController.isFilterActive) ? Typography.weightSemibold : Typography.weightRegular
+                                                color: noteController && noteController.sortField === "content" && !(noteController && noteController.isFilterActive) ? Colors.primary700 : Colors.textTertiary
+                                            }
+                                            Rectangle {
+                                                anchors.bottom: parent.bottom
+                                                anchors.left: parent.left
+                                                anchors.right: parent.right
+                                                height: 2
+                                                color: Colors.primary500
+                                                radius: Metrics.radiusSm
+                                                visible: noteController && noteController.sortField === "content" && !(noteController && noteController.isFilterActive)
                                             }
                                             MouseArea {
+                                                id: contentSortMA
                                                 anchors.fill: parent
+                                                hoverEnabled: true
                                                 onClicked: if (noteController && !noteController.isFilterActive) noteController.setSortField("content")
                                             }
                                         }
