@@ -472,7 +472,9 @@ Window {
     function resolveTemplateDialogFolderId(folderId) {
         if (!folderController) return ""
         var fid = folderId || ""
-        if (!fid || folderController.isSmartFolder(fid)) return ""
+        if (!fid || folderController.isSmartFolder(fid)) {
+            fid = folderController.getFirstRegularFolderId()
+        }
         return fid
     }
 
@@ -1246,8 +1248,8 @@ Window {
     function openTemplateManagerDialog() {
         if (!folderController) return
 
-        var selectedFolderId = folderController.currentFolderId || ""
-        if (!selectedFolderId || folderController.isSmartFolder(selectedFolderId)) {
+        var selectedFolderId = resolveTemplateDialogFolderId(folderController.currentFolderId || "")
+        if (!selectedFolderId) {
             return
         }
 
@@ -1297,7 +1299,7 @@ Window {
     function canOpenFolderSettingsDialog() {
         if (!folderController) return false
         var fid = folderController.currentFolderId || ""
-        return !!fid && !folderController.isSmartFolder(fid)
+        return !!fid
     }
 
     function saveTemplateEditor() {
@@ -2337,16 +2339,15 @@ Window {
                                 width: 28
                                 height: 20
                                 radius: Metrics.radiusMd
-                                color: canOpenFolderSettingsDialog() && manageTemplateArea.containsMouse ? Colors.primary100 : "transparent"
+                                color: manageTemplateArea.containsMouse ? Colors.primary100 : "transparent"
                                 border.width: 1
-                                border.color: canOpenFolderSettingsDialog() && manageTemplateArea.containsMouse ? Colors.primary200 : "transparent"
-                                opacity: canOpenFolderSettingsDialog() ? 1.0 : 0.4
+                                border.color: manageTemplateArea.containsMouse ? Colors.primary200 : "transparent"
+                                opacity: 1.0
 
                                 MouseArea {
                                     id: manageTemplateArea
                                     anchors.fill: parent
                                     hoverEnabled: true
-                                    enabled: canOpenFolderSettingsDialog()
                                     onClicked: window.openTemplateManagerDialog()
                                 }
 
@@ -5546,6 +5547,11 @@ Window {
         anchors.fill: parent
         color: Qt.rgba(0, 0, 0, 0.35)
         z: 20001
+
+        MouseArea {
+            anchors.fill: parent
+            onClicked: {}
+        }
     }
 
     Rectangle {
@@ -5642,9 +5648,18 @@ Window {
                             Layout.fillWidth: true
                             height: 40
                             radius: Metrics.radiusMd
-                            color: folderSettingsMenuIndex === 0 ? Colors.primary50 : (folderRenameMenuMA.containsMouse ? Colors.bgPrimary : "transparent")
-                            border.width: 1
-                            border.color: folderSettingsMenuIndex === 0 ? Colors.primary200 : Colors.borderLight
+                            color: folderSettingsMenuIndex === 0 ? Colors.primary50 : (folderRenameMenuMA.containsMouse ? Colors.bgSecondary : "transparent")
+                            border.width: 0
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.bottom: parent.bottom
+                                width: 3
+                                color: Colors.primary500
+                                radius: Metrics.radiusFull
+                                visible: folderSettingsMenuIndex === 0
+                            }
 
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
@@ -5669,9 +5684,18 @@ Window {
                             Layout.fillWidth: true
                             height: 40
                             radius: Metrics.radiusMd
-                            color: folderSettingsMenuIndex === 1 ? Colors.primary50 : (templateSettingsMenuMA.containsMouse ? Colors.bgPrimary : "transparent")
-                            border.width: 1
-                            border.color: folderSettingsMenuIndex === 1 ? Colors.primary200 : Colors.borderLight
+                            color: folderSettingsMenuIndex === 1 ? Colors.primary50 : (templateSettingsMenuMA.containsMouse ? Colors.bgSecondary : "transparent")
+                            border.width: 0
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.bottom: parent.bottom
+                                width: 3
+                                color: Colors.primary500
+                                radius: Metrics.radiusFull
+                                visible: folderSettingsMenuIndex === 1
+                            }
 
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
@@ -5696,9 +5720,18 @@ Window {
                             Layout.fillWidth: true
                             height: 40
                             radius: Metrics.radiusMd
-                            color: folderSettingsMenuIndex === 2 ? Colors.primary50 : (folderLocationMenuMA.containsMouse ? Colors.bgPrimary : "transparent")
-                            border.width: 1
-                            border.color: folderSettingsMenuIndex === 2 ? Colors.primary200 : Colors.borderLight
+                            color: folderSettingsMenuIndex === 2 ? Colors.primary50 : (folderLocationMenuMA.containsMouse ? Colors.bgSecondary : "transparent")
+                            border.width: 0
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.bottom: parent.bottom
+                                width: 3
+                                color: Colors.primary500
+                                radius: Metrics.radiusFull
+                                visible: folderSettingsMenuIndex === 2
+                            }
 
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
@@ -5741,9 +5774,18 @@ Window {
                             Layout.fillWidth: true
                             height: 40
                             radius: Metrics.radiusMd
-                            color: folderSettingsMenuIndex === 3 ? Colors.primary50 : (folderOrderMenuMA.containsMouse ? Colors.bgPrimary : "transparent")
-                            border.width: 1
-                            border.color: folderSettingsMenuIndex === 3 ? Colors.primary200 : Colors.borderLight
+                            color: folderSettingsMenuIndex === 3 ? Colors.primary50 : (folderOrderMenuMA.containsMouse ? Colors.bgSecondary : "transparent")
+                            border.width: 0
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.bottom: parent.bottom
+                                width: 3
+                                color: Colors.primary500
+                                radius: Metrics.radiusFull
+                                visible: folderSettingsMenuIndex === 3
+                            }
 
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
@@ -6917,10 +6959,23 @@ Window {
         }
     }
 
+    Rectangle {
+        id: aiSettingsBackdrop
+        visible: aiSettingsDialog.visible
+        anchors.fill: parent
+        color: Qt.rgba(0, 0, 0, 0.35)
+        z: 20001
+
+        MouseArea {
+            anchors.fill: parent
+            onClicked: {}
+        }
+    }
+
     AISettingsDialog {
         id: aiSettingsDialog
         visible: false
-        z: 9002
+        z: 20002
 
         onClosed: {
             visible = false

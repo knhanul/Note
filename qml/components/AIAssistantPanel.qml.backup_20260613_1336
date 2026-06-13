@@ -4707,196 +4707,65 @@ Rectangle {
 
                                     anchors.centerIn: parent
 
-                                    spacing: 4
+                                    spacing: Metrics.xs
 
 
 
-                                    RowLayout {
+                                    Text {
 
-                                        width: parent.width
+                                        text: "입력 소스: " + (root.currentDocumentSourceMode === "external_file"
 
-                                        spacing: Metrics.sm
+                                            ? (root.currentExternalDocumentType === "external_folder" ? "외부 폴더 1개" : "외부 파일 1개")
 
-
-
-                                        Column {
-
-                                            Layout.fillWidth: true
-
-                                            spacing: 2
-
-
-
-                                            Text {
-
-                                                text: "입력 소스"
-
-                                                font.family: Typography.fontPrimary
-
-                                                font.pixelSize: Typography.caption
-
-                                                font.weight: Typography.weightSemiBold
-
-                                                color: Colors.textPrimary
-
-                                            }
-
-
-
-                                            Text {
-
-                                        width: parent.width
-
-                                        visible: true
-
-                                        text: root.currentDocumentSourceMode === "note"
-                                              ? ((window.currentNote && window.currentNote.title) ? window.currentNote.title : "현재 노트")
-                                              : (root.currentExternalDocumentTitle !== "" ? root.currentExternalDocumentTitle : (root.currentExternalDocumentPath !== "" ? root.currentExternalDocumentPath : (root.currentExternalDocumentType === "external_folder" ? "외부 폴더가 선택되지 않았습니다." : "외부 파일이 선택되지 않았습니다.")))
+                                            : "현재 노트")
 
                                         font.family: Typography.fontPrimary
 
                                         font.pixelSize: Typography.caption
 
-                                        color: Colors.primary700
+                                        font.weight: Typography.weightMedium
+
+                                        color: Colors.textPrimary
+
+                                    }
+
+
+
+                                    Text {
+
+                                        width: parent.width
+
+                                        visible: root.currentDocumentSourceMode === "external_file"
+
+                                        text: root.currentExternalDocumentTitle !== "" ? root.currentExternalDocumentTitle : (root.currentExternalDocumentPath !== "" ? root.currentExternalDocumentPath : (root.currentExternalDocumentType === "external_folder" ? "외부 폴더가 선택되지 않았습니다." : "외부 파일이 선택되지 않았습니다."))
+
+                                        font.family: Typography.fontPrimary
+
+                                        font.pixelSize: Typography.caption
+
+                                        color: Colors.textSecondary
 
                                         elide: Text.ElideRight
 
                                     }
 
-                                        }
 
-                                        RowLayout {
 
-                                            Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+                                    Text {
 
-                                            spacing: 6
+                                        width: parent.width
 
+                                        visible: root.currentDocumentSourceMode === "external_file" && root.currentExternalDocumentType === "external_folder" && root.currentExternalDocumentSelectedCount > 0
 
+                                        text: "폴더 문서 처리: " + root.currentExternalDocumentProcessedCount + " / " + root.currentExternalDocumentSelectedCount + " (지원 파일 총 " + root.currentExternalDocumentTotalSupportedCount + ")"
 
-                                            Button {
+                                        font.family: Typography.fontPrimary
 
-                                                Layout.preferredWidth: 32
+                                        font.pixelSize: 10
 
-                                                Layout.preferredHeight: 32
+                                        color: Colors.textSecondary
 
-                                                text: ""
-
-                                                enabled: root.currentDocumentSourceMode !== "note" || root.currentExternalDocumentPath !== ""
-
-                                                background: Rectangle {
-
-                                                    color: noteSourceMouse.containsMouse ? Colors.bgSecondary : "transparent"
-
-                                                    radius: Metrics.radiusSm
-
-                                                }
-
-                                                MouseArea {
-
-                                                    id: noteSourceMouse
-
-                                                    anchors.fill: parent
-
-                                                    hoverEnabled: true
-
-                                                    enabled: parent.enabled
-
-                                                    onClicked: {
-
-                                                        root.useCurrentNoteSource()
-
-                                                    }
-
-                                                }
-
-                                                Image {
-
-                                                anchors.centerIn: parent
-
-                                                source: "../assets/icons/Add_Current_Doc.png"
-
-                                                sourceSize: Qt.size(28, 28)
-
-                                                fillMode: Image.PreserveAspectFit
-
-                                                opacity: parent.enabled ? 1 : 0.45
-
-                                            }
-
-                                            ToolTip.text: "현재 노트에서 가져오기"
-
-                                            ToolTip.visible: noteSourceMouse.containsMouse
-
-                                            ToolTip.delay: 350
-
-                                            ToolTip.timeout: 4000
-
-                                        }
-
-
-
-
-                                        Button {
-
-                                            Layout.preferredWidth: 32
-
-                                            Layout.preferredHeight: 32
-
-                                            text: ""
-
-                                            enabled: canUseAI() && !root.aiRunning
-
-                                            background: Rectangle {
-
-                                                color: fileSourceMouse.containsMouse ? Colors.bgSecondary : "transparent"
-
-                                                radius: Metrics.radiusSm
-
-                                            }
-
-                                            MouseArea {
-
-                                                id: fileSourceMouse
-
-                                                anchors.fill: parent
-
-                                                hoverEnabled: true
-
-                                                enabled: parent.enabled
-
-                                                onClicked: {
-
-                                                    currentDocumentFileDialog.open()
-
-                                                }
-
-                                            }
-
-                                            Image {
-
-                                                anchors.centerIn: parent
-
-                                                source: "../assets/icons/Add_External_File.png"
-
-                                                sourceSize: Qt.size(28, 28)
-
-                                                fillMode: Image.PreserveAspectFit
-
-                                                opacity: parent.enabled ? 1 : 0.45
-
-                                            }
-
-                                            ToolTip.text: "파일 불러오기"
-
-                                            ToolTip.visible: fileSourceMouse.containsMouse
-
-                                            ToolTip.delay: 350
-
-                                            ToolTip.timeout: 4000
-
-                                        }
-
-                                    }
+                                        wrapMode: Text.Wrap
 
                                     }
 
@@ -5234,6 +5103,110 @@ Rectangle {
 
 
 
+                                    RowLayout {
+
+                                        width: parent.width
+
+                                        spacing: Metrics.xs
+
+
+
+                                        Button {
+
+                                            Layout.fillWidth: true
+
+                                            Layout.preferredHeight: 30
+
+                                            text: "열린 노트"
+
+                                            enabled: root.currentDocumentSourceMode !== "note" || root.currentExternalDocumentPath !== ""
+
+                                            contentItem: Text {
+
+                                                text: parent.text
+
+                                                font.family: Typography.fontPrimary
+
+                                                font.pixelSize: Typography.caption
+
+                                                font.weight: Typography.weightMedium
+
+                                                horizontalAlignment: Text.AlignHCenter
+
+                                                verticalAlignment: Text.AlignVCenter
+
+                                                color: (parent.enabled && root.currentDocumentSourceMode === "note") ? Colors.white : (parent.enabled ? Colors.textPrimary : Colors.textTertiary)
+
+                                            }
+
+                                            background: Rectangle {
+
+                                                color: parent.enabled ? (root.currentDocumentSourceMode === "note" ? Colors.primary500 : Colors.surface) : Colors.bgTertiary
+
+                                                border.color: root.currentDocumentSourceMode === "note" ? Colors.primary500 : Colors.borderLight
+
+                                                radius: Metrics.radiusSm
+
+                                            }
+
+                                            onClicked: {
+
+                                                root.useCurrentNoteSource()
+
+                                            }
+
+                                        }
+
+
+
+                                        Button {
+
+                                            Layout.fillWidth: true
+
+                                            Layout.preferredHeight: 30
+
+                                            text: "파일 불러오기"
+
+                                            enabled: canUseAI() && !root.aiRunning
+
+                                            contentItem: Text {
+
+                                                text: parent.text
+
+                                                font.family: Typography.fontPrimary
+
+                                                font.pixelSize: Typography.caption
+
+                                                font.weight: Typography.weightMedium
+
+                                                horizontalAlignment: Text.AlignHCenter
+
+                                                verticalAlignment: Text.AlignVCenter
+
+                                                color: (parent.enabled && root.currentDocumentSourceMode === "external_file") ? Colors.white : (parent.enabled ? Colors.textPrimary : Colors.textTertiary)
+
+                                            }
+
+                                            background: Rectangle {
+
+                                                color: parent.enabled ? (root.currentDocumentSourceMode === "external_file" ? Colors.primary500 : Colors.surface) : Colors.bgTertiary
+
+                                                border.color: root.currentDocumentSourceMode === "external_file" ? Colors.primary500 : Colors.borderLight
+
+                                                radius: Metrics.radiusSm
+
+                                            }
+
+                                            onClicked: {
+
+                                                currentDocumentFileDialog.open()
+
+                                            }
+
+                                        }
+
+                                    }
+
                                 }
 
                             }
@@ -5243,37 +5216,13 @@ Rectangle {
 
 
 
-                            RowLayout {
-
-                                width: parent.width
-
-                                spacing: Metrics.sm
-
-                                Rectangle {
-
-                                    Layout.fillWidth: true
-
-                                    Layout.minimumHeight: 84
-
-                                    Layout.preferredHeight: Math.max(84, Math.min(220, actionInput.contentHeight + 20))
-
-                                    Layout.maximumHeight: 220
-
-                                    color: Colors.surface
-
-                                    border.color: Colors.borderLight
-
-                                    radius: Metrics.radiusSm
-
-                                    clip: true
-
-                                    TextArea {
+                            TextField {
 
                                 id: actionInput
 
-                                        anchors.fill: parent
+                                width: parent.width
 
-                                        anchors.margins: 6
+                                height: 36
 
                                 placeholderText: root.selectedAction ? (root.selectedAction.action_id === "current_note_qa" ? "현재 문서에 대해 질문하세요." : getInputModePlaceholder(root.selectedAction.input_mode, root.selectedAction.input_placeholder)) : "AI 기능을 선택하세요"
 
@@ -5281,38 +5230,27 @@ Rectangle {
 
                                 font.pixelSize: Typography.bodySmall
 
-                                        wrapMode: TextEdit.Wrap
-
                                 enabled: canUseAI() && !root.aiRunning
 
-                                        selectByMouse: true
+                            }
 
-                                        Keys.onPressed: function(event) {
-                                            if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && (event.modifiers & Qt.ControlModifier)) {
-                                                event.accepted = true
-                                                if (root.aiRunning) {
-                                                    var ac = getAssistantController()
-                                                    if (ac) {
-                                                        ac.cancel()
-                                                        console.log("[AIAssistantPanel] 작업 취소됨")
-                                                    }
-                                                } else {
-                                                    runSelectedAction()
-                                                }
-                                            }
-                                        }
 
-                                        background: null
 
-                                    }
+                            RowLayout {
 
-                                }
+                                width: parent.width
+
+                                height: 36
+
+                                spacing: Metrics.sm
+
+
 
                                 Button {
 
-                                    Layout.preferredWidth: 56
+                                    Layout.fillWidth: true
 
-                                    Layout.preferredHeight: 34
+                                    Layout.preferredHeight: 36
 
                                     text: root.aiRunning ? "중지" : "실행"
 
@@ -5788,11 +5726,11 @@ Rectangle {
 
                                     width: parent.width
 
-                                    columns: 6
+                                    columns: 3
 
-                                    rows: 1
+                                    rows: 2
 
-                                    rowSpacing: 0
+                                    rowSpacing: Metrics.sm
 
                                     columnSpacing: Metrics.sm
 
@@ -5800,39 +5738,45 @@ Rectangle {
 
                                     Button {
 
-                                        Layout.preferredWidth: 40
+                                        Layout.fillWidth: true
 
-                                        Layout.preferredHeight: 40
+                                        Layout.preferredHeight: 32
 
-                                        text: ""
+                                        text: "현재 문서 등록"
 
                                         enabled: canUseAI() && !root.ragIndexingRunning && !root.ragRequestRunning
 
+                                        contentItem: Text {
+
+                                            text: parent.text
+
+                                            font.family: Typography.fontPrimary
+
+                                            font.pixelSize: Typography.caption
+
+                                            horizontalAlignment: Text.AlignHCenter
+
+                                            verticalAlignment: Text.AlignVCenter
+
+                                            color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
+
+                                        }
+
                                         background: Rectangle {
-                                            color: docRegMouse.containsMouse ? Colors.bgSecondary : "transparent"
+
+                                            color: parent.enabled ? Colors.surface : Colors.bgTertiary
+
+                                            border.color: Colors.borderLight
+
                                             radius: Metrics.radiusSm
+
                                         }
 
-                                        MouseArea {
-                                            id: docRegMouse
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            enabled: parent.enabled
-                                            onClicked: indexCurrentNoteForRag()
-                                        }
+                                        onClicked: {
 
-                                        Image {
-                                            anchors.centerIn: parent
-                                            source: "../assets/icons/Add_Current_Doc.png"
-                                            sourceSize: Qt.size(36, 36)
-                                            fillMode: Image.PreserveAspectFit
-                                            opacity: parent.enabled ? 1 : 0.45
-                                        }
+                                            indexCurrentNoteForRag()
 
-                                        ToolTip.text: "현재 문서 등록\n현재 열려 있는 문서를 참고문서로 등록합니다."
-                                        ToolTip.visible: docRegMouse.containsMouse
-                                        ToolTip.delay: 350
-                                        ToolTip.timeout: 4000
+                                        }
 
                                     }
 
@@ -5840,39 +5784,45 @@ Rectangle {
 
                                     Button {
 
-                                        Layout.preferredWidth: 40
+                                        Layout.fillWidth: true
 
-                                        Layout.preferredHeight: 40
+                                        Layout.preferredHeight: 32
 
-                                        text: ""
+                                        text: "현재 폴더 등록"
 
                                         enabled: canUseAI() && !root.ragIndexingRunning && !root.ragRequestRunning
 
+                                        contentItem: Text {
+
+                                            text: parent.text
+
+                                            font.family: Typography.fontPrimary
+
+                                            font.pixelSize: Typography.caption
+
+                                            horizontalAlignment: Text.AlignHCenter
+
+                                            verticalAlignment: Text.AlignVCenter
+
+                                            color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
+
+                                        }
+
                                         background: Rectangle {
-                                            color: folderRegMouse.containsMouse ? Colors.bgSecondary : "transparent"
+
+                                            color: parent.enabled ? Colors.surface : Colors.bgTertiary
+
+                                            border.color: Colors.borderLight
+
                                             radius: Metrics.radiusSm
+
                                         }
 
-                                        MouseArea {
-                                            id: folderRegMouse
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            enabled: parent.enabled
-                                            onClicked: indexCurrentFolderForRag()
-                                        }
+                                        onClicked: {
 
-                                        Image {
-                                            anchors.centerIn: parent
-                                            source: "../assets/icons/Add_Current_Folder.png"
-                                            sourceSize: Qt.size(36, 36)
-                                            fillMode: Image.PreserveAspectFit
-                                            opacity: parent.enabled ? 1 : 0.45
-                                        }
+                                            indexCurrentFolderForRag()
 
-                                        ToolTip.text: "현재 폴더 등록\n현재 선택된 폴더의 문서를 참고문서로 등록합니다."
-                                        ToolTip.visible: folderRegMouse.containsMouse
-                                        ToolTip.delay: 350
-                                        ToolTip.timeout: 4000
+                                        }
 
                                     }
 
@@ -5880,39 +5830,45 @@ Rectangle {
 
                                     Button {
 
-                                        Layout.preferredWidth: 40
+                                        Layout.fillWidth: true
 
-                                        Layout.preferredHeight: 40
+                                        Layout.preferredHeight: 32
 
-                                        text: ""
+                                        text: "전체 노트 등록"
 
                                         enabled: canUseAI() && !root.ragIndexingRunning && !root.ragRequestRunning
 
+                                        contentItem: Text {
+
+                                            text: parent.text
+
+                                            font.family: Typography.fontPrimary
+
+                                            font.pixelSize: Typography.caption
+
+                                            horizontalAlignment: Text.AlignHCenter
+
+                                            verticalAlignment: Text.AlignVCenter
+
+                                            color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
+
+                                        }
+
                                         background: Rectangle {
-                                            color: allRegMouse.containsMouse ? Colors.bgSecondary : "transparent"
+
+                                            color: parent.enabled ? Colors.surface : Colors.bgTertiary
+
+                                            border.color: Colors.borderLight
+
                                             radius: Metrics.radiusSm
+
                                         }
 
-                                        MouseArea {
-                                            id: allRegMouse
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            enabled: parent.enabled
-                                            onClicked: indexAllNotesForRag()
-                                        }
+                                        onClicked: {
 
-                                        Image {
-                                            anchors.centerIn: parent
-                                            source: "../assets/icons/Add_All_Notes.png"
-                                            sourceSize: Qt.size(36, 36)
-                                            fillMode: Image.PreserveAspectFit
-                                            opacity: parent.enabled ? 1 : 0.45
-                                        }
+                                            indexAllNotesForRag()
 
-                                        ToolTip.text: "전체 노트 등록\n모든 노트를 참고문서로 등록합니다."
-                                        ToolTip.visible: allRegMouse.containsMouse
-                                        ToolTip.delay: 350
-                                        ToolTip.timeout: 4000
+                                        }
 
                                     }
 
@@ -5920,39 +5876,45 @@ Rectangle {
 
                                     Button {
 
-                                        Layout.preferredWidth: 40
+                                        Layout.fillWidth: true
 
-                                        Layout.preferredHeight: 40
+                                        Layout.preferredHeight: 32
 
-                                        text: ""
+                                        text: "외부 파일 등록"
 
                                         enabled: canUseAI() && !root.ragIndexingRunning && !root.ragRequestRunning
 
+                                        contentItem: Text {
+
+                                            text: parent.text
+
+                                            font.family: Typography.fontPrimary
+
+                                            font.pixelSize: Typography.caption
+
+                                            horizontalAlignment: Text.AlignHCenter
+
+                                            verticalAlignment: Text.AlignVCenter
+
+                                            color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
+
+                                        }
+
                                         background: Rectangle {
-                                            color: extFileRegMouse.containsMouse ? Colors.bgSecondary : "transparent"
+
+                                            color: parent.enabled ? Colors.surface : Colors.bgTertiary
+
+                                            border.color: Colors.borderLight
+
                                             radius: Metrics.radiusSm
+
                                         }
 
-                                        MouseArea {
-                                            id: extFileRegMouse
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            enabled: parent.enabled
-                                            onClicked: externalFileDialog.open()
-                                        }
+                                        onClicked: {
 
-                                        Image {
-                                            anchors.centerIn: parent
-                                            source: "../assets/icons/Add_External_File.png"
-                                            sourceSize: Qt.size(36, 36)
-                                            fillMode: Image.PreserveAspectFit
-                                            opacity: parent.enabled ? 1 : 0.45
-                                        }
+                                            externalFileDialog.open()
 
-                                        ToolTip.text: "외부 파일 등록\n외부 파일을 선택하여 참고문서로 등록합니다."
-                                        ToolTip.visible: extFileRegMouse.containsMouse
-                                        ToolTip.delay: 350
-                                        ToolTip.timeout: 4000
+                                        }
 
                                     }
 
@@ -5960,39 +5922,45 @@ Rectangle {
 
                                     Button {
 
-                                        Layout.preferredWidth: 40
+                                        Layout.fillWidth: true
 
-                                        Layout.preferredHeight: 40
+                                        Layout.preferredHeight: 32
 
-                                        text: ""
+                                        text: "외부 폴더 등록"
 
                                         enabled: canUseAI() && !root.ragIndexingRunning && !root.ragRequestRunning
 
+                                        contentItem: Text {
+
+                                            text: parent.text
+
+                                            font.family: Typography.fontPrimary
+
+                                            font.pixelSize: Typography.caption
+
+                                            horizontalAlignment: Text.AlignHCenter
+
+                                            verticalAlignment: Text.AlignVCenter
+
+                                            color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
+
+                                        }
+
                                         background: Rectangle {
-                                            color: extFolderRegMouse.containsMouse ? Colors.bgSecondary : "transparent"
+
+                                            color: parent.enabled ? Colors.surface : Colors.bgTertiary
+
+                                            border.color: Colors.borderLight
+
                                             radius: Metrics.radiusSm
+
                                         }
 
-                                        MouseArea {
-                                            id: extFolderRegMouse
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            enabled: parent.enabled
-                                            onClicked: externalFolderDialog.open()
-                                        }
+                                        onClicked: {
 
-                                        Image {
-                                            anchors.centerIn: parent
-                                            source: "../assets/icons/Add_External_Folder.png"
-                                            sourceSize: Qt.size(36, 36)
-                                            fillMode: Image.PreserveAspectFit
-                                            opacity: parent.enabled ? 1 : 0.45
-                                        }
+                                            externalFolderDialog.open()
 
-                                        ToolTip.text: "외부 폴더 등록\n외부 폴더의 파일들을 참고문서로 등록합니다."
-                                        ToolTip.visible: extFolderRegMouse.containsMouse
-                                        ToolTip.delay: 350
-                                        ToolTip.timeout: 4000
+                                        }
 
                                     }
 
@@ -6000,39 +5968,45 @@ Rectangle {
 
                                     Button {
 
-                                        Layout.preferredWidth: 40
+                                        Layout.fillWidth: true
 
-                                        Layout.preferredHeight: 40
+                                        Layout.preferredHeight: 32
 
-                                        text: ""
+                                        text: "참고문서 관리"
 
                                         enabled: canUseAI()
 
+                                        contentItem: Text {
+
+                                            text: parent.text
+
+                                            font.family: Typography.fontPrimary
+
+                                            font.pixelSize: Typography.caption
+
+                                            horizontalAlignment: Text.AlignHCenter
+
+                                            verticalAlignment: Text.AlignVCenter
+
+                                            color: parent.enabled ? Colors.textPrimary : Colors.textTertiary
+
+                                        }
+
                                         background: Rectangle {
-                                            color: refsManageMouse.containsMouse ? Colors.bgSecondary : "transparent"
+
+                                            color: parent.enabled ? Colors.surface : Colors.bgTertiary
+
+                                            border.color: Colors.borderLight
+
                                             radius: Metrics.radiusSm
+
                                         }
 
-                                        MouseArea {
-                                            id: refsManageMouse
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            enabled: parent.enabled
-                                            onClicked: root.openReferenceDocsSettings()
-                                        }
+                                        onClicked: {
 
-                                        Image {
-                                            anchors.centerIn: parent
-                                            source: "../assets/icons/Manage_Refs.png"
-                                            sourceSize: Qt.size(36, 36)
-                                            fillMode: Image.PreserveAspectFit
-                                            opacity: parent.enabled ? 1 : 0.45
-                                        }
+                                            root.openReferenceDocsSettings()
 
-                                        ToolTip.text: "참고문서 관리\n등록된 참고문서를 확인하고 관리합니다."
-                                        ToolTip.visible: refsManageMouse.containsMouse
-                                        ToolTip.delay: 350
-                                        ToolTip.timeout: 4000
+                                        }
 
                                     }
 
@@ -6052,37 +6026,13 @@ Rectangle {
 
 
 
-                            RowLayout {
-
-                                width: parent.width
-
-                                spacing: Metrics.sm
-
-                                Rectangle {
-
-                                    Layout.fillWidth: true
-
-                                    Layout.minimumHeight: 84
-
-                                    Layout.preferredHeight: Math.max(84, Math.min(220, ragActionInput.contentHeight + 20))
-
-                                    Layout.maximumHeight: 220
-
-                                    color: Colors.surface
-
-                                    border.color: Colors.borderLight
-
-                                    radius: Metrics.radiusSm
-
-                                    clip: true
-
-                                    TextArea {
+                                                            TextField {
 
                                 id: ragActionInput
 
-                                        anchors.fill: parent
+                                width: parent.width
 
-                                        anchors.margins: 6
+                                height: 36
 
                                 placeholderText: root.selectedAction ? (root.selectedAction.action_id === "current_note_qa" ? "현재 문서에 대해 질문하세요." : getInputModePlaceholder(root.selectedAction.input_mode)) : "AI 기능을 선택하세요"
 
@@ -6090,42 +6040,31 @@ Rectangle {
 
                                 font.pixelSize: Typography.bodySmall
 
-                                        wrapMode: TextEdit.Wrap
-
                                 enabled: canUseAI() && !root.aiRunning
 
-                                        selectByMouse: true
+                            }
 
-                                        Keys.onPressed: function(event) {
-                                            if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && (event.modifiers & Qt.ControlModifier)) {
-                                                event.accepted = true
-                                                if (root.aiRunning) {
-                                                    var ac = getAssistantController()
-                                                    if (ac) {
-                                                        ac.cancel()
-                                                        console.log("[AIAssistantPanel] 작업 취소됨")
-                                                    }
-                                                } else {
-                                                    runSelectedAction()
-                                                }
-                                            }
-                                        }
 
-                                        background: null
 
-                                    }
+                            RowLayout {
 
-                                }
+                                width: parent.width
+
+                                height: 36
+
+                                spacing: Metrics.sm
+
+
 
                                 Button {
 
-                                    Layout.preferredWidth: 56
+                                    Layout.fillWidth: true
 
-                                    Layout.preferredHeight: 34
+                                    Layout.preferredHeight: 36
 
                                     text: root.aiRunning ? "중지" : "실행"
 
-                                    enabled: canUseAI() && root.selectedAction && !!root.selectedAction.action_id
+                                    enabled: canUseAI() && root.selectedAction && root.selectedAction.action_id
 
                                     contentItem: Text {
 

@@ -297,9 +297,18 @@ Rectangle {
                             Layout.fillWidth: true
                             height: 40
                             radius: Metrics.radiusMd
-                            color: root.settingsMenuIndex === 0 ? Colors.primary50 : (modelSettingsMenuMA.containsMouse ? Colors.bgPrimary : "transparent")
-                            border.width: 1
-                            border.color: root.settingsMenuIndex === 0 ? Colors.primary200 : Colors.borderLight
+                            color: root.settingsMenuIndex === 0 ? Colors.primary50 : (modelSettingsMenuMA.containsMouse ? Colors.bgSecondary : "transparent")
+                            border.width: 0
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.bottom: parent.bottom
+                                width: 3
+                                color: Colors.primary500
+                                radius: Metrics.radiusFull
+                                visible: root.settingsMenuIndex === 0
+                            }
 
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
@@ -324,10 +333,19 @@ Rectangle {
                             Layout.fillWidth: true
                             height: 40
                             radius: Metrics.radiusMd
-                            color: root.settingsMenuIndex === 1 ? Colors.primary50 : (actionSettingsMenuMA.containsMouse ? Colors.bgPrimary : "transparent")
-                            border.width: 1
-                            border.color: root.settingsMenuIndex === 1 ? Colors.primary200 : Colors.borderLight
+                            color: root.settingsMenuIndex === 1 ? Colors.primary50 : (actionSettingsMenuMA.containsMouse ? Colors.bgSecondary : "transparent")
+                            border.width: 0
                             visible: typeof aiActionController !== "undefined" && aiActionController !== null
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.bottom: parent.bottom
+                                width: 3
+                                color: Colors.primary500
+                                radius: Metrics.radiusFull
+                                visible: root.settingsMenuIndex === 1
+                            }
 
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
@@ -352,9 +370,18 @@ Rectangle {
                             Layout.fillWidth: true
                             height: 40
                             radius: Metrics.radiusMd
-                            color: root.settingsMenuIndex === 2 ? Colors.primary50 : (categoryMenuMA.containsMouse ? Colors.bgPrimary : "transparent")
-                            border.width: 1
-                            border.color: root.settingsMenuIndex === 2 ? Colors.primary200 : Colors.borderLight
+                            color: root.settingsMenuIndex === 2 ? Colors.primary50 : (categoryMenuMA.containsMouse ? Colors.bgSecondary : "transparent")
+                            border.width: 0
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.bottom: parent.bottom
+                                width: 3
+                                color: Colors.primary500
+                                radius: Metrics.radiusFull
+                                visible: root.settingsMenuIndex === 2
+                            }
 
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
