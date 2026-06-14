@@ -112,9 +112,34 @@ Window {
         { "icon": "\uD83D\uDCDD", "label": "예시 출력", "description": "원하는 출력 예시를 보여줍니다", "value": "[예시 출력]\n핵심 요약:\n- \n\n확인 필요 사항:\n- \n\n다음 작업:\n- \n" }
     ]
     property var promptVariableInsertItems: [
-        { "icon": "\uD83D\uDCC4", "label": "현재 문서 내용", "code": "{{CONTENT}}", "description": "현재 열려 있는 문서 전체 내용을 프롬프트에 넣습니다.", "value": "{{CONTENT}}" },
-        { "icon": "\u2702\uFE0F", "label": "선택한 내용", "code": "{{SELECTION}}", "description": "사용자가 문서에서 선택한 텍스트를 프롬프트에 넣습니다.", "value": "{{SELECTION}}" },
-        { "icon": "\u2328\uFE0F", "label": "사용자 입력", "code": "{{USER_INPUT}}", "description": "AI 실행창에 사용자가 입력한 요청을 프롬프트에 넣습니다.", "value": "{{USER_INPUT}}" }
+        {
+            "icon": "\uD83D\uDCC4",
+            "iconSource": "assets/icons/Add_Current_Doc.png",
+            "label": "현재 노트 내용",
+            "code": "{{CONTENT}}",
+            "description": "현재 노트 또는 선택한 입력 소스의 전체 내용이 사용됩니다.",
+            "tooltipTitle": "현재 노트 내용 {{CONTENT}}",
+            "tooltipDescription": "AI업무비서 입력 소스에서 선택한 현재 노트 내용이 이 위치에 들어갑니다.",
+            "value": "{{CONTENT}}"
+        },
+        {
+            "icon": "\u2702\uFE0F",
+            "label": "선택한 내용",
+            "code": "{{SELECTION}}",
+            "description": "에디터에서 드래그로 선택한 문장이 들어갑니다.",
+            "tooltipTitle": "선택한 내용 {{SELECTION}}",
+            "tooltipDescription": "에디터에서 드래그로 선택한 문장이나 문단이 이 위치에 들어갑니다.",
+            "value": "{{SELECTION}}"
+        },
+        {
+            "icon": "\u2328\uFE0F",
+            "label": "사용자 입력",
+            "code": "{{USER_INPUT}}",
+            "description": "AI업무비서 입력창에 작성한 요청이 들어갑니다.",
+            "tooltipTitle": "사용자 입력 {{USER_INPUT}}",
+            "tooltipDescription": "AI업무비서 패널의 사용자 입력창에 사용자가 입력한 내용이 이 위치에 들어갑니다.",
+            "value": "{{USER_INPUT}}"
+        }
     ]
 
     // Reload prompt documents when switching to AI prompt mode
@@ -1666,12 +1691,16 @@ Window {
     Connections {
         target: noteController
         function onLibraryChanged() {
+            if (window.activeContentMode !== "notes")
+                return
             notesListView.model = null
             notesListView.model = noteController ? noteController.filteredNotes : []
             window.selectedNoteId = ""
             window.syncSelectionAfterFolderChange()
         }
         function onFilteredNotesChanged() {
+            if (window.activeContentMode !== "notes")
+                return
             var prevSelected = window.selectedNoteId
             notesListView.model = null
             notesListView.model = noteController ? noteController.filteredNotes : []
@@ -3698,6 +3727,8 @@ Window {
 
                             // Load more notes when scrolling to bottom (infinite scroll)
                             onAtYEndChanged: {
+                                if (window.activeContentMode !== "notes")
+                                    return
                                 if (atYEnd && noteController && notesListView.count > 0) {
                                     // Save current scroll position before loading more
                                     var scrollY = contentY
@@ -4621,8 +4652,15 @@ Window {
                                                             hoverEnabled: true
                                                             cursorShape: window.currentPromptReadonly() ? Qt.ArrowCursor : Qt.PointingHandCursor
                                                             ToolTip.visible: containsMouse
-                                                            ToolTip.delay: 300
-                                                            ToolTip.text: modelData.description
+                                                            ToolTip.delay: 350
+                                                            ToolTip.timeout: 5000
+                                                            ToolTip.text: {
+                                                                var title = modelData.tooltipTitle || modelData.label || ""
+                                                                var desc = modelData.tooltipDescription || modelData.description || ""
+                                                                if (title && desc)
+                                                                    return title + "\n" + desc
+                                                                return title || desc
+                                                            }
                                                             onClicked: {
                                                                 if (!window.currentPromptReadonly()) {
                                                                     window.insertPromptSnippet(modelData.value)
@@ -4653,14 +4691,14 @@ Window {
                                                     color: Colors.textTertiary
                                                 }
                                                 Text {
-                                                    text: "변수"
+                                                    text: "변수 · AI업무비서 입력값"
                                                     font.family: Typography.fontPrimary
                                                     font.pixelSize: Typography.bodySmall
                                                     font.weight: Typography.weightMedium
                                                     color: Colors.textPrimary
                                                 }
                                                 Text {
-                                                    text: "동적 데이터를 삽입"
+                                                    text: "프롬프트와 입력값 연결"
                                                     font.family: Typography.fontPrimary
                                                     font.pixelSize: 10
                                                     color: Colors.textTertiary
@@ -4705,7 +4743,18 @@ Window {
                                                             anchors.centerIn: parent
                                                             spacing: Metrics.xs
 
+                                                            Image {
+                                                                id: promptVarIconImage
+                                                                visible: modelData.iconSource && modelData.iconSource.length > 0
+                                                                source: modelData.iconSource
+                                                                sourceSize: Qt.size(14, 14)
+                                                                width: 14
+                                                                height: 14
+                                                                anchors.verticalCenter: parent.verticalCenter
+                                                                fillMode: Image.PreserveAspectFit
+                                                            }
                                                             Text {
+                                                                visible: !(modelData.iconSource && modelData.iconSource.length > 0)
                                                                 text: modelData.icon
                                                                 font.pixelSize: 12
                                                                 anchors.verticalCenter: parent.verticalCenter

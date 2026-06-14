@@ -658,6 +658,26 @@ Rectangle {
 
                                     Text { text: "응답 길이"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
                                     Text { text: root.getResponseLengthLabel(root.currentAction ? root.currentAction.response_length : "medium"); font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textPrimary }
+
+                                    Text { text: "예시 입력"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: root.currentAction && root.currentAction.example_input && root.currentAction.example_input.trim().length > 0 ? root.currentAction.example_input : "설정되지 않았습니다."
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
+                                        color: Colors.textPrimary
+                                        wrapMode: Text.Wrap
+                                    }
+
+                                    Text { text: "입력창 안내 문구"; font.family: Typography.fontPrimary; font.pixelSize: Typography.caption; color: Colors.textSecondary }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: root.currentAction && root.currentAction.input_placeholder && root.currentAction.input_placeholder.trim().length > 0 ? root.currentAction.input_placeholder : "설정되지 않았습니다."
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
+                                        color: Colors.textPrimary
+                                        wrapMode: Text.Wrap
+                                    }
                                 }
                             }
                         }

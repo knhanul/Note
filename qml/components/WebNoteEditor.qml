@@ -20,6 +20,25 @@ ColumnLayout {
     property string editorMode: "wysiwyg" // wysiwyg | markdown
     property bool readOnly: false
 
+    function getCurrentSelectionText(callback) {
+        if (typeof callback !== "function") return
+
+        if (!root._editorReady) {
+            callback("")
+            return
+        }
+
+        try {
+            webView.runJavaScript("(function(){ try { var sel = window.getSelection ? window.getSelection() : null; return sel ? sel.toString() : ''; } catch (e) { return ''; } })();",
+                                   function(result) {
+                                       callback(result || "")
+                                   })
+        } catch (e) {
+            console.log("[WebNoteEditor] getCurrentSelectionText failed: " + e)
+            callback("")
+        }
+    }
+
     // Signals
     signal titleEdited(string newTitle)
     signal contentEdited(string newContent)

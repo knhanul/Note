@@ -1,7 +1,7 @@
 {
   "last_library_id": "6bd09bb7",
-  "last_folder_id": "320823fa",
+  "last_folder_id": "d5b381cf",
   "ai_panel_action_selection_order": "{\"categories\":[],\"actions\":{},\"favorites\":[\"polish_selection\",\"extract_todo\",\"suggest_title_tags\",\"current_note_qa\"]}",
-  "ai_category_list": "[]",
+  "ai_category_list": "[\"입력창 전용\",\"문서 처리\",\"문장 편집\",\"발표자료 처리\",\"업무 정리\",\"엑셀 처리\",\"참고문서 RAG\"]",
   "include_subfolders": true
 }

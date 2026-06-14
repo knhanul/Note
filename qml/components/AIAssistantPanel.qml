@@ -56,6 +56,10 @@ Rectangle {
 
     property var selectedAction: ({})
 
+    // Stores the last example text automatically applied to the 실행입력창.
+    // Helps us detect whether the current contents were auto-filled so we can safely replace them when the user picks another action.
+    property string actionInputAutoText: ""
+
     property string selectedCategory: ""
 
     property var categoryOrder: []
@@ -71,6 +75,36 @@ Rectangle {
     property var categoryList: buildCategoryList()
 
     property var filteredActionList: orderedActionsByCategory(selectedCategory)
+
+    readonly property var promptVariableMetadata: ({
+        "CONTENT": {
+            label: "현재 노트 내용",
+            summary: "현재 노트 내용 {{CONTENT}}",
+            code: "{{CONTENT}}",
+            chipLabel: "현재 노트 내용",
+            tooltip: "현재 노트 내용이 프롬프트의 {{CONTENT}}에 들어갑니다.",
+            iconSource: "../assets/icons/Add_Current_Doc.png"
+        },
+        "SELECTION": {
+            label: "선택한 내용",
+            summary: "선택한 내용 {{SELECTION}}",
+            code: "{{SELECTION}}",
+            chipLabel: "선택한 내용",
+            tooltip: "에디터에서 드래그로 선택한 문장이나 문단이 {{SELECTION}}으로 전달됩니다.",
+            iconSource: ""
+        },
+        "USER_INPUT": {
+            label: "사용자 입력",
+            summary: "사용자 입력 {{USER_INPUT}}",
+            code: "{{USER_INPUT}}",
+            chipLabel: "사용자 입력",
+            tooltip: "AI업무비서 입력창에 작성한 내용이 {{USER_INPUT}}으로 전달됩니다.",
+            iconSource: ""
+        }
+    })
+
+    readonly property string selectedActionVariableSummary: buildSelectedActionVariableSummary(selectedAction)
+    readonly property var selectedActionVariableKeys: getPromptVariableUsageList(selectedAction)
 
 
 
@@ -98,6 +132,25 @@ Rectangle {
 
     property int aiModeIndex: 0  // 0 = 현재 문서 AI, 1 = 참고문서 AI
 
+    // 참고문서 AI 답변 방식(프롬프트) 선택 상태
+    property var ragPromptOptions: [
+        { "id": "default", "name": "기본 답변", "description": "참고문서를 바탕으로 질문에 답변합니다." },
+        { "id": "evidence", "name": "근거 중심 답변", "description": "참고문서의 관련 근거와 함께 답변합니다." },
+        { "id": "summary", "name": "핵심 요약", "description": "검색된 참고문서 내용을 핵심만 요약합니다." },
+        { "id": "checklist", "name": "체크리스트 생성", "description": "참고문서 내용을 실행 가능한 체크리스트로 정리합니다." },
+        { "id": "compare", "name": "문서 비교", "description": "여러 참고문서의 공통점과 차이점을 비교합니다." },
+        { "id": "report", "name": "보고서 초안", "description": "참고문서를 근거로 업무 보고서 초안을 작성합니다." },
+        { "id": "faq", "name": "FAQ 생성", "description": "참고문서 내용을 질문과 답변 형식으로 정리합니다." }
+    ]
+
+    property int selectedRagPromptIndex: 0
+
+    property string selectedRagPromptId: "default"
+
+    property string selectedRagPromptName: "기본 답변"
+
+    property string selectedRagPromptDescription: "참고문서를 바탕으로 질문에 답변합니다."
+
     property string lastAskedQuestion: ""
 
     property string currentStreamingNoteId: ""
@@ -107,6 +160,237 @@ Rectangle {
     property string currentStreamingTitle: ""
 
     property var noteEditorRef: null
+
+
+
+    function promptVariableMeta(key) {
+
+        return root.promptVariableMetadata[key] || null
+
+    }
+
+
+
+    function getPromptVariableUsageList(action) {
+
+        var keys = ["CONTENT", "SELECTION", "USER_INPUT"]
+
+        if (!action || !action.current_prompt || !action.current_prompt.content_md)
+
+            return []
+
+        var content = action.current_prompt.content_md
+
+        if (typeof content !== "string" || content.length === 0)
+
+            return []
+
+        var regex = /\{\{([^}]+)\}\}/gi
+
+        var match
+
+        var found = {}
+
+        while ((match = regex.exec(content)) !== null) {
+
+            var name = (match[1] || "").trim().toUpperCase()
+
+            if (keys.indexOf(name) !== -1)
+
+                found[name] = true
+
+        }
+
+        var ordered = []
+
+        for (var i = 0; i < keys.length; i++) {
+
+            if (found[keys[i]])
+
+                ordered.push(keys[i])
+
+        }
+
+        return ordered
+
+    }
+
+
+
+    function buildSelectedActionVariableSummary(action) {
+
+        var usage = root.getPromptVariableUsageList(action)
+
+        if (!usage || usage.length === 0)
+
+            return ""
+
+        var phrases = []
+
+        for (var i = 0; i < usage.length; i++) {
+
+            var meta = root.promptVariableMeta(usage[i])
+
+            if (meta && meta.summary)
+
+                phrases.push(meta.summary)
+
+            else
+
+                phrases.push("{{" + usage[i] + "}}")
+
+        }
+
+        var joined = phrases.join(", ")
+
+        return "이 기능은 " + joined + "을 사용합니다."
+
+    }
+
+
+
+    function currentContentSourceLabel() {
+
+        if (root.currentDocumentSourceMode === "note")
+
+            return "현재 노트"
+
+        if (root.currentDocumentSourceMode === "external_file") {
+
+            if (root.currentExternalDocumentType === "external_folder")
+
+                return "외부 폴더"
+
+            return "외부 파일"
+
+        }
+
+        return "입력 소스"
+
+    }
+
+
+
+    function currentContentSourceIcon() {
+
+        if (root.currentDocumentSourceMode === "note")
+
+            return "../assets/icons/Add_Current_Doc.png"
+
+        if (root.currentDocumentSourceMode === "external_file") {
+
+            if (root.currentExternalDocumentType === "external_folder")
+
+                return "../assets/icons/Add_External_Folder.png"
+
+            return "../assets/icons/Add_External_File.png"
+
+        }
+
+        return ""
+
+    }
+
+
+
+    function currentContentSourceTooltip() {
+
+        return currentContentSourceLabel() + " 내용이 프롬프트의 {{CONTENT}}에 들어갑니다."
+
+    }
+
+
+
+    function currentContentSourceTitle() {
+
+        if (root.currentDocumentSourceMode === "note") {
+
+            if (window.currentNote && window.currentNote.title)
+
+                return window.currentNote.title
+
+            return "현재 노트"
+
+        }
+
+        if (root.currentExternalDocumentTitle && root.currentExternalDocumentTitle.length > 0)
+
+            return root.currentExternalDocumentTitle
+
+        if (root.currentExternalDocumentPath && root.currentExternalDocumentPath.length > 0)
+
+            return root.currentExternalDocumentPath
+
+        if (root.currentExternalDocumentType === "external_folder")
+
+            return "외부 폴더가 선택되지 않았습니다."
+
+        return "외부 파일이 선택되지 않았습니다."
+
+    }
+
+
+
+
+    onRagIndexingRunningChanged: {
+
+        console.log("[AIAssistantPanel] ragIndexingRunning changed:", root.ragIndexingRunning)
+
+    }
+
+
+
+    onRagRequestRunningChanged: {
+
+        console.log("[AIAssistantPanel] ragRequestRunning changed:", root.ragRequestRunning)
+
+    }
+
+
+
+    Timer {
+
+        id: ragIndexingStartTimer
+
+        interval: 100
+
+        repeat: false
+
+        property string pendingActionName: ""
+
+        property var pendingCallback: null
+
+
+
+        onTriggered: {
+
+            console.log("[AIAssistantPanel] RAG indexing actual start:", pendingActionName)
+
+            if (pendingCallback) {
+
+                try {
+
+                    pendingCallback()
+
+                } catch (e) {
+
+                    console.log("[AIAssistantPanel] RAG indexing callback failed:", e)
+
+                    root.ragIndexingRunning = false
+
+                    clearRagIndexingProgress()
+
+                }
+
+            }
+
+            pendingCallback = null
+
+            pendingActionName = ""
+
+        }
+
+    }
 
     property bool currentStreamingIsRag: false
 
@@ -777,15 +1061,54 @@ Rectangle {
     function applyExampleInputIfEmpty(action, inputField) {
         if (!action || !inputField) return
 
-        var exampleInput = action.example_input
-        if (!exampleInput) return
+        var exampleInput = action.example_input || ""
 
-        if (inputField.text.trim() === "") {
+        if (!exampleInput) {
+            root.actionInputAutoText = ""
+            return
+        }
+
+        var currentText = inputField.text || ""
+        var trimmedText = currentText.trim()
+        var shouldApply = (trimmedText === "") || (currentText === root.actionInputAutoText)
+
+        if (shouldApply) {
             inputField.text = exampleInput
+            root.actionInputAutoText = exampleInput
             console.log("[AIAssistantPanel] Applied example input for action: " + (action.name || action.action_id))
         } else {
             console.log("[AIAssistantPanel] Skip example input because user input already exists")
         }
+    }
+
+
+
+    function fetchCurrentSelectionText(callback) {
+
+        if (typeof callback !== "function") return
+
+        if (root.noteEditorRef && typeof root.noteEditorRef.getCurrentSelectionText === "function") {
+
+            try {
+
+                root.noteEditorRef.getCurrentSelectionText(function(text) {
+
+                    callback(text || "")
+
+                })
+
+                return
+
+            } catch (e) {
+
+                console.log("[AIAssistantPanel] fetchCurrentSelectionText failed: " + e)
+
+            }
+
+        }
+
+        callback("")
+
     }
 
 
@@ -1373,6 +1696,18 @@ Rectangle {
             return
         }
 
+        fetchCurrentSelectionText(function(selectionText) {
+
+            root.executeCurrentNoteAction(selectionText || "")
+
+        })
+
+    }
+
+
+
+    function executeCurrentNoteAction(selectionText) {
+
         var action = root.selectedAction
 
         if (!action || !action.action_id) return
@@ -1620,6 +1955,8 @@ Rectangle {
         })
 
         
+
+        var selection = selectionText || ""
 
         if (action.action_id === "current_note_qa") {
 
@@ -2129,6 +2466,32 @@ Rectangle {
 
 
 
+    function beginRagIndexing(actionName, callback) {
+
+        console.log("[AIAssistantPanel] RAG indexing requested:", actionName)
+
+        if (typeof callback !== "function") {
+
+            console.warn("[AIAssistantPanel] beginRagIndexing requires a callback")
+
+            return
+
+        }
+
+        root.ragIndexingRunning = true
+
+        console.log("[AIAssistantPanel] ragIndexingRunning set true:", root.ragIndexingRunning)
+
+        ragIndexingStartTimer.pendingActionName = actionName || ""
+
+        ragIndexingStartTimer.pendingCallback = callback
+
+        ragIndexingStartTimer.restart()
+
+    }
+
+
+
     function indexCurrentNoteForRag() {
 
         var ragCtrl = getAiRagController()
@@ -2233,14 +2596,25 @@ Rectangle {
 
         prepareRagIndexingProgress([note.title || note.id || "제목 없음"], 1)
 
-        root.ragIndexingRunning = true
-        if (typeof window !== "undefined") window.ragIndexingBusy = true
+        beginRagIndexing("current-note", function() {
 
+            console.log("[AIAssistantPanel] Indexing current note (replace mode): id=" + note.id)
 
+            try {
 
-        console.log("[AIAssistantPanel] Indexing current note (replace mode): id=" + note.id)
+                ragCtrl.indexCurrentNote(note.id, note.title || "", note.content || "", tagsJson)
 
-        ragCtrl.indexCurrentNote(note.id, note.title || "", note.content || "", tagsJson)
+            } catch (e) {
+
+                root.ragIndexingRunning = false
+
+                clearRagIndexingProgress()
+
+                console.log("[AIAssistantPanel] 참고문서 등록 실패:", e)
+
+            }
+
+        })
 
     }
 
@@ -2393,6 +2767,8 @@ Rectangle {
 
         console.log("[AIAssistantPanel] Asking indexed documents: question=" + question)
 
+        console.log("[AIAssistantPanel] RAG prompt selected:", root.selectedRagPromptId, root.selectedRagPromptName)
+
         ragCtrl.askIndexedDocuments(question)
 
     }
@@ -2477,39 +2853,37 @@ Rectangle {
 
         prepareRagIndexingProgress([], 0)
 
-        root.ragIndexingRunning = true
-        if (typeof window !== "undefined") window.ragIndexingBusy = true
+        beginRagIndexing("current-folder", function() {
 
-        console.log("[AIAssistantPanel] 참고문서 등록 중...")
+            console.log("[AIAssistantPanel] calling ragCtrl indexing method: current-folder")
 
+            try {
 
+                var descendantIds = folderCtrl.getDescendantIds(currentFolderId)
 
-        try {
+                var folderIds = [currentFolderId].concat(descendantIds || [])
 
-            var descendantIds = folderCtrl.getDescendantIds(currentFolderId)
+                var notesJson = noteController.getNotesForRagByFolderIdsJson(JSON.stringify(folderIds))
 
-            var folderIds = [currentFolderId].concat(descendantIds || [])
+                var notes = JSON.parse(notesJson)
 
-            var notesJson = noteController.getNotesForRagByFolderIdsJson(JSON.stringify(folderIds))
+                prepareRagIndexingProgress(buildLabelsFromNotes(notes), notes.length)
 
-            var notes = JSON.parse(notesJson)
+                console.log("[AIAssistantPanel] Indexing folder (replace mode): " + currentFolderId + ", notes count: " + notes.length)
 
-            prepareRagIndexingProgress(buildLabelsFromNotes(notes), notes.length)
+                ragCtrl.indexCurrentFolderNotes(notesJson, currentFolderId)
 
-            console.log("[AIAssistantPanel] Indexing folder (replace mode): " + currentFolderId + ", notes count: " + notes.length)
+            } catch (e) {
 
-            ragCtrl.indexCurrentFolderNotes(notesJson, currentFolderId)
+                root.ragIndexingRunning = false
 
-        } catch (e) {
+                clearRagIndexingProgress()
 
-            root.ragIndexingRunning = false
-            if (typeof window !== "undefined") window.ragIndexingBusy = false
+                console.log("[AIAssistantPanel] 참고문서 등록 실패:", e)
 
-            clearRagIndexingProgress()
+            }
 
-            console.log("[AIAssistantPanel] 참고문서 등록 실패: " + e)
-
-        }
+        })
 
     }
 
@@ -2565,35 +2939,33 @@ Rectangle {
 
         prepareRagIndexingProgress([], 0)
 
-        root.ragIndexingRunning = true
-        if (typeof window !== "undefined") window.ragIndexingBusy = true
+        beginRagIndexing("all-notes", function() {
 
-        console.log("[AIAssistantPanel] 참고문서 등록 중...")
+            console.log("[AIAssistantPanel] calling ragCtrl indexing method: all-notes")
 
+            try {
 
+                var notesJson = noteCtrl.getAllNotesForRagJson()
 
-        try {
+                var notes = JSON.parse(notesJson)
 
-            var notesJson = noteCtrl.getAllNotesForRagJson()
+                prepareRagIndexingProgress(buildLabelsFromNotes(notes), notes.length)
 
-            var notes = JSON.parse(notesJson)
+                console.log("[AIAssistantPanel] Indexing all notes (replace mode), count: " + notes.length)
 
-            prepareRagIndexingProgress(buildLabelsFromNotes(notes), notes.length)
+                ragCtrl.indexAllNotesJson(notesJson)
 
-            console.log("[AIAssistantPanel] Indexing all notes (replace mode), count: " + notes.length)
+            } catch (e) {
 
-            ragCtrl.indexAllNotesJson(notesJson)
+                root.ragIndexingRunning = false
 
-        } catch (e) {
+                clearRagIndexingProgress()
 
-            root.ragIndexingRunning = false
-            if (typeof window !== "undefined") window.ragIndexingBusy = false
+                console.log("[AIAssistantPanel] 참고문서 등록 실패:", e)
 
-            clearRagIndexingProgress()
+            }
 
-            console.log("[AIAssistantPanel] 참고문서 등록 실패: " + e)
-
-        }
+        })
 
     }
 
@@ -3345,31 +3717,29 @@ Rectangle {
 
         prepareRagIndexingProgress(buildLabelsFromPaths(paths), paths.length)
 
-        root.ragIndexingRunning = true
-        if (typeof window !== "undefined") window.ragIndexingBusy = true
+        beginRagIndexing("external-files", function() {
 
-        console.log("[AIAssistantPanel] 참고문서 등록 중...")
+            console.log("[AIAssistantPanel] calling ragCtrl indexing method: external-files")
 
+            try {
 
+                var pathsJson = JSON.stringify(paths)
 
-        try {
+                console.log("[AIAssistantPanel] Indexing external files (replace mode): " + paths.length + " files")
 
-            var pathsJson = JSON.stringify(paths)
+                ragCtrl.indexExternalFilesJson(pathsJson)
 
-            console.log("[AIAssistantPanel] Indexing external files (replace mode): " + paths.length + " files")
+            } catch (e) {
 
-            ragCtrl.indexExternalFilesJson(pathsJson)
+                root.ragIndexingRunning = false
 
-        } catch (e) {
+                clearRagIndexingProgress()
 
-            root.ragIndexingRunning = false
-            if (typeof window !== "undefined") window.ragIndexingBusy = false
+                console.log("[AIAssistantPanel] 참고문서 등록 실패:", e)
 
-            clearRagIndexingProgress()
+            }
 
-            console.log("[AIAssistantPanel] 참고문서 등록 실패: " + e)
-
-        }
+        })
 
     }
 
@@ -3423,29 +3793,27 @@ Rectangle {
 
         prepareRagIndexingProgress([folderPath], 0)
 
-        root.ragIndexingRunning = true
-        if (typeof window !== "undefined") window.ragIndexingBusy = true
+        beginRagIndexing("external-folder", function() {
 
-        console.log("[AIAssistantPanel] 참고문서 등록 중...")
+            console.log("[AIAssistantPanel] calling ragCtrl indexing method: external-folder")
 
+            try {
 
+                console.log("[AIAssistantPanel] Indexing external folder (replace mode): " + folderPath)
 
-        try {
+                ragCtrl.indexExternalFolder(folderPath)
 
-            console.log("[AIAssistantPanel] Indexing external folder (replace mode): " + folderPath)
+            } catch (e) {
 
-            ragCtrl.indexExternalFolder(folderPath)
+                root.ragIndexingRunning = false
 
-        } catch (e) {
+                clearRagIndexingProgress()
 
-            root.ragIndexingRunning = false
-            if (typeof window !== "undefined") window.ragIndexingBusy = false
+                console.log("[AIAssistantPanel] 참고문서 등록 실패:", e)
 
-            clearRagIndexingProgress()
+            }
 
-            console.log("[AIAssistantPanel] 참고문서 등록 실패: " + e)
-
-        }
+        })
 
     }
 
@@ -3661,10 +4029,33 @@ Rectangle {
 
                 console.log("[AIAssistantPanel] RAG index status: " + status)
 
-                root.ragIndexingRunning = false
-                if (typeof window !== "undefined") window.ragIndexingBusy = false
+                var completionStatuses = [
+                    "indexed_current_note",
+                    "indexed_folder",
+                    "indexed_all_notes",
+                    "indexed_notes",
+                    "indexed_external_files",
+                    "indexed_external_folder",
+                    "indexed_empty"
+                ]
 
-                clearRagIndexingProgress()
+                var failureStatuses = [
+                    "error",
+                    "failed",
+                    "failure",
+                    "cancelled",
+                    "canceled"
+                ]
+
+                var shouldRelease = completionStatuses.indexOf(status) >= 0
+                var shouldFailRelease = failureStatuses.indexOf(status) >= 0
+
+                if (shouldRelease || shouldFailRelease) {
+                    root.ragIndexingRunning = false
+                    clearRagIndexingProgress()
+                } else {
+                    console.log("[AIAssistantPanel] keep RAG indexing lock for status:", status)
+                }
 
                 if (status === "indexed_current_note") {
 
@@ -3745,7 +4136,6 @@ Rectangle {
                 root.ragRequestRunning = false
 
                 root.ragIndexingRunning = false
-                if (typeof window !== "undefined") window.ragIndexingBusy = false
 
                 clearRagIndexingProgress()
 
@@ -3783,13 +4173,23 @@ Rectangle {
 
 
 
-    ColumnLayout {
+    Item {
+
+        id: panelContentContainer
 
         anchors.fill: parent
 
-        anchors.margins: Metrics.lg
+        clip: true
 
-        spacing: Metrics.md
+
+
+        ColumnLayout {
+
+            anchors.fill: parent
+
+            anchors.margins: Metrics.lg
+
+            spacing: Metrics.md
 
 
 
@@ -4536,6 +4936,8 @@ Rectangle {
 
                                                 Rectangle {
 
+                                                    id: actionDelegateItem
+
                                                     width: parent.width
 
                                                     height: 34
@@ -4543,6 +4945,72 @@ Rectangle {
                                                     color: root.selectedAction && root.selectedAction.action_id === modelData.action_id ? Colors.primary50 : "transparent"
 
                                                     radius: Metrics.radiusSm
+
+                                                    readonly property string _trimmedInputPlaceholder: {
+
+                                                        var candidates = [modelData.input_placeholder, modelData.inputPlaceholder, modelData.input_hint, modelData.inputHint, modelData.inputGuide, modelData.input_guide]
+
+                                                        for (var i = 0; i < candidates.length; i++) {
+
+                                                            var candidate = candidates[i]
+
+                                                            if (candidate && typeof candidate === "string" && candidate.trim().length > 0)
+
+                                                                return candidate.trim()
+
+                                                        }
+
+                                                        return ""
+
+                                                    }
+
+                                                    readonly property string _trimmedDescription: (modelData.description && typeof modelData.description === "string") ? modelData.description.trim() : ""
+
+                                                    readonly property string actionTooltipGuide: {
+
+                                                        if (actionDelegateItem._trimmedInputPlaceholder.length > 0)
+
+                                                            return actionDelegateItem._trimmedInputPlaceholder
+
+                                                        if (actionDelegateItem._trimmedDescription.length > 0)
+
+                                                            return actionDelegateItem._trimmedDescription
+
+                                                        var fallback = modelData.name || modelData.action_id || ""
+
+                                                        return (typeof fallback === "string") ? fallback.trim() : ""
+
+                                                    }
+
+                                                    readonly property string actionTooltipText: {
+
+                                                        var header = modelData.name || modelData.action_id || ""
+
+                                                        if (typeof header === "string")
+
+                                                            header = header.trim()
+
+                                                        else
+
+                                                            header = ""
+
+                                                        var guide = actionDelegateItem.actionTooltipGuide
+
+                                                        if (!guide && !header)
+
+                                                            return ""
+
+                                                        if (!guide)
+
+                                                            return header
+
+                                                        if (!header || guide === header)
+
+                                                            return guide
+
+                                                        return header + "\n" + guide
+
+                                                    }
 
 
 
@@ -4628,6 +5096,8 @@ Rectangle {
 
                                                     MouseArea {
 
+                                                        id: actionDelegateMouseArea
+
                                                         anchors.fill: parent
 
                                                         anchors.rightMargin: 24
@@ -4642,6 +5112,15 @@ Rectangle {
                                                         }
 
                                                     }
+
+                                                    ToolTip.visible: actionDelegateItem.actionTooltipText.length > 0 && actionDelegateMouseArea.containsMouse
+
+                                                    ToolTip.text: actionDelegateItem.actionTooltipText
+
+                                                    ToolTip.delay: 400
+
+                                                    ToolTip.timeout: 5000
+
 
                                                 }
 
@@ -4735,7 +5214,7 @@ Rectangle {
 
                                                 font.pixelSize: Typography.caption
 
-                                                font.weight: Typography.weightSemiBold
+                                                font.weight: Typography.weightSemibold
 
                                                 color: Colors.textPrimary
 
@@ -5316,7 +5795,7 @@ Rectangle {
 
                                     text: root.aiRunning ? "중지" : "실행"
 
-                                    enabled: canUseAI() && root.selectedAction && root.selectedAction.action_id
+                                    enabled: canUseAI() && root.selectedAction && !!root.selectedAction.action_id
 
                                     contentItem: Text {
 
@@ -5672,97 +6151,30 @@ Rectangle {
 
 
 
-                                Text {
-
-                                    text: "참고문서 AI"
-
-                                    font.family: Typography.fontPrimary
-
-                                    font.pixelSize: Typography.bodyRegular
-
-                                    font.weight: Typography.weightSemibold
-
-                                    color: Colors.textPrimary
-
-                                }
-
-
-
-                                Text {
-
-                                    width: parent.width
-
-                                    text: "등록한 문서는 AI가 여러 문서에서 찾아 답변할 때 참고합니다."
-
-                                    font.family: Typography.fontPrimary
-
-                                    font.pixelSize: Typography.caption
-
-                                    color: Colors.textSecondary
-
-                                    wrapMode: Text.WordWrap
-
-                                }
-
-
-
+                                // 상단 안내 카드 (중복 타이틀 대신 짧은 설명)
                                 Rectangle {
 
                                     width: parent.width
 
-                                    height: 1
+                                    radius: Metrics.radiusSm
 
-                                    color: Colors.borderLight
+                                    color: Colors.bgSecondary
 
-                                }
-
-
-
-                                Column {
-
-                                    width: parent.width
-
-                                    spacing: Metrics.xs
-
-
+                                    implicitHeight: referenceDocsIntroText.implicitHeight + (Metrics.sm * 2)
 
                                     Text {
-
-                                        text: "현재 문서 질문: 지금 열려 있는 문서 하나만 참고합니다."
-
+                                        id: referenceDocsIntroText
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.leftMargin: Metrics.sm
+                                        anchors.rightMargin: Metrics.sm
+                                        text: "등록한 참고문서를 검색해 근거 기반으로 답변합니다.\n현재 문서 AI는 열린 노트 중심, 참고문서 AI는 여러 문서·파일·폴더를 함께 참고합니다."
                                         font.family: Typography.fontPrimary
-
                                         font.pixelSize: Typography.caption
-
-                                        color: Colors.textTertiary
-
+                                        color: Colors.textSecondary
+                                        wrapMode: Text.WordWrap
                                     }
-
-
-
-                                    Text {
-
-                                        text: "등록된 문서 질문: 등록된 여러 문서에서 관련 내용을 찾아 답변합니다."
-
-                                        font.family: Typography.fontPrimary
-
-                                        font.pixelSize: Typography.caption
-
-                                        color: Colors.textTertiary
-
-                                    }
-
-                                }
-
-
-
-                                Rectangle {
-
-                                    width: parent.width
-
-                                    height: 1
-
-                                    color: Colors.borderLight
 
                                 }
 
@@ -5779,6 +6191,22 @@ Rectangle {
                                     font.weight: Typography.weightMedium
 
                                     color: Colors.textPrimary
+
+                                }
+
+                                Text {
+
+                                    width: parent.width
+
+                                    text: "답변에 참고할 노트·파일·폴더를 등록하세요."
+
+                                    font.family: Typography.fontPrimary
+
+                                    font.pixelSize: Typography.caption
+
+                                    color: Colors.textTertiary
+
+                                    wrapMode: Text.WordWrap
 
                                 }
 
@@ -6052,6 +6480,63 @@ Rectangle {
 
 
 
+                                // 답변 방식(RAG 프롬프트) 선택 섹션
+                                Column {
+
+                                    width: parent.width
+
+                                    spacing: Metrics.xs
+
+                                    Text {
+                                        text: "답변 방식"
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.bodySmall
+                                        font.weight: Typography.weightSemibold
+                                        color: Colors.textPrimary
+                                    }
+
+                                    Text {
+                                        width: parent.width
+                                        text: "참고문서를 어떤 형태로 정리할지 선택하세요."
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
+                                        color: Colors.textTertiary
+                                        wrapMode: Text.WordWrap
+                                    }
+
+                                    ComboBox {
+                                        id: ragPromptCombo
+                                        width: parent.width
+                                        Layout.fillWidth: true
+                                        height: 32
+                                        model: root.ragPromptOptions
+                                        textRole: "name"
+                                        currentIndex: root.selectedRagPromptIndex
+                                        onActivated: function(index) {
+                                            var opt = root.ragPromptOptions[index]
+                                            if (opt) {
+                                                root.selectedRagPromptIndex = index
+                                                root.selectedRagPromptId = opt.id
+                                                root.selectedRagPromptName = opt.name
+                                                root.selectedRagPromptDescription = opt.description
+                                                console.log("[AIAssistantPanel] RAG prompt selected:", root.selectedRagPromptId, root.selectedRagPromptName)
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        width: parent.width
+                                        text: root.selectedRagPromptDescription
+                                        font.family: Typography.fontPrimary
+                                        font.pixelSize: Typography.caption
+                                        color: Colors.textSecondary
+                                        wrapMode: Text.WordWrap
+                                    }
+
+                                }
+
+
+
                             RowLayout {
 
                                 width: parent.width
@@ -6125,7 +6610,7 @@ Rectangle {
 
                                     text: root.aiRunning ? "중지" : "실행"
 
-                                    enabled: canUseAI() && root.selectedAction && !!root.selectedAction.action_id
+                                    enabled: canUseAI() && (root.aiModeIndex === 1 || (root.selectedAction && !!root.selectedAction.action_id))
 
                                     contentItem: Text {
 
@@ -6499,265 +6984,265 @@ Rectangle {
 
         }
 
-    }
-
-    Item {
-
-        id: progressOverlay
-
-        parent: root
-
-        anchors.fill: parent
-
-        visible: root.aiRunning || root.ragRequestRunning || root.ragIndexingRunning
-
-        opacity: visible ? 1 : 0
-
-        z: 999
-
-        enabled: visible
 
 
+        Item {
 
-        Rectangle {
+            id: progressOverlay
 
             anchors.fill: parent
 
-            color: Colors.bgPrimary
+            visible: root.aiRunning || root.ragRequestRunning || root.ragIndexingRunning
 
-            opacity: 0.92
+            opacity: visible ? 1 : 0
 
-        }
+            z: 100
 
-
-
-        MouseArea {
-
-            anchors.fill: parent
-
-            hoverEnabled: true
-
-            onClicked: {}
-
-        }
-
-
-
-        Column {
-
-            anchors.centerIn: parent
-
-            width: Math.min(root.width * 0.85, 420)
-
-            spacing: Metrics.sm
-
-
-
-            BusyIndicator {
-
-                running: !root.ragIndexingRunning
-
-                width: 48
-
-                height: 48
-
-                visible: !root.ragIndexingRunning
-
-            }
-
-
-
-            Text {
-
-                text: root.ragIndexingRunning
-
-                      ? "참고문서를 등록하는 중입니다..."
-
-                      : (root.ragRequestRunning ? "답변 생성 중..." : "AI 작업 실행 중")
-
-                font.family: Typography.fontPrimary
-
-                font.pixelSize: Typography.bodyLarge
-
-                font.weight: Typography.weightSemibold
-
-                color: Colors.textPrimary
-
-                horizontalAlignment: Text.AlignHCenter
-
-                width: parent.width
-
-            }
-
-
-
-            Text {
-
-                text: root.ragIndexingRunning
-
-                      ? "선택된 파일/노트를 순서대로 색인하고 있습니다. 잠시만 기다려주세요."
-
-                      : (root.ragRequestRunning ? "참고문서를 검색하고 답변을 생성 중입니다." : "작업이 완료될 때까지 다른 조작은 잠시 중단됩니다.")
-
-                font.family: Typography.fontPrimary
-
-                font.pixelSize: Typography.caption
-
-                color: Colors.textSecondary
-
-                horizontalAlignment: Text.AlignHCenter
-
-                wrapMode: Text.WordWrap
-
-                width: parent.width
-
-            }
-
-
-
-            ProgressBar {
-
-                visible: root.ragIndexingRunning
-
-                Layout.fillWidth: true
-
-                from: 0
-
-                to: Math.max(1, root.ragIndexingProgressTotal)
-
-                value: Math.min(root.ragIndexingProgressCurrent, Math.max(1, root.ragIndexingProgressTotal))
-
-                indeterminate: root.ragIndexingProgressTotal <= 0
-
-            }
-
-
-
-            Text {
-
-                visible: root.ragIndexingRunning
-
-                text: root.ragIndexingProgressTotal > 0
-
-                      ? (root.ragIndexingProgressCurrent + " / " + root.ragIndexingProgressTotal + " 문서 처리")
-
-                      : "목록을 준비하고 있습니다..."
-
-                font.family: Typography.fontPrimary
-
-                font.pixelSize: Typography.caption
-
-                color: Colors.textSecondary
-
-                horizontalAlignment: Text.AlignHCenter
-
-                width: parent.width
-
-            }
+            enabled: visible
 
 
 
             Rectangle {
 
-                visible: root.ragIndexingRunning && root.ragIndexingProgressItems.length > 0
+                anchors.fill: parent
 
-                width: parent.width
+                color: Colors.bgPrimary
 
-                height: Math.min(220, root.ragIndexingProgressItems.length * 22 + Metrics.md * 2)
+                opacity: 0.92
 
-                radius: Metrics.radiusSm
-
-                color: Colors.surface
-
-                border.color: Colors.borderLight
-
-                border.width: 1
+            }
 
 
 
-                Column {
+            MouseArea {
 
-                    anchors.fill: parent
+                anchors.fill: parent
 
-                    anchors.margins: Metrics.sm
+                hoverEnabled: true
 
-                    spacing: Metrics.xs
+                onClicked: {}
 
-
-
-                    Text {
-
-                        text: "등록 중인 파일/노트 목록"
-
-                        font.family: Typography.fontPrimary
-
-                        font.pixelSize: Typography.caption
-
-                        font.weight: Typography.weightMedium
-
-                        color: Colors.textSecondary
-
-                    }
+            }
 
 
 
-                    ScrollView {
+            Column {
 
-                        width: parent.width
+                anchors.centerIn: parent
 
-                        height: parent.height - Metrics.lg
+                width: Math.min(parent.width * 0.85, 420)
 
-                        clip: true
-
-                        ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                spacing: Metrics.sm
 
 
 
-                        Column {
+                BusyIndicator {
+
+                    running: !root.ragIndexingRunning
+
+                    width: 48
+
+                    height: 48
+
+                    visible: !root.ragIndexingRunning
+
+                }
+
+
+
+                Text {
+
+                    text: root.ragIndexingRunning
+
+                          ? "참고문서를 등록하는 중입니다..."
+
+                          : (root.ragRequestRunning ? "답변 생성 중..." : "AI 작업 실행 중")
+
+                    font.family: Typography.fontPrimary
+
+                    font.pixelSize: Typography.bodyLarge
+
+                    font.weight: Typography.weightSemibold
+
+                    color: Colors.textPrimary
+
+                    horizontalAlignment: Text.AlignHCenter
+
+                    width: parent.width
+
+                }
+
+
+
+                Text {
+
+                    text: root.ragIndexingRunning
+
+                          ? "선택된 파일/노트를 순서대로 색인하고 있습니다. 잠시만 기다려주세요."
+
+                          : (root.ragRequestRunning ? "참고문서를 검색하고 답변을 생성 중입니다." : "작업이 완료될 때까지 다른 조작은 잠시 중단됩니다.")
+
+                    font.family: Typography.fontPrimary
+
+                    font.pixelSize: Typography.caption
+
+                    color: Colors.textSecondary
+
+                    horizontalAlignment: Text.AlignHCenter
+
+                    wrapMode: Text.WordWrap
+
+                    width: parent.width
+
+                }
+
+
+
+                ProgressBar {
+
+                    visible: root.ragIndexingRunning
+
+                    Layout.fillWidth: true
+
+                    from: 0
+
+                    to: Math.max(1, root.ragIndexingProgressTotal)
+
+                    value: Math.min(root.ragIndexingProgressCurrent, Math.max(1, root.ragIndexingProgressTotal))
+
+                    indeterminate: root.ragIndexingProgressTotal <= 0
+
+                }
+
+
+
+                Text {
+
+                    visible: root.ragIndexingRunning
+
+                    text: root.ragIndexingProgressTotal > 0
+
+                          ? (root.ragIndexingProgressCurrent + " / " + root.ragIndexingProgressTotal + " 문서 처리")
+
+                          : "목록을 준비하고 있습니다..."
+
+                    font.family: Typography.fontPrimary
+
+                    font.pixelSize: Typography.caption
+
+                    color: Colors.textSecondary
+
+                    horizontalAlignment: Text.AlignHCenter
+
+                    width: parent.width
+
+                }
+
+
+
+                Rectangle {
+
+                    visible: root.ragIndexingRunning && root.ragIndexingProgressItems.length > 0
+
+                    width: parent.width
+
+                    height: Math.min(220, root.ragIndexingProgressItems.length * 22 + Metrics.md * 2)
+
+                    radius: Metrics.radiusSm
+
+                    color: Colors.surface
+
+                    border.color: Colors.borderLight
+
+                    border.width: 1
+
+
+
+                    Column {
+
+                        anchors.fill: parent
+
+                        anchors.margins: Metrics.sm
+
+                        spacing: Metrics.xs
+
+
+
+                        Text {
+
+                            text: "등록 중인 파일/노트 목록"
+
+                            font.family: Typography.fontPrimary
+
+                            font.pixelSize: Typography.caption
+
+                            font.weight: Typography.weightMedium
+
+                            color: Colors.textSecondary
+
+                        }
+
+
+
+                        ScrollView {
 
                             width: parent.width
 
-                            spacing: 2
+                            height: parent.height - Metrics.lg
 
-                            Repeater {
+                            clip: true
 
-                                model: root.ragIndexingProgressItems
+                            ScrollBar.vertical.policy: ScrollBar.AsNeeded
 
-                                delegate: Row {
 
-                                    width: parent.width
 
-                                    spacing: Metrics.xs
+                            Column {
 
-                                    Text {
+                                width: parent.width
 
-                                        text: (Math.max(0, root.ragIndexingProgressCurrent - root.ragIndexingProgressItems.length) + index + 1) + "."
+                                spacing: 2
 
-                                        font.family: Typography.fontPrimary
+                                Repeater {
 
-                                        font.pixelSize: 10
+                                    model: root.ragIndexingProgressItems
 
-                                        color: Colors.textTertiary
+                                    delegate: Row {
 
-                                        width: 24
+                                        width: parent.width
 
-                                    }
+                                        spacing: Metrics.xs
 
-                                    Text {
+                                        Text {
 
-                                        text: modelData
+                                            text: (Math.max(0, root.ragIndexingProgressCurrent - root.ragIndexingProgressItems.length) + index + 1) + "."
 
-                                        font.family: Typography.fontPrimary
+                                            font.family: Typography.fontPrimary
 
-                                        font.pixelSize: 10
+                                            font.pixelSize: 10
 
-                                        color: Colors.textPrimary
+                                            color: Colors.textTertiary
 
-                                        wrapMode: Text.NoWrap
+                                            width: 24
 
-                                        elide: Text.ElideRight
+                                        }
 
-                                        width: parent.width - 24
+                                        Text {
+
+                                            text: modelData
+
+                                            font.family: Typography.fontPrimary
+
+                                            font.pixelSize: 10
+
+                                            color: Colors.textPrimary
+
+                                            wrapMode: Text.NoWrap
+
+                                            elide: Text.ElideRight
+
+                                            width: parent.width - 24
+
+                                        }
 
                                     }
 
@@ -6771,51 +7256,51 @@ Rectangle {
 
                 }
 
-            }
 
 
+                Button {
 
-            Button {
+                    text: "작업 중지"
 
-                text: "작업 중지"
+                    width: 160
 
-                width: 160
+                    Layout.alignment: Qt.AlignHCenter
 
-                Layout.alignment: Qt.AlignHCenter
+                    contentItem: Text {
 
-                contentItem: Text {
+                        text: parent.text
 
-                    text: parent.text
+                        font.family: Typography.fontPrimary
 
-                    font.family: Typography.fontPrimary
+                        font.pixelSize: Typography.bodySmall
 
-                    font.pixelSize: Typography.bodySmall
+                        font.weight: Typography.weightMedium
 
-                    font.weight: Typography.weightMedium
+                        color: Colors.white
 
-                    color: Colors.white
+                        horizontalAlignment: Text.AlignHCenter
 
-                    horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
 
-                    verticalAlignment: Text.AlignVCenter
+                    }
 
-                }
+                    background: Rectangle {
 
-                background: Rectangle {
+                        color: Colors.primary500
 
-                    color: Colors.primary500
+                        radius: Metrics.radiusSm
 
-                    radius: Metrics.radiusSm
+                        border.color: Colors.primary600
 
-                    border.color: Colors.primary600
+                    }
 
-                }
+                    onClicked: {
 
-                onClicked: {
+                        var ac = getAssistantController()
 
-                    var ac = getAssistantController()
+                        if (ac) ac.cancel()
 
-                    if (ac) ac.cancel()
+                    }
 
                 }
 
@@ -6824,8 +7309,6 @@ Rectangle {
         }
 
     }
-
-
 
     FileDialog {
 
@@ -6932,6 +7415,8 @@ Rectangle {
         }
 
     }
+
+}
 
 }
 
