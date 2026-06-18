@@ -46,7 +46,9 @@ class AiRagServiceTest(unittest.TestCase):
         search_svc = AiSearchService(repo)
         context_svc = AiContextBuilder(repo)
         prompt_svc = AiRagPromptBuilder()
-        rag_svc = AiRagService(search_svc, context_svc, prompt_svc, llm_client)
+        from services.rag_answer_prompt_loader import RagAnswerPromptLoader
+        rag_prompt_loader = RagAnswerPromptLoader()
+        rag_svc = AiRagService(search_svc, context_svc, prompt_svc, llm_client, rag_prompt_loader=rag_prompt_loader)
         return rag_svc, index_svc, db
 
     def test_answer_question_success(self):
@@ -109,7 +111,7 @@ class AiRagServiceTest(unittest.TestCase):
         try:
             result = rag_svc.answer_question("nonexistentword12345")
 
-            self.assertEqual(result.answer_text, "")
+            self.assertEqual(result.answer_text, "참고문서에서 관련 내용을 찾지 못했습니다.")
             self.assertIn("RAG_NO_SEARCH_RESULTS", result.warnings)
             self.assertIsNone(result.llm_result)
         finally:
@@ -142,7 +144,7 @@ class AiRagServiceTest(unittest.TestCase):
             index_svc.index_markdown_document(doc, "doc-opt", "note")
 
             options = RagQueryOptions(model="custom-model", temperature=0.8, timeout_sec=30.0)
-            result = rag_svc.answer_question("keyword", options)
+            result = rag_svc.answer_question("keyword", "default_answer", options)
 
             self.assertIsNotNone(fake_llm.last_options)
             self.assertEqual(fake_llm.last_options.model, "custom-model")

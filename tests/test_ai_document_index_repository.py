@@ -154,7 +154,9 @@ class AiDocumentIndexRepositoryTest(unittest.TestCase):
             summaries, total = repo.list_document_summaries(limit=1)
             self.assertEqual(total, 2)
             self.assertEqual(len(summaries), 1)
-            self.assertEqual(summaries[0].chunk_count, 2)
+            # doc-2 is upserted last, so it has the latest indexed_at and appears first
+            self.assertEqual(summaries[0].document_id, "doc-2")
+            self.assertEqual(summaries[0].chunk_count, 1)
         finally:
             db.close()
 
