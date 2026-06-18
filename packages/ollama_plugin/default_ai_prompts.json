@@ -45,7 +45,7 @@
       "readonly": false,
       "archived": false,
       "sort_order": 10,
-      "response_length": "medium",
+      "response_length": "detailed",
       "prompt_doc_id": "doc_summary",
       "example_input": "이 문서의 핵심만 짧게 요약해줘",
       "input_placeholder": "예: 요청사항과 확인할 일을 중심으로 정리해줘"
@@ -69,7 +69,7 @@
       "readonly": false,
       "archived": false,
       "sort_order": 11,
-      "response_length": "medium",
+      "response_length": "detailed",
       "prompt_doc_id": "doc_requests",
       "example_input": "이 문서에서 요청하는 내용을 정리해줘",
       "input_placeholder": "예: 요청사항, 처리할 일, 확인할 일을 나눠서 정리해줘"
@@ -93,7 +93,7 @@
       "readonly": false,
       "archived": false,
       "sort_order": 12,
-      "response_length": "medium",
+      "response_length": "detailed",
       "prompt_doc_id": "doc_checklist",
       "example_input": "이 내용을 실행 가능한 체크리스트로 바꿔줘",
       "input_placeholder": "예: 실행할 일과 확인할 일을 체크리스트로 나눠줘"
@@ -164,7 +164,7 @@
       "readonly": false,
       "archived": false,
       "sort_order": 30,
-      "response_length": "medium",
+      "response_length": "detailed",
       "prompt_doc_id": "excel_sheet_summary",
       "example_input": "이 엑셀 시트가 어떤 내용인지 정리해줘",
       "input_placeholder": "예: 주요 열, 눈에 띄는 값, 확인할 일을 정리해줘"
@@ -187,7 +187,7 @@
       "readonly": false,
       "archived": false,
       "sort_order": 31,
-      "response_length": "medium",
+      "response_length": "detailed",
       "prompt_doc_id": "excel_task_list",
       "example_input": "엑셀에서 해야 할 일과 확인할 일을 정리해줘",
       "input_placeholder": "예: 업무, 담당자, 기한, 상태를 찾아줘"
@@ -210,7 +210,7 @@
       "readonly": false,
       "archived": false,
       "sort_order": 32,
-      "response_length": "medium",
+      "response_length": "detailed",
       "prompt_doc_id": "excel_table_review",
       "example_input": "이 엑셀 표에서 이상하거나 확인이 필요한 부분을 찾아줘",
       "input_placeholder": "예: 빈 값, 불명확한 값, 형식이 다른 값을 찾아줘"

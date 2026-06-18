@@ -126,6 +126,47 @@ class PromptRepository:
         """
 
         with self._connect() as conn:
+            # Check if ai_actions table exists and has the correct schema
+            try:
+                current_action_cols = self._table_columns(conn, "ai_actions")
+                # If action_id is missing, the table has an old schema and needs to be recreated
+                if "action_id" not in current_action_cols:
+                    logger.warning("[PromptRepository] ai_actions table has old schema (missing action_id), recreating table")
+                    # Backup existing data if possible
+                    try:
+                        conn.execute("DROP TABLE IF EXISTS ai_actions_backup")
+                        conn.execute("ALTER TABLE ai_actions RENAME TO ai_actions_backup")
+                        logger.info("[PromptRepository] Backed up old ai_actions table to ai_actions_backup")
+                    except sqlite3.Error as e:
+                        logger.warning(f"[PromptRepository] Failed to backup old ai_actions table: {e}")
+                    # Create new table
+                    conn.execute("""
+                        CREATE TABLE ai_actions (
+                            action_id TEXT PRIMARY KEY,
+                            name TEXT NOT NULL,
+                            description TEXT,
+                            category TEXT,
+                            required_variables_json TEXT,
+                            enabled INTEGER DEFAULT 1,
+                            sort_order INTEGER DEFAULT 0,
+                            source_type TEXT DEFAULT 'default',
+                            readonly INTEGER DEFAULT 0,
+                            archived INTEGER DEFAULT 0,
+                            input_mode TEXT DEFAULT 'auto',
+                            use_rag INTEGER DEFAULT 0,
+                            response_length TEXT DEFAULT 'medium',
+                            icon TEXT DEFAULT '',
+                            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                        )
+                    """)
+                    logger.info("[PromptRepository] Recreated ai_actions table with correct schema")
+                    # Refresh column list after recreation
+                    current_action_cols = self._table_columns(conn, "ai_actions")
+            except sqlite3.Error as e:
+                # Table might not exist yet, which is fine
+                logger.debug(f"[PromptRepository] ai_actions table check: {e}")
+
             # Create tables if not exist (additive only, no drop/rename)
             conn.executescript(schema)
 
@@ -163,6 +204,7 @@ class PromptRepository:
 
             # Correct default actions
             self._correct_default_actions(conn)
+            self._apply_response_length_defaults(conn)
 
     def _create_backup_if_needed(self) -> None:
         """Create backup before migration if it doesn't exist."""
@@ -190,7 +232,6 @@ class PromptRepository:
                 "archived = 0",
                 "input_mode = 'auto'",
                 f"use_rag = {use_rag}",
-                "response_length = 'medium'",
             ]
             
             # Only add updated_at if column exists
@@ -208,6 +249,48 @@ class PromptRepository:
                 (action_id,),
             )
         logger.info("[PromptRepository] Corrected default actions")
+
+    def _apply_response_length_defaults(self, conn: sqlite3.Connection) -> None:
+        """Ensure built-in actions adopt the updated response length policies."""
+        current_action_cols = self._table_columns(conn, "ai_actions")
+        if "response_length" not in current_action_cols or "source_type" not in current_action_cols:
+            return
+
+        target_map = {
+            # Document-centric workflows
+            "doc_summary": "detailed",
+            "doc_requests": "detailed",
+            "doc_checklist": "detailed",
+            "document_summary": "detailed",
+            "document_key_summary": "detailed",
+            "report_draft": "detailed",
+            "meeting_summary": "detailed",
+            # Excel-focused workflows
+            "excel_sheet_summary": "detailed",
+            "excel_task_list": "detailed",
+            "excel_table_review": "detailed",
+            "excel_data_summary": "detailed",
+            "excel_formula_generate": "detailed",
+            "excel_pivot_recommend": "detailed",
+            "excel_chart_recommend": "detailed",
+        }
+
+        for action_id, target_length in target_map.items():
+            try:
+                conn.execute(
+                    """
+                    UPDATE ai_actions
+                    SET response_length = ?
+                    WHERE action_id = ?
+                      AND COALESCE(response_length, '') IN ('', 'medium', 'long')
+                      AND COALESCE(source_type, 'default') IN ('default', 'seed', 'sample')
+                    """,
+                    (target_length, action_id),
+                )
+            except sqlite3.Error as exc:
+                logger.warning(
+                    f"[PromptRepository] Failed to apply response length default for {action_id}: {exc}"
+                )
 
     def list_actions(self, include_archived: bool = False, enabled_only: bool = False) -> list[dict[str, Any]]:
         conditions = []
@@ -331,60 +414,47 @@ class PromptRepository:
         with self._connect() as conn:
             try:
                 cols = self._table_columns(conn, "ai_actions")
-                set_clauses = [
-                    "name = excluded.name",
-                    "description = excluded.description",
-                    "category = excluded.category",
-                    "required_variables_json = excluded.required_variables_json",
-                    "enabled = excluded.enabled",
-                    "sort_order = excluded.sort_order",
-                    "source_type = excluded.source_type",
-                    "readonly = excluded.readonly",
-                    "archived = excluded.archived",
-                    "input_mode = excluded.input_mode",
-                    "use_rag = excluded.use_rag",
-                    "response_length = excluded.response_length",
-                    "icon = excluded.icon",
-                    "updated_at = CURRENT_TIMESTAMP",
-                ]
+                field_values = {
+                    "name": record.get("name", ""),
+                    "description": record.get("description", ""),
+                    "category": record.get("category", ""),
+                    "required_variables_json": record.get("required_variables_json", "[]"),
+                    "enabled": int(bool(record.get("enabled", True))),
+                    "sort_order": int(record.get("sort_order", 0)),
+                    "source_type": record.get("source_type", "user"),
+                    "readonly": int(record.get("readonly", 0)),
+                    "archived": int(record.get("archived", 0)),
+                    "input_mode": record.get("input_mode", "auto"),
+                    "use_rag": int(record.get("use_rag", 0)),
+                    "response_length": record.get("response_length", "medium"),
+                    "icon": record.get("icon", ""),
+                }
                 if "example_input" in cols:
-                    set_clauses.append("example_input = excluded.example_input")
+                    field_values["example_input"] = record.get("example_input", "")
                 if "input_placeholder" in cols:
-                    set_clauses.append("input_placeholder = excluded.input_placeholder")
-                excluded_cols = ["action_id", "name", "description", "category",
-                                 "required_variables_json", "enabled", "sort_order",
-                                 "source_type", "readonly", "archived",
-                                 "input_mode", "use_rag", "response_length", "icon"]
-                excluded_values = [
-                    action_id,
-                    record.get("name", ""),
-                    record.get("description", ""),
-                    record.get("category", ""),
-                    record.get("required_variables_json", "[]"),
-                    int(bool(record.get("enabled", True))),
-                    int(record.get("sort_order", 0)),
-                    record.get("source_type", "user"),
-                    int(record.get("readonly", 0)),
-                    int(record.get("archived", 0)),
-                    record.get("input_mode", "auto"),
-                    int(record.get("use_rag", 0)),
-                    record.get("response_length", "medium"),
-                    record.get("icon", ""),
-                ]
-                if "example_input" in cols:
-                    excluded_cols.append("example_input")
-                    excluded_values.append(record.get("example_input", ""))
-                if "input_placeholder" in cols:
-                    excluded_cols.append("input_placeholder")
-                    excluded_values.append(record.get("input_placeholder", ""))
+                    field_values["input_placeholder"] = record.get("input_placeholder", "")
+
+                set_clauses = []
+                values: list[Any] = []
+                for col, val in field_values.items():
+                    if col in cols:
+                        set_clauses.append(f"{col} = ?")
+                        values.append(val)
+
+                if "updated_at" in cols:
+                    set_clauses.append("updated_at = CURRENT_TIMESTAMP")
+
+                if not set_clauses:
+                    return True
+
+                values.append(action_id)
                 conn.execute(
                     f"""
-                    UPDATE ai_actions SET
-                        {', '.join(set_clauses)}
-                    FROM (SELECT {', '.join(excluded_cols)}) AS excluded
-                    WHERE ai_actions.action_id = excluded.action_id
+                    UPDATE ai_actions
+                    SET {', '.join(set_clauses)}
+                    WHERE action_id = ?
                     """,
-                    tuple(excluded_values),
+                    tuple(values),
                 )
                 return True
             except sqlite3.Error as e:

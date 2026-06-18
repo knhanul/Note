@@ -134,18 +134,19 @@ Rectangle {
 
     // 참고문서 AI 답변 방식(프롬프트) 선택 상태
     property var ragPromptOptions: [
-        { "id": "default", "name": "기본 답변", "description": "참고문서를 바탕으로 질문에 답변합니다." },
-        { "id": "evidence", "name": "근거 중심 답변", "description": "참고문서의 관련 근거와 함께 답변합니다." },
-        { "id": "summary", "name": "핵심 요약", "description": "검색된 참고문서 내용을 핵심만 요약합니다." },
+        { "id": "default_answer", "name": "기본 답변", "description": "참고문서를 바탕으로 질문에 답변합니다." },
+        { "id": "evidence_based_answer", "name": "근거 중심 답변", "description": "참고문서의 관련 근거와 함께 답변합니다." },
+        { "id": "key_summary", "name": "핵심 요약", "description": "검색된 참고문서 내용을 핵심만 요약합니다." },
         { "id": "checklist", "name": "체크리스트 생성", "description": "참고문서 내용을 실행 가능한 체크리스트로 정리합니다." },
-        { "id": "compare", "name": "문서 비교", "description": "여러 참고문서의 공통점과 차이점을 비교합니다." },
-        { "id": "report", "name": "보고서 초안", "description": "참고문서를 근거로 업무 보고서 초안을 작성합니다." },
-        { "id": "faq", "name": "FAQ 생성", "description": "참고문서 내용을 질문과 답변 형식으로 정리합니다." }
+        { "id": "document_compare", "name": "문서 비교", "description": "여러 참고문서의 공통점과 차이점을 비교합니다." },
+        { "id": "report_draft", "name": "보고서 초안", "description": "참고문서를 근거로 업무 보고서 초안을 작성합니다." },
+        { "id": "faq", "name": "FAQ 생성", "description": "참고문서 내용을 질문과 답변 형식으로 정리합니다." },
+        { "id": "action_plan", "name": "실행계획 작성", "description": "참고문서를 바탕으로 실행계획을 작성합니다." }
     ]
 
     property int selectedRagPromptIndex: 0
 
-    property string selectedRagPromptId: "default"
+    property string selectedRagPromptId: "default_answer"
 
     property string selectedRagPromptName: "기본 답변"
 
@@ -251,6 +252,14 @@ Rectangle {
 
     function currentContentSourceLabel() {
 
+        if (aiInputSourceType === "document")
+
+            return "문서"
+
+        if (aiInputSourceType === "excel")
+
+            return "엑셀"
+
         if (root.currentDocumentSourceMode === "note")
 
             return "현재 노트"
@@ -273,9 +282,17 @@ Rectangle {
 
     function currentContentSourceIcon() {
 
+        if (aiInputSourceType === "document")
+
+            return "../assets/icons/SourceWord.png"
+
+        if (aiInputSourceType === "excel")
+
+            return "../assets/icons/SourceXls.png"
+
         if (root.currentDocumentSourceMode === "note")
 
-            return "../assets/icons/Add_Current_Doc.png"
+            return "../assets/icons/SourceNote.png"
 
         if (root.currentDocumentSourceMode === "external_file") {
 
@@ -295,6 +312,14 @@ Rectangle {
 
     function currentContentSourceTooltip() {
 
+        if (aiInputSourceType === "document")
+
+            return "불러온 문서 내용이 프롬프트의 {{CONTENT}}에 들어갑니다."
+
+        if (aiInputSourceType === "excel")
+
+            return "분석한 엑셀 데이터가 프롬프트의 {{CONTENT}}에 들어갑니다."
+
         return currentContentSourceLabel() + " 내용이 프롬프트의 {{CONTENT}}에 들어갑니다."
 
     }
@@ -302,6 +327,14 @@ Rectangle {
 
 
     function currentContentSourceTitle() {
+
+        if (aiInputSourceType === "document")
+
+            return documentDisplayText || "문서가 선택되지 않았습니다."
+
+        if (aiInputSourceType === "excel")
+
+            return excelDisplayText || "엑셀 파일이 선택되지 않았습니다."
 
         if (root.currentDocumentSourceMode === "note") {
 
@@ -423,6 +456,29 @@ Rectangle {
     property int currentExternalDocumentFailedCount: 0
 
     property bool currentExternalDocumentFailedFilesExpanded: false
+
+    property string aiInputSourceType: "note" // note | document | excel
+    property string documentAiContext: ""
+    property string documentDisplayText: ""
+    property bool documentLoading: false
+    property string documentLoadError: ""
+    property string loadedDocumentPath: ""
+    property string loadedDocumentName: ""
+    property string loadedDocumentType: ""
+    property string loadedDocumentExtractMode: ""
+    property var documentWarnings: []
+    property var documentMetadata: ({})
+
+    property string excelAiContext: ""
+    property bool excelLoading: false
+    property string excelLoadError: ""
+    property string excelDisplayText: ""
+    property string loadedExcelPath: ""
+    property string loadedExcelName: ""
+    property string selectedExcelSheet: ""
+    property var excelSheetNames: []
+    property var excelWorkbookSummary: ({})
+    property var excelWarnings: []
 
 
 
@@ -1395,6 +1451,98 @@ Rectangle {
 
         root.currentExternalDocumentError = ""
 
+        aiInputSourceType = "note"
+        resetDocumentState()
+        resetExcelState()
+
+    }
+
+
+
+    function resetDocumentState() {
+
+        documentAiContext = ""
+
+        documentDisplayText = ""
+
+        documentLoading = false
+
+        documentLoadError = ""
+
+        loadedDocumentPath = ""
+
+        loadedDocumentName = ""
+
+        loadedDocumentType = ""
+
+        loadedDocumentExtractMode = ""
+
+        documentWarnings = []
+
+        documentMetadata = ({})
+
+    }
+
+
+
+    function resetExcelState() {
+
+        excelAiContext = ""
+
+        excelDisplayText = ""
+
+        excelLoading = false
+
+        excelLoadError = ""
+
+        loadedExcelPath = ""
+
+        loadedExcelName = ""
+
+        selectedExcelSheet = ""
+
+        excelSheetNames = []
+
+        excelWorkbookSummary = ({})
+
+        excelWarnings = []
+
+    }
+
+
+
+    function selectNoteInputSource() {
+
+        root.useCurrentNoteSource()
+
+    }
+
+
+
+    function selectDocumentInputSource() {
+
+        if (documentLoading)
+
+            return
+
+        documentLoadError = ""
+
+        currentDocumentFileDialog.open()
+
+    }
+
+
+
+    function selectExcelInputSource() {
+
+        if (excelLoading)
+
+            return
+
+        excelLoadError = ""
+
+        excelFileDialog.open()
+
     }
 
 
@@ -1407,6 +1555,8 @@ Rectangle {
 
             root.currentExternalDocumentError = "assistantController를 사용할 수 없습니다."
 
+            documentLoadError = root.currentExternalDocumentError
+
             return false
 
         }
@@ -1417,11 +1567,17 @@ Rectangle {
 
             root.currentExternalDocumentError = "파일 경로가 비어 있습니다."
 
+            documentLoadError = root.currentExternalDocumentError
+
             return false
 
         }
 
 
+
+        documentLoading = true
+
+        documentLoadError = ""
 
         try {
 
@@ -1432,6 +1588,10 @@ Rectangle {
             if (!payload) {
 
                 root.currentExternalDocumentError = "외부 파일 정보를 읽지 못했습니다."
+
+                documentLoadError = root.currentExternalDocumentError
+
+                documentLoading = false
 
                 return false
 
@@ -1447,11 +1607,23 @@ Rectangle {
 
                 root.currentDocumentSourceMode = "note"
 
+                resetDocumentState()
+
+                documentLoadError = payload.error || root.currentExternalDocumentError
+
+                documentLoading = false
+
                 return false
 
             }
 
 
+
+            resetDocumentState()
+
+            resetExcelState()
+
+            aiInputSourceType = "document"
 
             root.currentDocumentSourceMode = "external_file"
 
@@ -1481,6 +1653,21 @@ Rectangle {
 
             root.currentExternalDocumentFailedFilesExpanded = false
 
+            documentAiContext = payload.content || ""
+            documentDisplayText = payload.display_text || (payload.title || payload.source_path || "외부 문서")
+            documentWarnings = Array.isArray(payload.warnings) ? payload.warnings : []
+            documentMetadata = payload.metadata || {}
+            loadedDocumentPath = payload.source_path || filePath
+            loadedDocumentName = payload.title || ""
+            loadedDocumentType = payload.source_type || "external_file"
+            loadedDocumentExtractMode = payload.extract_mode || ""
+            documentLoadError = payload.error || ""
+            aiInputSourceType = "document"
+            documentLoading = false
+            excelLoading = false
+            excelAiContext = ""
+            excelDisplayText = ""
+
             return true
 
         } catch (e) {
@@ -1491,7 +1678,111 @@ Rectangle {
 
             root.currentDocumentSourceMode = "note"
 
+            resetDocumentState()
+
+            documentLoadError = root.currentExternalDocumentError
+
+            documentLoading = false
+
             console.log("[AIAssistantPanel] loadCurrentExternalDocument failed: " + e)
+
+            return false
+
+        }
+
+    }
+
+
+
+    function loadExcelFile(filePath) {
+
+        var ac = getAssistantController()
+
+        if (!ac) {
+
+            excelLoadError = "assistantController를 사용할 수 없습니다."
+
+            return false
+
+        }
+
+        if (!filePath) {
+
+            excelLoadError = "파일 경로가 비어 있습니다."
+
+            return false
+
+        }
+
+        excelLoading = true
+
+        excelLoadError = ""
+
+        try {
+
+            var jsonStr = ac.loadExternalExcelJson(filePath)
+
+            var payload = parseJsonObjectSafe(jsonStr)
+
+            if (!payload) {
+
+                excelLoadError = "엑셀 정보를 읽지 못했습니다."
+
+                excelLoading = false
+
+                return false
+
+            }
+
+            if (!payload.ok) {
+
+                excelLoadError = payload.error || "엑셀 파일을 불러오지 못했습니다."
+
+                excelWarnings = Array.isArray(payload.warnings) ? payload.warnings : []
+
+                excelLoading = false
+
+                return false
+
+            }
+
+            root.clearCurrentExternalDocument()
+
+            resetDocumentState()
+
+            aiInputSourceType = "excel"
+
+            excelAiContext = payload.content || ""
+
+            excelDisplayText = payload.display_text || (payload.title || payload.source_path || "엑셀 데이터")
+
+            loadedExcelPath = payload.source_path || filePath
+
+            loadedExcelName = payload.title || ""
+
+            selectedExcelSheet = payload.selected_sheet || ""
+
+            excelSheetNames = (payload.metadata && payload.metadata.sheet_names) ? payload.metadata.sheet_names : []
+
+            excelWorkbookSummary = payload.metadata || {}
+
+            excelWarnings = Array.isArray(payload.warnings) ? payload.warnings : []
+
+            excelLoadError = payload.error || ""
+
+            excelLoading = false
+
+            return true
+
+        } catch (e) {
+
+            excelLoadError = "엑셀 불러오기 실패: " + e
+
+            excelWarnings = []
+
+            excelLoading = false
+
+            console.log("[AIAssistantPanel] loadExcelFile failed: " + e)
 
             return false
 
@@ -1604,6 +1895,54 @@ Rectangle {
 
 
     function getCurrentDocumentSource() {
+
+        if (aiInputSourceType === "document" && documentAiContext && documentAiContext.length > 0) {
+
+            return {
+
+                note_id: "",
+
+                title: loadedDocumentName || (loadedDocumentPath ? loadedDocumentPath.split(/[/\\]/).pop() : ""),
+
+                content: documentAiContext,
+
+                tags: [],
+
+                source_type: loadedDocumentType || "document",
+
+                source_path: loadedDocumentPath || "",
+
+                is_external_file: true,
+
+                metadata: documentMetadata || {}
+
+            }
+
+        }
+
+        if (aiInputSourceType === "excel" && excelAiContext && excelAiContext.length > 0) {
+
+            return {
+
+                note_id: "",
+
+                title: loadedExcelName || (loadedExcelPath ? loadedExcelPath.split(/[/\\]/).pop() : ""),
+
+                content: excelAiContext,
+
+                tags: [],
+
+                source_type: "excel",
+
+                source_path: loadedExcelPath || "",
+
+                is_external_file: true,
+
+                metadata: excelWorkbookSummary || {}
+
+            }
+
+        }
 
         if (root.currentDocumentSourceMode === "external_file" && root.currentExternalDocumentContent) {
 
@@ -2769,7 +3108,7 @@ Rectangle {
 
         console.log("[AIAssistantPanel] RAG prompt selected:", root.selectedRagPromptId, root.selectedRagPromptName)
 
-        ragCtrl.askIndexedDocuments(question)
+        ragCtrl.askIndexedDocuments(question, root.selectedRagPromptId)
 
     }
 
@@ -3344,7 +3683,8 @@ Rectangle {
                          : "기본 실행"
         var question = root.lastAskedQuestion || ""
         
-        var header = "# AI 결과\n\n"
+        var title = formatAiResultTitle()
+        var header = "# " + title + "\n\n"
         header += "- 실행 시각: " + dateStr + "\n"
         header += "- 실행 모드: " + aiModeLabel + "\n"
         header += "- 입력 소스: " + inputSource + "\n"
@@ -3366,7 +3706,8 @@ Rectangle {
         
         var question = root.lastAskedQuestion || ""
         
-        var header = "# RAG 답변\n\n"
+        var title = formatAiResultTitle()
+        var header = "# " + title + "\n\n"
         header += "- 실행 시각: " + dateStr + "\n"
         header += "- 실행 모드: 참고문서 AI\n"
         header += "- 입력 소스: 색인된 참고문서\n"
@@ -3898,6 +4239,23 @@ Rectangle {
                         // 상태 업데이트: 성공
 
                         updateCurrentAiStatus(true, root.currentStreamingNoteId, root.currentStreamingTitle, "")
+
+                        // 자동 저장 트리거
+                        var nc = getNoteController()
+                        if (nc && nc.saveCurrentNote) {
+                            console.log("[AIAssistantPanel] Triggering auto-save for AI result note")
+                            nc.saveCurrentNote()
+                        }
+
+                        // AI결과 폴더로 이동하여 노트 목록 갱신
+                        var fc = getFolderController()
+                        if (fc) {
+                            var aiFolderId = ac.getOrCreateAIResultFolder()
+                            if (aiFolderId) {
+                                console.log("[AIAssistantPanel] Switching to AI result folder:", aiFolderId)
+                                fc.selectFolder(aiFolderId)
+                            }
+                        }
 
                     }
 
@@ -5224,23 +5582,19 @@ Rectangle {
 
                                             Text {
 
-                                        width: parent.width
+                                            width: parent.width
 
-                                        visible: true
+                                            text: currentContentSourceTitle()
 
-                                        text: root.currentDocumentSourceMode === "note"
-                                              ? ((window.currentNote && window.currentNote.title) ? window.currentNote.title : "현재 노트")
-                                              : (root.currentExternalDocumentTitle !== "" ? root.currentExternalDocumentTitle : (root.currentExternalDocumentPath !== "" ? root.currentExternalDocumentPath : (root.currentExternalDocumentType === "external_folder" ? "외부 폴더가 선택되지 않았습니다." : "외부 파일이 선택되지 않았습니다.")))
+                                            font.family: Typography.fontPrimary
 
-                                        font.family: Typography.fontPrimary
+                                            font.pixelSize: Typography.caption
 
-                                        font.pixelSize: Typography.caption
+                                            color: aiInputSourceType === "note" ? Colors.primary700 : Colors.textPrimary
 
-                                        color: Colors.primary700
+                                            elide: Text.ElideRight
 
-                                        elide: Text.ElideRight
-
-                                    }
+                                        }
 
                                         }
 
@@ -5248,25 +5602,41 @@ Rectangle {
 
                                             Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
 
-                                            spacing: 6
+                                            spacing: Metrics.xs
 
+                                            Item {
 
+                                                Layout.preferredWidth: 44
 
-                                            Button {
+                                                Layout.preferredHeight: 44
 
-                                                Layout.preferredWidth: 32
+                                                property bool active: aiInputSourceType === "note"
 
-                                                Layout.preferredHeight: 32
+                                                Rectangle {
 
-                                                text: ""
-
-                                                enabled: root.currentDocumentSourceMode !== "note" || root.currentExternalDocumentPath !== ""
-
-                                                background: Rectangle {
-
-                                                    color: noteSourceMouse.containsMouse ? Colors.bgSecondary : "transparent"
+                                                    anchors.fill: parent
 
                                                     radius: Metrics.radiusSm
+
+                                                    color: noteSourceMouse.containsMouse ? Colors.bgSecondary : (parent.active ? Colors.primary50 : "transparent")
+
+                                                    border.width: parent.active ? 1 : 0
+
+                                                    border.color: parent.active ? Colors.primary400 : "transparent"
+
+                                                }
+
+                                                Image {
+
+                                                    anchors.centerIn: parent
+
+                                                    source: "../assets/icons/SourceNote.png"
+
+                                                    sourceSize: Qt.size(36, 36)
+
+                                                    fillMode: Image.PreserveAspectFit
+
+                                                    opacity: noteSourceMouse.enabled ? 1 : 0.45
 
                                                 }
 
@@ -5278,104 +5648,284 @@ Rectangle {
 
                                                     hoverEnabled: true
 
-                                                    enabled: parent.enabled
+                                                    enabled: !documentLoading && !excelLoading
 
-                                                    onClicked: {
+                                                    onClicked: selectNoteInputSource()
 
-                                                        root.useCurrentNoteSource()
+                                                }
 
-                                                    }
+                                                ToolTip {
+
+                                                    text: "노트: 현재 열려 있는 마크다운 노트 내용을 AI 입력으로 사용합니다."
+
+                                                    visible: noteSourceMouse.containsMouse
+
+                                                    delay: 350
+
+                                                    timeout: 4000
+
+                                                }
+
+                                            }
+
+                                            Item {
+
+                                                Layout.preferredWidth: 44
+
+                                                Layout.preferredHeight: 44
+
+                                                property bool active: aiInputSourceType === "document"
+
+                                                Rectangle {
+
+                                                    anchors.fill: parent
+
+                                                    radius: Metrics.radiusSm
+
+                                                    color: documentSourceMouse.containsMouse ? Colors.bgSecondary : (parent.active ? Colors.primary50 : "transparent")
+
+                                                    border.width: parent.active ? 1 : 0
+
+                                                    border.color: parent.active ? Colors.primary400 : "transparent"
 
                                                 }
 
                                                 Image {
 
-                                                anchors.centerIn: parent
+                                                    anchors.centerIn: parent
 
-                                                source: "../assets/icons/Add_Current_Doc.png"
+                                                    source: "../assets/icons/SourceWord.png"
 
-                                                sourceSize: Qt.size(28, 28)
+                                                    sourceSize: Qt.size(36, 36)
 
-                                                fillMode: Image.PreserveAspectFit
+                                                    fillMode: Image.PreserveAspectFit
 
-                                                opacity: parent.enabled ? 1 : 0.45
+                                                    opacity: documentSourceMouse.enabled ? 1 : 0.45
 
-                                            }
+                                                }
 
-                                            ToolTip.text: "현재 노트에서 가져오기"
+                                                MouseArea {
 
-                                            ToolTip.visible: noteSourceMouse.containsMouse
+                                                    id: documentSourceMouse
 
-                                            ToolTip.delay: 350
+                                                    anchors.fill: parent
 
-                                            ToolTip.timeout: 4000
+                                                    hoverEnabled: true
 
-                                        }
+                                                    enabled: canUseAI() && !root.aiRunning && !documentLoading
 
+                                                    onClicked: selectDocumentInputSource()
 
+                                                }
 
+                                                ToolTip {
 
-                                        Button {
+                                                    text: "문서: 아래아한글, 파워포인트, 워드, PDF 등 외부 문서를 불러와 AI 입력으로 사용합니다."
 
-                                            Layout.preferredWidth: 32
+                                                    visible: documentSourceMouse.containsMouse
 
-                                            Layout.preferredHeight: 32
+                                                    delay: 350
 
-                                            text: ""
-
-                                            enabled: canUseAI() && !root.aiRunning
-
-                                            background: Rectangle {
-
-                                                color: fileSourceMouse.containsMouse ? Colors.bgSecondary : "transparent"
-
-                                                radius: Metrics.radiusSm
-
-                                            }
-
-                                            MouseArea {
-
-                                                id: fileSourceMouse
-
-                                                anchors.fill: parent
-
-                                                hoverEnabled: true
-
-                                                enabled: parent.enabled
-
-                                                onClicked: {
-
-                                                    currentDocumentFileDialog.open()
+                                                    timeout: 4000
 
                                                 }
 
                                             }
 
-                                            Image {
+                                            Item {
 
-                                                anchors.centerIn: parent
+                                                Layout.preferredWidth: 44
 
-                                                source: "../assets/icons/Add_External_File.png"
+                                                Layout.preferredHeight: 44
 
-                                                sourceSize: Qt.size(28, 28)
+                                                property bool active: aiInputSourceType === "excel"
 
-                                                fillMode: Image.PreserveAspectFit
+                                                Rectangle {
 
-                                                opacity: parent.enabled ? 1 : 0.45
+                                                    anchors.fill: parent
+
+                                                    radius: Metrics.radiusSm
+
+                                                    color: excelSourceMouse.containsMouse ? Colors.bgSecondary : (parent.active ? Colors.primary50 : "transparent")
+
+                                                    border.width: parent.active ? 1 : 0
+
+                                                    border.color: parent.active ? Colors.primary400 : "transparent"
+
+                                                }
+
+                                                Image {
+
+                                                    anchors.centerIn: parent
+
+                                                    source: "../assets/icons/SourceXls.png"
+
+                                                    sourceSize: Qt.size(36, 36)
+
+                                                    fillMode: Image.PreserveAspectFit
+
+                                                    opacity: excelSourceMouse.enabled ? 1 : 0.45
+
+                                                }
+
+                                                MouseArea {
+
+                                                    id: excelSourceMouse
+
+                                                    anchors.fill: parent
+
+                                                    hoverEnabled: true
+
+                                                    enabled: canUseAI() && !root.aiRunning && !excelLoading
+
+                                                    onClicked: selectExcelInputSource()
+
+                                                }
+
+                                                ToolTip {
+
+                                                    text: "엑셀: 엑셀 또는 CSV 데이터를 불러와 분석·함수 생성·보고서 작성에 사용합니다."
+
+                                                    visible: excelSourceMouse.containsMouse
+
+                                                    delay: 350
+
+                                                    timeout: 4000
+
+                                                }
 
                                             }
 
-                                            ToolTip.text: "파일 불러오기"
+        
+                                            BusyIndicator {
 
-                                            ToolTip.visible: fileSourceMouse.containsMouse
+                                                running: documentLoading || excelLoading
 
-                                            ToolTip.delay: 350
+                                                visible: running
 
-                                            ToolTip.timeout: 4000
+                                                Layout.preferredWidth: 18
+
+                                                Layout.preferredHeight: 18
+
+                                            }
 
                                         }
 
                                     }
+
+
+
+                                    Text {
+
+                                        width: parent.width
+
+                                        visible: documentLoading
+
+                                        text: "문서 분석 중..."
+
+                                        font.family: Typography.fontPrimary
+
+                                        font.pixelSize: Typography.caption
+
+                                        color: Colors.textSecondary
+
+                                    }
+
+
+
+                                    Text {
+
+                                        width: parent.width
+
+                                        visible: excelLoading
+
+                                        text: "엑셀 분석 중..."
+
+                                        font.family: Typography.fontPrimary
+
+                                        font.pixelSize: Typography.caption
+
+                                        color: Colors.textSecondary
+
+                                    }
+
+
+
+                                    Text {
+
+                                        width: parent.width
+
+                                        visible: documentLoadError !== ""
+
+                                        text: documentLoadError
+
+                                        font.family: Typography.fontPrimary
+
+                                        font.pixelSize: Typography.caption
+
+                                        color: Colors.error
+
+                                        wrapMode: Text.Wrap
+
+                                    }
+
+
+
+                                    Text {
+
+                                        width: parent.width
+
+                                        visible: excelLoadError !== ""
+
+                                        text: excelLoadError
+
+                                        font.family: Typography.fontPrimary
+
+                                        font.pixelSize: Typography.caption
+
+                                        color: Colors.error
+
+                                        wrapMode: Text.Wrap
+
+                                    }
+
+
+
+                                    Text {
+
+                                        width: parent.width
+
+                                        visible: documentWarnings.length > 0
+
+                                        text: documentWarnings.join(" · ")
+
+                                        font.family: Typography.fontPrimary
+
+                                        font.pixelSize: Typography.caption
+
+                                        color: Colors.warning
+
+                                        wrapMode: Text.Wrap
+
+                                    }
+
+
+
+                                    Text {
+
+                                        width: parent.width
+
+                                        visible: excelWarnings.length > 0
+
+                                        text: excelWarnings.join(" · ")
+
+                                        font.family: Typography.fontPrimary
+
+                                        font.pixelSize: Typography.caption
+
+                                        color: Colors.warning
+
+                                        wrapMode: Text.Wrap
 
                                     }
 
@@ -5781,7 +6331,12 @@ Rectangle {
                                             }
                                         }
 
-                                        background: null
+                                        background: Rectangle {
+                                            color: Colors.bgPrimary
+                                            border.color: Colors.primary500
+                                            border.width: 2
+                                            radius: Metrics.radiusSm
+                                        }
 
                                     }
 
@@ -6596,7 +7151,12 @@ Rectangle {
                                             }
                                         }
 
-                                        background: null
+                                        background: Rectangle {
+                                            color: Colors.bgPrimary
+                                            border.color: Colors.primary500
+                                            border.width: 2
+                                            radius: Metrics.radiusSm
+                                        }
 
                                     }
 
@@ -7316,7 +7876,15 @@ Rectangle {
 
         title: "외부 문서 선택"
 
-        nameFilters: ["Markdown (*.md *.markdown)", "Word (*.docx)", "Text (*.txt)", "HTML (*.html *.htm)", "HWPX (*.hwpx)", "HWP (*.hwp)", "All files (*)"]
+        nameFilters: [
+            "아래아한글 (*.hwp *.hwpx)",
+            "파워포인트 (*.pptx)",
+            "워드 문서 (*.docx)",
+            "PDF (*.pdf)",
+            "텍스트/마크다운 (*.txt *.md *.markdown)",
+            "지원 문서 (*.hwp *.hwpx *.pptx *.docx *.pdf *.txt *.md *.markdown)",
+            "모든 파일 (*.*)"
+        ]
 
         fileMode: FileDialog.OpenFiles
 
@@ -7362,7 +7930,15 @@ Rectangle {
 
         title: "현재 문서용 외부 파일 선택"
 
-        nameFilters: ["Markdown (*.md *.markdown)", "Word (*.docx)", "HWPX (*.hwpx)", "HWP (*.hwp)", "Text (*.txt)", "HTML (*.html *.htm)", "All files (*)"]
+        nameFilters: [
+            "아래아한글 (*.hwp *.hwpx)",
+            "파워포인트 (*.pptx)",
+            "워드 문서 (*.docx)",
+            "PDF (*.pdf)",
+            "텍스트/마크다운 (*.txt *.md *.markdown)",
+            "지원 문서 (*.hwp *.hwpx *.pptx *.docx *.pdf *.txt *.md *.markdown)",
+            "모든 파일 (*.*)"
+        ]
 
         fileMode: FileDialog.OpenFile
 
@@ -7385,6 +7961,42 @@ Rectangle {
                 root.clearCurrentExternalDocument()
 
                 root.loadCurrentExternalDocument(filePath)
+
+            }
+
+        }
+
+    }
+
+
+
+    FileDialog {
+
+        id: excelFileDialog
+
+        title: "엑셀 데이터 선택"
+
+        nameFilters: ["엑셀/CSV (*.xlsx *.xlsm *.csv)", "모든 파일 (*.*)"]
+
+        fileMode: FileDialog.OpenFile
+
+        onAccepted: {
+
+            var filePath = ""
+
+            if (selectedFile) {
+
+                filePath = fileUrlToLocalPath(selectedFile)
+
+            } else if (selectedFiles && selectedFiles.length > 0) {
+
+                filePath = fileUrlToLocalPath(selectedFiles[0])
+
+            }
+
+            if (filePath !== "") {
+
+                root.loadExcelFile(filePath)
 
             }
 

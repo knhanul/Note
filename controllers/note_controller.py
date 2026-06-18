@@ -139,7 +139,10 @@ class NoteController(QObject):
             self._is_dirty = False
             self._save_status = "saved"
             self._selected_tag = ""
-            self.notesChanged.emit()  # Clear notes view immediately
+            self._loaded_notes = []
+            self._current_note_data = {}
+            self._pagination_offset = 0
+            self.notesChanged.emit()
             self.filteredNotesChanged.emit()
             self.tagsChanged.emit()
             self._on_folder_changed()  # Reload notes for current folder

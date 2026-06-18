@@ -56,10 +56,45 @@ Rectangle {
         root.categoryOptions = loadCategories()
     }
     property var responseLengthOptions: [
-        { "value": "short", "label": "짧게", "description": "핵심만 빠르게 답변합니다." },
-        { "value": "medium", "label": "보통", "description": "일반적인 업무용 답변 길이입니다." },
-        { "value": "long", "label": "자세히", "description": "맥락과 설명을 더 충분히 제공합니다." }
+        {
+            "value": "short",
+            "label": "짧게",
+            "description": "핵심 위주로 간단히 답변합니다. (최대 약 2,000자)"
+        },
+        {
+            "value": "medium",
+            "label": "보통",
+            "description": "일반적인 업무 분량으로 정리합니다. (최대 약 6,000자)"
+        },
+        {
+            "value": "detailed",
+            "label": "자세히",
+            "description": "근거와 맥락을 포함해 자세히 설명합니다. (최대 약 12,000자)"
+        },
+        {
+            "value": "very_detailed",
+            "label": "매우 자세히",
+            "description": "보고서 수준으로 길게 작성합니다. (최대 약 20,000자)"
+        }
     ]
+
+    function normalizeResponseLength(value) {
+        if (!value || value === "")
+            return "medium"
+        switch (value) {
+        case "short":
+        case "medium":
+        case "detailed":
+        case "very_detailed":
+            return value
+        case "long":
+            return "detailed"
+        case "very_long":
+            return "very_detailed"
+        default:
+            return "medium"
+        }
+    }
 
     function getActionController() {
         return aiActionControllerObj
@@ -119,24 +154,27 @@ Rectangle {
 
 
     function getResponseLengthLabel(value) {
+        var normalized = normalizeResponseLength(value)
         for (var i = 0; i < root.responseLengthOptions.length; i++) {
-            if (root.responseLengthOptions[i].value === value)
+            if (root.responseLengthOptions[i].value === normalized)
                 return root.responseLengthOptions[i].label
         }
         return "보통"
     }
 
     function getResponseLengthDescription(value) {
+        var normalized = normalizeResponseLength(value)
         for (var i = 0; i < root.responseLengthOptions.length; i++) {
-            if (root.responseLengthOptions[i].value === value)
+            if (root.responseLengthOptions[i].value === normalized)
                 return root.responseLengthOptions[i].description
         }
         return root.responseLengthOptions[1].description
     }
 
     function responseLengthIndex(value) {
+        var normalized = normalizeResponseLength(value)
         for (var i = 0; i < root.responseLengthOptions.length; i++) {
-            if (root.responseLengthOptions[i].value === value)
+            if (root.responseLengthOptions[i].value === normalized)
                 return i
         }
         return 1
@@ -319,7 +357,7 @@ Rectangle {
             if (promptDoc)
                 c.set_binding(action.action_id, promptDoc.prompt_doc_id)
             selectAction(action.action_id)
-            root.isEditMode = false
+            root.cancelEdit()
             root.statusMessage = "변경 내용을 저장했습니다."
         } else {
             root.statusMessage = "저장에 실패했습니다."
@@ -962,6 +1000,15 @@ Rectangle {
                                 Text {
                                     Layout.fillWidth: true
                                     text: root.getResponseLengthDescription(root.selectedResponseLength(actionFormResponseLength))
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: Typography.caption
+                                    color: Colors.textTertiary
+                                    wrapMode: Text.Wrap
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: "답변의 상세도와 최대 출력 길이가 함께 조정됩니다."
                                     font.family: Typography.fontPrimary
                                     font.pixelSize: Typography.caption
                                     color: Colors.textTertiary

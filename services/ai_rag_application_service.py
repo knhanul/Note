@@ -13,6 +13,7 @@ from services.ollama_llm_client import OllamaLlmClient
 from services.document_chunk_model import IndexedDocument, IndexedDocumentSummary
 from services.ai_search_service import SearchResultChunk
 from services.ai_rag_service import RagAnswer, RagCitation
+from services.rag_answer_prompt_loader import RagAnswerPromptLoader
 from packages.ollama_plugin.ai_settings import AISettingsManager
 
 
@@ -63,6 +64,7 @@ class AiRagApplicationService:
         self._context_builder: Optional[AiContextBuilder] = None
         self._prompt_builder: Optional[AiRagPromptBuilder] = None
         self._rag_service: Optional[AiRagService] = None
+        self._rag_prompt_loader: Optional[RagAnswerPromptLoader] = None
         self._last_answer: Optional[RagAnswer] = None
         self._initialized = False
 
@@ -77,6 +79,8 @@ class AiRagApplicationService:
         self._search_service = AiSearchService(self._repo)
         self._context_builder = AiContextBuilder(self._repo)
         self._prompt_builder = AiRagPromptBuilder()
+        self._rag_prompt_loader = RagAnswerPromptLoader()
+        self._rag_prompt_loader.load()
 
         # Initialize settings manager to get model from AI settings
         if self._app_data_dir:
@@ -95,6 +99,7 @@ class AiRagApplicationService:
             prompt_builder=self._prompt_builder,
             llm_client=llm,
             default_model=self._default_model,
+            rag_prompt_loader=self._rag_prompt_loader,
         )
 
         self._initialized = True
@@ -279,10 +284,10 @@ class AiRagApplicationService:
         return self._search_service.search_keyword(query, limit=limit, offset=offset)
 
     def ask_indexed_documents(
-        self, question: str, options: RagQueryOptions | None = None
+        self, question: str, prompt_id: str = "default_answer", options: RagQueryOptions | None = None
     ) -> RagAnswer:
         self._ensure_initialized()
-        self._last_answer = self._rag_service.answer_question(question, options)
+        self._last_answer = self._rag_service.answer_question(question, prompt_id, options)
         return self._last_answer
 
     def ask_indexed_document(

@@ -650,6 +650,20 @@ export default function App() {
         console.log('[editorAPI] getMode called, returning:', modeRef.current)
         return modeRef.current
       },
+      scrollToBottom() {
+        if (modeRef.current === 'markdown') {
+          const textarea = markdownTextareaRef.current
+          if (textarea) {
+            textarea.scrollTop = textarea.scrollHeight
+          }
+          return
+        }
+        const { view, state } = editor
+        const coords = view.coordsAtPos(state.doc.content.size)
+        if (coords) {
+          view.dom.scrollIntoView({ block: 'end', behavior: 'smooth' })
+        }
+      },
     }
 
     // QML이 첫 진입 시 읽을 수 있도록 초기 payload 한 번 발행

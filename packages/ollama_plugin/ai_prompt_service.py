@@ -20,6 +20,10 @@ logger = logging.getLogger(__name__)
 VARIABLE_PATTERN = re.compile(r"\{\{([A-Z_]+)\}\}")
 ACTION_ID_PATTERN = re.compile(r"^[a-z0-9_]+$")
 
+RESPONSE_LENGTH_ALLOWED = {"short", "medium", "detailed", "very_detailed"}
+RESPONSE_LENGTH_ALIASES = {"long": "detailed", "very_long": "very_detailed"}
+DEFAULT_RESPONSE_LENGTH = "medium"
+
 
 class PromptService:
     """Business logic for AI prompt documents and action-to-prompt bindings."""
@@ -32,6 +36,15 @@ class PromptService:
     @property
     def repository(self) -> PromptRepository:
         return self._repo
+
+    def _normalize_response_length(self, value: str | None) -> str:
+        if not value:
+            return DEFAULT_RESPONSE_LENGTH
+        if value in RESPONSE_LENGTH_ALLOWED:
+            return value
+        if value in RESPONSE_LENGTH_ALIASES:
+            return RESPONSE_LENGTH_ALIASES[value]
+        return DEFAULT_RESPONSE_LENGTH
 
     def list_actions(self, include_archived: bool = False, enabled_only: bool = False) -> list[dict[str, Any]]:
         actions = self._repo.list_actions(include_archived=include_archived, enabled_only=enabled_only)
@@ -57,7 +70,7 @@ class PromptService:
                 "archived": bool(action.get("archived", 0)),
                 "input_mode": action.get("input_mode", "auto"),
                 "use_rag": bool(action.get("use_rag", 0)),
-                "response_length": action.get("response_length", "medium"),
+                "response_length": self._normalize_response_length(action.get("response_length")),
                 "icon": action.get("icon", ""),
                 "example_input": action.get("example_input", ""),
                 "input_placeholder": action.get("input_placeholder", ""),
@@ -154,7 +167,7 @@ class PromptService:
             "archived": 0,
             "input_mode": data.get("input_mode", "auto"),
             "use_rag": data.get("use_rag", 0),
-            "response_length": data.get("response_length", "medium"),
+            "response_length": self._normalize_response_length(data.get("response_length")),
             "icon": data.get("icon", ""),
             "example_input": data.get("example_input", ""),
             "input_placeholder": data.get("input_placeholder", ""),
@@ -187,7 +200,7 @@ class PromptService:
             "archived": action.get("archived", 0),
             "input_mode": data.get("input_mode", action.get("input_mode", "auto")),
             "use_rag": data.get("use_rag", action.get("use_rag", 0)),
-            "response_length": data.get("response_length", action.get("response_length", "medium")),
+            "response_length": self._normalize_response_length(data.get("response_length", action.get("response_length", DEFAULT_RESPONSE_LENGTH))),
             "icon": data.get("icon", action.get("icon", "")),
             "example_input": data.get("example_input", action.get("example_input", "")),
             "input_placeholder": data.get("input_placeholder", action.get("input_placeholder", "")),

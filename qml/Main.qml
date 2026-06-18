@@ -63,6 +63,114 @@ Window {
     property string folderExportScope: "folder"  // folder | all | favorites
     property string folderExportFolderId: ""
     property string folderExportLabel: ""
+    // Print dialog state
+    property bool printDialogVisible: false
+    property string printPreviewTitle: ""
+    property string printPreviewMarkdown: ""
+    property string printOutputMode: "pdf"  // pdf | printer
+    property string printPaperSize: "A4"
+    property string printOrientation: "portrait"
+    property string printMarginPreset: "normal"
+    property int printScalePercent: 100
+    property bool printIncludeTitle: true
+    property bool printIncludeDates: false
+    property bool printIncludePageNumbers: true
+    property bool printIncludeTags: false
+    property bool printIncludeCodeBackground: true
+    property bool printIncludeLinkUrls: false
+    property string printStyle: "default"  // default | document | concise
+    property string printFileDialogMode: ""
+    property string printPdfOutputPath: ""
+    property string printDialogStatusMessage: ""
+    property bool printPreviewGenerating: false
+    property string printPreviewErrorMessage: ""
+    property var printPreviewPageImages: []
+    property int printPreviewPageCount: 0
+    property string printPreviewPdfPath: ""
+    property var printPreviewOptionSnapshot: ({})
+    property var printPaperSizeOptions: ["A4", "Letter", "Legal"]
+    property var printOrientationOptions: [
+        { "label": "세로", "value": "portrait" },
+        { "label": "가로", "value": "landscape" }
+    ]
+    property var printMarginOptions: [
+        { "label": "기본", "value": "normal" },
+        { "label": "좁게", "value": "narrow" },
+        { "label": "넓게", "value": "wide" }
+    ]
+
+    onPrintPreviewTitleChanged: schedulePrintPreviewRefresh()
+    onPrintPreviewMarkdownChanged: schedulePrintPreviewRefresh()
+    onPrintIncludeTitleChanged: schedulePrintPreviewRefresh()
+    onPrintIncludeDatesChanged: schedulePrintPreviewRefresh()
+    onPrintIncludeTagsChanged: schedulePrintPreviewRefresh()
+    onPrintIncludeLinkUrlsChanged: schedulePrintPreviewRefresh()
+    onPrintIncludePageNumbersChanged: schedulePrintPreviewRefresh()
+    onPrintIncludeCodeBackgroundChanged: schedulePrintPreviewRefresh()
+    onPrintMarginPresetChanged: schedulePrintPreviewRefresh()
+    onPrintScalePercentChanged: schedulePrintPreviewRefresh()
+    onPrintOrientationChanged: schedulePrintPreviewRefresh()
+
+    function collectPrintPreviewOptions() {
+        var note = currentNote || {}
+        return {
+            title: printPreviewTitle || "",
+            markdown: printPreviewMarkdown || "",
+            orientation: printOrientation,
+            marginPreset: printMarginPreset,
+            scalePercent: printScalePercent,
+            includeTitle: printIncludeTitle,
+            includeDates: printIncludeDates,
+            includeTags: printIncludeTags,
+            includePageNumbers: printIncludePageNumbers,
+            includeCodeBackground: printIncludeCodeBackground,
+            includeLinkUrls: printIncludeLinkUrls,
+            tags: note.tags ? note.tags : [],
+            createdAt: note.created_at || "",
+            updatedAt: note.updated_at || "",
+            previewZoom: 1.5
+        }
+    }
+
+    function schedulePrintPreviewRefresh() {
+        if (!printDialogVisible || !currentExportController || !canPrintCurrentNote())
+            return
+        if (printPreviewRefreshTimer.running) {
+            printPreviewRefreshTimer.restart()
+        } else {
+            printPreviewRefreshTimer.start()
+        }
+    }
+
+    function triggerPrintPreviewRefresh() {
+        if (!currentExportController || !canPrintCurrentNote())
+            return
+        var options = collectPrintPreviewOptions()
+        printPreviewOptionSnapshot = options
+        printPreviewGenerating = true
+        printPreviewErrorMessage = ""
+        currentExportController.requestPrintPreview(options)
+    }
+
+    Timer {
+        id: printPreviewRefreshTimer
+        interval: 260
+        repeat: false
+        onTriggered: triggerPrintPreviewRefresh()
+    }
+
+    function fileUrlToLocalPath(urlString) {
+        if (!urlString || urlString.length === 0)
+            return ""
+        var decoded = decodeURIComponent(urlString.toString())
+        if (decoded.indexOf("file:///") === 0) {
+            decoded = decoded.substring(8)
+        } else if (decoded.indexOf("file://") === 0) {
+            decoded = decoded.substring(7)
+        }
+        decoded = decoded.replace(/\\/g, "/")
+        return decoded
+    }
     property string importStatusMessage: ""
     property bool importStatusError: false
     property bool importBusy: false
@@ -158,6 +266,658 @@ Window {
             }
         } else {
             window.promptWarningMessages = []
+            window.selectedAIPromptDocId = ""
+            window.currentAIPromptDocument = null
+            window.refreshNotesListView()
+        }
+    }
+
+    Item {
+        id: printDialogLayer
+        anchors.fill: parent
+        visible: window.printDialogVisible
+        z: 9150
+
+        Rectangle {
+            anchors.fill: parent
+            color: Qt.rgba(0, 0, 0, 0.35)
+            MouseArea { anchors.fill: parent }
+        }
+
+        Rectangle {
+            id: printDialogCard
+            anchors.centerIn: parent
+            width: Math.min(parent.width - Metrics.xl * 4, 1080)
+            height: Math.min(parent.height - Metrics.xl * 3, 700)
+            radius: Metrics.radiusXxl
+            color: Colors.bgPrimary
+            border.color: Colors.borderLight
+            border.width: 1
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: Metrics.cardPadding
+                spacing: Metrics.md
+
+                RowLayout {
+                    Layout.fillWidth: true
+
+                    Text {
+                        text: "현재 노트 출력"
+                        font.family: Typography.fontPrimary
+                        font.weight: Typography.weightSemibold
+                        font.pixelSize: Typography.h4
+                        color: Colors.textPrimary
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    Rectangle {
+                        width: 28
+                        height: 28
+                        radius: Metrics.radiusSm
+                        color: closePrintMA.containsMouse ? Colors.bgSecondary : "transparent"
+                        border.width: 0
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "✕"
+                            font.pixelSize: 14
+                            color: Colors.textSecondary
+                        }
+
+                        MouseArea {
+                            id: closePrintMA
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: window.closePrintDialog()
+                        }
+                    }
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: "현재 노트의 마크다운 내용을 미리 확인한 뒤 프린터 또는 PDF로 출력하세요."
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.bodySmall
+                    color: Colors.textSecondary
+                    wrapMode: Text.Wrap
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    visible: window.printDialogStatusMessage.length > 0
+                    text: window.printDialogStatusMessage
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.caption
+                    color: window.canPrintCurrentNote() ? Colors.accentRose : Colors.accentRose
+                    wrapMode: Text.Wrap
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    spacing: Metrics.md
+
+                    Rectangle {
+                        id: previewPanel
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        Layout.preferredWidth: 640
+                        Layout.minimumWidth: 560
+                        Layout.maximumWidth: parent.width * 0.65
+                        radius: Metrics.radiusMd
+                        color: "#FFFFFF"
+                        border.color: Colors.borderLight
+                        border.width: 1
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: Metrics.md
+                            spacing: Metrics.sm
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text {
+                                    text: "출력 미리보기"
+                                    font.family: Typography.fontPrimary
+                                    font.weight: Typography.weightSemibold
+                                    font.pixelSize: Typography.bodyLarge
+                                    color: Colors.textPrimary
+                                }
+
+                                Text {
+                                    text: window.printPreviewGenerating
+                                        ? "PDF 미리보기를 생성하는 중..."
+                                        : (window.printPreviewPageCount > 0
+                                            ? "총 " + window.printPreviewPageCount + "페이지"
+                                            : "미리볼 페이지가 없습니다.")
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: Typography.caption
+                                    color: window.printPreviewGenerating ? Colors.accentRose : Colors.textSecondary
+                                }
+
+                                Item { Layout.fillWidth: true }
+
+                                Text {
+                                    text: window.printOrientation === "landscape" ? "가로 방향" : "세로 방향"
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: Typography.caption
+                                    color: Colors.textSecondary
+                                }
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                visible: window.printPreviewErrorMessage && window.printPreviewErrorMessage.length > 0
+                                text: window.printPreviewErrorMessage
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.caption
+                                color: Colors.error
+                                wrapMode: Text.Wrap
+                            }
+
+                            Flickable {
+                                id: previewPagesFlickable
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                clip: true
+                                boundsBehavior: Flickable.StopAtBounds
+                                contentWidth: previewPagesColumn.width
+                                contentHeight: previewPagesColumn.height
+                                ScrollBar.vertical: ScrollBar {
+                                    policy: ScrollBar.AsNeeded
+                                }
+
+                                Column {
+                                    id: previewPagesColumn
+                                    width: previewPagesFlickable.width
+                                    spacing: Metrics.lg
+                                    readonly property real pageCardMaxWidth: Math.max(260, Math.min(previewPagesFlickable.width - Metrics.lg * 2, 860))
+
+                                    Repeater {
+                                        model: window.printPreviewPageImages
+                                        delegate: Item {
+                                            width: previewPagesColumn.width
+                                            implicitHeight: pageWrapper.implicitHeight
+
+                                            Column {
+                                                id: pageWrapper
+                                                width: previewPagesColumn.width
+                                                spacing: Metrics.xs
+
+                                                Text {
+                                                    anchors.horizontalCenter: parent.horizontalCenter
+                                                    text: (modelData.number || index + 1) + " / " + window.printPreviewPageCount
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.caption
+                                                    color: Colors.textSecondary
+                                                }
+
+                                                Rectangle {
+                                                    id: pageImageCard
+                                                    width: Math.min(previewPagesColumn.pageCardMaxWidth, previewPagesFlickable.width - Metrics.md * 2)
+                                                    property real aspectRatio: (modelData.height && modelData.width)
+                                                        ? modelData.height / modelData.width
+                                                        : (window.printOrientation === "landscape" ? 0.707 : 1.414)
+                                                    height: width * aspectRatio
+                                                    anchors.horizontalCenter: parent.horizontalCenter
+                                                    radius: Metrics.radiusLg
+                                                    color: Colors.bgPrimary
+                                                    border.color: Colors.borderLight
+                                                    border.width: 1
+                                                    antialiasing: true
+
+                                                    Image {
+                                                        anchors.fill: parent
+                                                        source: modelData.url ? modelData.url : modelData
+                                                        asynchronous: true
+                                                        cache: false
+                                                        fillMode: Image.PreserveAspectFit
+                                                        smooth: true
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Item {
+                                        visible: window.printPreviewPageImages.length === 0
+                                        width: parent.width
+                                        height: 220
+
+                                        Column {
+                                            anchors.centerIn: parent
+                                            spacing: Metrics.xs
+
+                                            Text {
+                                                text: window.printPreviewGenerating
+                                                    ? "PDF 미리보기를 생성하는 중입니다..."
+                                                    : "미리볼 페이지가 없습니다."
+                                                font.family: Typography.fontPrimary
+                                                font.pixelSize: Typography.bodySmall
+                                                color: Colors.textSecondary
+                                            }
+
+                                            Text {
+                                                visible: !window.printPreviewGenerating && (!window.printPreviewErrorMessage || window.printPreviewErrorMessage.length === 0)
+                                                text: "출력 옵션을 변경하면 자동으로 미리보기가 생성됩니다."
+                                                font.family: Typography.fontPrimary
+                                                font.pixelSize: Typography.caption
+                                                color: Colors.textSecondary
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: "페이지 방향과 여백, 배율 설정이 PDF 미리보기에 즉시 반영됩니다."
+                                font.family: Typography.fontPrimary
+                                font.pixelSize: Typography.caption
+                                color: Colors.textSecondary
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        id: settingsPanel
+                        Layout.fillHeight: true
+                        Layout.minimumWidth: 320
+                        Layout.preferredWidth: 360
+                        Layout.maximumWidth: 400
+                        radius: Metrics.radiusMd
+                        color: Colors.bgPrimary
+                        border.color: Colors.borderLight
+                        border.width: 1
+
+                        ScrollView {
+                            id: settingsScroll
+                            anchors.fill: parent
+                            clip: true
+
+                            Item {
+                                id: settingsContentWrapper
+                                width: settingsScroll.availableWidth
+                                height: settingsContent.implicitHeight + Metrics.md * 2
+
+                                ColumnLayout {
+                                    id: settingsContent
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    anchors.margins: Metrics.md
+                                    spacing: Metrics.md
+
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        radius: Metrics.radiusMd
+                                        color: Colors.surface
+                                        border.color: Colors.borderLight
+                                        border.width: 1
+                                        implicitHeight: outputSection.implicitHeight + Metrics.md * 2
+
+                                        ColumnLayout {
+                                            id: outputSection
+                                            anchors.left: parent.left
+                                            anchors.right: parent.right
+                                            anchors.top: parent.top
+                                            anchors.margins: Metrics.md
+                                            spacing: Metrics.sm
+
+                                            Text {
+                                                text: "출력 형식"
+                                                font.family: Typography.fontPrimary
+                                                font.weight: Typography.weightSemibold
+                                                font.pixelSize: Typography.bodySmall
+                                                color: Colors.textPrimary
+                                            }
+
+                                            RowLayout {
+                                                Layout.fillWidth: true
+                                                spacing: Metrics.xs
+
+                                                Repeater {
+                                                    model: [
+                                                        { "label": "PDF로 저장", "value": "pdf" },
+                                                        { "label": "프린터로 출력", "value": "printer" }
+                                                    ]
+                                                    delegate: Rectangle {
+                                                        Layout.fillWidth: true
+                                                        Layout.preferredWidth: 0
+                                                        height: 34
+                                                        radius: Metrics.radiusMd
+                                                        color: window.printOutputMode === modelData.value ? Colors.primary500 : Colors.bgPrimary
+                                                        border.width: 1
+                                                        border.color: window.printOutputMode === modelData.value ? Colors.primary600 : Colors.borderLight
+
+                                                        Text {
+                                                            anchors.centerIn: parent
+                                                            text: modelData.label
+                                                            font.family: Typography.fontPrimary
+                                                            font.pixelSize: Typography.caption
+                                                            font.weight: Typography.weightSemibold
+                                                            color: window.printOutputMode === modelData.value ? Colors.textInverse : Colors.textSecondary
+                                                        }
+
+                                                        MouseArea {
+                                                            anchors.fill: parent
+                                                            hoverEnabled: true
+                                                            onClicked: window.printOutputMode = modelData.value
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        radius: Metrics.radiusMd
+                                        color: Colors.surface
+                                        border.color: Colors.borderLight
+                                        border.width: 1
+                                        implicitHeight: pageSection.implicitHeight + Metrics.md * 2
+
+                                        ColumnLayout {
+                                            id: pageSection
+                                            anchors.left: parent.left
+                                            anchors.right: parent.right
+                                            anchors.top: parent.top
+                                            anchors.margins: Metrics.md
+                                            spacing: Metrics.sm
+
+                                            Text {
+                                                text: "페이지 설정"
+                                                font.family: Typography.fontPrimary
+                                                font.weight: Typography.weightSemibold
+                                                font.pixelSize: Typography.bodySmall
+                                                color: Colors.textPrimary
+                                            }
+
+                                            ComboBox {
+                                                Layout.fillWidth: true
+                                                model: window.printPaperSizeOptions
+                                                currentIndex: Math.max(0, window.printPaperSizeOptions.indexOf(window.printPaperSize))
+                                                onActivated: function(index) {
+                                                    if (index >= 0) window.printPaperSize = window.printPaperSizeOptions[index]
+                                                }
+                                            }
+
+                                            RowLayout {
+                                                Layout.fillWidth: true
+                                                spacing: Metrics.xs
+
+                                                Repeater {
+                                                    model: window.printOrientationOptions
+                                                    delegate: Rectangle {
+                                                        Layout.fillWidth: true
+                                                        Layout.preferredWidth: 0
+                                                        height: 32
+                                                        radius: Metrics.radiusMd
+                                                        color: window.printOrientation === modelData.value ? Colors.primary100 : Colors.bgPrimary
+                                                        border.width: 1
+                                                        border.color: window.printOrientation === modelData.value ? Colors.primary500 : Colors.borderLight
+
+                                                        Text {
+                                                            anchors.centerIn: parent
+                                                            text: modelData.label
+                                                            font.family: Typography.fontPrimary
+                                                            font.pixelSize: Typography.caption
+                                                            color: window.printOrientation === modelData.value ? Colors.primary700 : Colors.textSecondary
+                                                        }
+
+                                                        MouseArea {
+                                                            anchors.fill: parent
+                                                            hoverEnabled: true
+                                                            onClicked: window.printOrientation = modelData.value
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            ComboBox {
+                                                Layout.fillWidth: true
+                                                model: window.printMarginOptions
+                                                textRole: "label"
+                                                valueRole: "value"
+                                                currentIndex: Math.max(0, window.printMarginOptions.findIndex(function(opt) { return opt.value === window.printMarginPreset }))
+                                                onActivated: function(index) {
+                                                    var opt = window.printMarginOptions[index]
+                                                    if (opt && opt.value) window.printMarginPreset = opt.value
+                                                }
+                                            }
+
+                                            RowLayout {
+                                                Layout.fillWidth: true
+                                                spacing: Metrics.xs
+
+                                                Text {
+                                                    text: "배율:"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.caption
+                                                    color: Colors.textSecondary
+                                                }
+
+                                                SpinBox {
+                                                    Layout.preferredWidth: 80
+                                                    from: 50
+                                                    to: 200
+                                                    stepSize: 5
+                                                    value: window.printScalePercent
+                                                    onValueModified: window.printScalePercent = value
+                                                }
+
+                                                Text {
+                                                    text: window.printScalePercent + "%"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.caption
+                                                    color: Colors.textSecondary
+                                                }
+
+                                                Item { Layout.fillWidth: true }
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        radius: Metrics.radiusMd
+                                        color: Colors.surface
+                                        border.color: Colors.borderLight
+                                        border.width: 1
+                                        implicitHeight: includeSection.implicitHeight + Metrics.md * 2
+
+                                        ColumnLayout {
+                                            id: includeSection
+                                            anchors.left: parent.left
+                                            anchors.right: parent.right
+                                            anchors.top: parent.top
+                                            anchors.margins: Metrics.md
+                                            spacing: Metrics.xs
+
+                                            Text {
+                                                text: "포함할 내용"
+                                                font.family: Typography.fontPrimary
+                                                font.weight: Typography.weightSemibold
+                                                font.pixelSize: Typography.bodySmall
+                                                color: Colors.textPrimary
+                                            }
+
+                                            CheckBox {
+                                                Layout.fillWidth: true
+                                                text: "노트 제목 포함"
+                                                checked: window.printIncludeTitle
+                                                onToggled: window.printIncludeTitle = checked
+                                            }
+
+                                            CheckBox {
+                                                Layout.fillWidth: true
+                                                text: "작성일/수정일 포함"
+                                                checked: window.printIncludeDates
+                                                onToggled: window.printIncludeDates = checked
+                                            }
+
+                                            CheckBox {
+                                                Layout.fillWidth: true
+                                                text: "페이지 번호 포함"
+                                                checked: window.printIncludePageNumbers
+                                                onToggled: window.printIncludePageNumbers = checked
+                                            }
+
+                                            CheckBox {
+                                                Layout.fillWidth: true
+                                                text: "태그 포함"
+                                                checked: window.printIncludeTags
+                                                onToggled: window.printIncludeTags = checked
+                                            }
+
+                                            CheckBox {
+                                                Layout.fillWidth: true
+                                                text: "코드블록 배경 포함"
+                                                checked: window.printIncludeCodeBackground
+                                                onToggled: window.printIncludeCodeBackground = checked
+                                            }
+
+                                            CheckBox {
+                                                Layout.fillWidth: true
+                                                text: "링크 URL 표시"
+                                                checked: window.printIncludeLinkUrls
+                                                onToggled: window.printIncludeLinkUrls = checked
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        radius: Metrics.radiusMd
+                                        color: Colors.surface
+                                        border.color: Colors.borderLight
+                                        border.width: 1
+                                        implicitHeight: styleSection.implicitHeight + Metrics.md * 2
+
+                                        ColumnLayout {
+                                            id: styleSection
+                                            anchors.left: parent.left
+                                            anchors.right: parent.right
+                                            anchors.top: parent.top
+                                            anchors.margins: Metrics.md
+                                            spacing: Metrics.xs
+
+                                            Text {
+                                                text: "출력 스타일"
+                                                font.family: Typography.fontPrimary
+                                                font.weight: Typography.weightSemibold
+                                                font.pixelSize: Typography.bodySmall
+                                                color: Colors.textPrimary
+                                            }
+
+                                            RowLayout {
+                                                Layout.fillWidth: true
+                                                spacing: Metrics.xs
+
+                                                Repeater {
+                                                    model: [
+                                                        { "label": "기본", "value": "default" },
+                                                        { "label": "문서형", "value": "document" },
+                                                        { "label": "간결형", "value": "concise" }
+                                                    ]
+                                                    delegate: Rectangle {
+                                                        Layout.fillWidth: true
+                                                        Layout.preferredWidth: 0
+                                                        height: 32
+                                                        radius: Metrics.radiusMd
+                                                        color: window.printStyle === modelData.value ? Colors.primary100 : Colors.bgPrimary
+                                                        border.width: 1
+                                                        border.color: window.printStyle === modelData.value ? Colors.primary500 : Colors.borderLight
+
+                                                        Text {
+                                                            anchors.centerIn: parent
+                                                            text: modelData.label
+                                                            font.family: Typography.fontPrimary
+                                                            font.pixelSize: Typography.caption
+                                                            color: window.printStyle === modelData.value ? Colors.primary700 : Colors.textSecondary
+                                                        }
+
+                                                        MouseArea {
+                                                            anchors.fill: parent
+                                                            hoverEnabled: true
+                                                            onClicked: window.printStyle = modelData.value
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Metrics.sm
+
+                    Item { Layout.fillWidth: true }
+
+                    Rectangle {
+                        width: 96
+                        height: 34
+                        radius: Metrics.radiusMd
+                        color: cancelPrintMA.containsMouse ? Colors.bgTertiary : Colors.bgSecondary
+                        border.width: 1
+                        border.color: Colors.borderLight
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "취소"
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.caption
+                            color: Colors.textSecondary
+                        }
+
+                        MouseArea {
+                            id: cancelPrintMA
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: window.closePrintDialog()
+                        }
+                    }
+
+                    Rectangle {
+                        width: 130
+                        height: 34
+                        radius: Metrics.radiusMd
+                        color: actionPrintMA.containsMouse ? Colors.primary600 : Colors.primary500
+                        opacity: window.canPrintCurrentNote() ? 1 : 0.4
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: window.printOutputMode === "pdf" ? "PDF 저장" : "인쇄"
+                            font.family: Typography.fontPrimary
+                            font.pixelSize: Typography.caption
+                            font.weight: Typography.weightSemibold
+                            color: Colors.textInverse
+                        }
+
+                        MouseArea {
+                            id: actionPrintMA
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            enabled: window.canPrintCurrentNote()
+                            onClicked: {
+                                if (window.printOutputMode === "pdf") {
+                                    window.handlePrintToPdf()
+                                } else {
+                                    window.handlePrintToDevice()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -317,6 +1077,14 @@ Window {
         }
     }
 
+    function refreshNotesListView() {
+        var listView = notesListView
+        if (!listView) return
+        listView.model = []
+        listView.model = noteController ? noteController.filteredNotes : []
+        console.log("[Main] Notes ListView model refreshed, count:", listView.count)
+    }
+
     // Manual save shortcut (Ctrl+S)
     Shortcut {
         sequence: "Ctrl+S"
@@ -423,6 +1191,92 @@ Window {
         exportStatusError = false
         exportLastOutputPath = ""
         currentNoteExportDialog.visible = true
+    }
+
+    function canPrintCurrentNote() {
+        return activeContentMode === "notes" && (selectedNoteId !== "" || isDraftNewNote)
+    }
+
+    function resetPrintDialogOptions() {
+        printOutputMode = "pdf"
+        printPaperSize = "A4"
+        printOrientation = "portrait"
+        printMarginPreset = "normal"
+        printScalePercent = 100
+        printIncludeTitle = true
+        printIncludeDates = false
+        printIncludePageNumbers = true
+        printIncludeTags = false
+        printIncludeCodeBackground = true
+        printIncludeLinkUrls = false
+        printDialogStatusMessage = ""
+        printPreviewPageImages = []
+        printPreviewPageCount = 0
+        printPreviewPdfPath = ""
+        printPreviewErrorMessage = ""
+        printPreviewGenerating = false
+    }
+
+    function updatePrintPreviewFromEditor() {
+        var liveTitle = (currentNote && currentNote.title !== undefined)
+            ? currentNote.title : (noteEditor ? noteEditor.title : "")
+        var liveMarkdown = (currentNote && currentNote.content !== undefined)
+            ? currentNote.content : (noteEditor ? noteEditor.content : "")
+        printPreviewTitle = (liveTitle && liveTitle.trim()) ? liveTitle : "제목 없음"
+        printPreviewMarkdown = liveMarkdown || ""
+        if (printDialogVisible) {
+            schedulePrintPreviewRefresh()
+        }
+    }
+
+    function openPrintDialog() {
+        if (!canPrintCurrentNote()) {
+            printDialogStatusMessage = "먼저 출력할 노트를 열어주세요."
+            printPreviewTitle = ""
+            printPreviewMarkdown = ""
+            printDialogVisible = true
+            return
+        }
+        resetPrintDialogOptions()
+        updatePrintPreviewFromEditor()
+        printDialogVisible = true
+        schedulePrintPreviewRefresh()
+    }
+
+    function closePrintDialog() {
+        printDialogVisible = false
+        printPreviewRefreshTimer.stop()
+    }
+
+    function handlePrintToPdf() {
+        if (!currentExportController) {
+            printDialogStatusMessage = "내보내기 컨트롤러를 찾을 수 없습니다."
+            return
+        }
+        
+        var defaultName = currentExportController.safeFilename(printPreviewTitle || "무제") + ".pdf"
+        var defaultDir = exportOutputDir || exportLastOutputPath || ""
+
+        fileDialog.title = "PDF 저장"
+        fileDialog.selectExisting = false
+        fileDialog.nameFilters = ["PDF 파일 (*.pdf)", "모든 파일 (*.*)"]
+        if (defaultDir && defaultDir.length > 0) {
+            var normalizedDir = defaultDir.replace(/\\/g, "/")
+            fileDialog.folder = "file:///" + normalizedDir
+            fileDialog.currentFile = "file:///" + normalizedDir + "/" + defaultName
+        } else {
+            fileDialog.folder = ""
+            fileDialog.currentFile = "file:///" + defaultName
+        }
+        fileDialog.defaultSuffix = "pdf"
+        printFileDialogMode = "pdf"
+        printDialogStatusMessage = ""
+        fileDialog.open()
+    }
+
+    function handlePrintToDevice() {
+        printDialogStatusMessage = "인쇄 기능은 아직 준비 중입니다. PDF로 저장 후 사용하세요."
+        console.log("[PrintDialog] Printer job requested - not yet implemented")
     }
 
     function openFolderExportDialog() {
@@ -1693,8 +2547,7 @@ Window {
         function onLibraryChanged() {
             if (window.activeContentMode !== "notes")
                 return
-            notesListView.model = null
-            notesListView.model = noteController ? noteController.filteredNotes : []
+            window.refreshNotesListView()
             window.selectedNoteId = ""
             window.syncSelectionAfterFolderChange()
         }
@@ -1702,8 +2555,7 @@ Window {
             if (window.activeContentMode !== "notes")
                 return
             var prevSelected = window.selectedNoteId
-            notesListView.model = null
-            notesListView.model = noteController ? noteController.filteredNotes : []
+            window.refreshNotesListView()
             window.selectedNoteId = prevSelected
         }
         function onNoteSelected(noteId) {
@@ -1825,7 +2677,7 @@ Window {
         function onExportProgress(current, total, message) {
             window.exportProgressValue = current
             window.exportProgressTotal = total
-            window.exportStatusMessage = message + " (" + current + "/" + total + ")"
+            window.exportStatusMessage = (message || "") + (total > 0 ? " (" + current + "/" + total + ")" : "")
         }
         function onExportFinished(ok, message, outputPath, count, failedCount) {
             window.exportBusy = false
@@ -1839,6 +2691,24 @@ Window {
                 window.exportLastOutputPath = outputPath || ""
             }
         }
+        function onPrintPreviewStarted(requestId) {
+            window.printPreviewGenerating = true
+            window.printPreviewErrorMessage = ""
+        }
+        function onPrintPreviewReady(requestId, pdfPath, pageEntries) {
+            window.printPreviewGenerating = false
+            window.printPreviewErrorMessage = ""
+            window.printPreviewPdfPath = pdfPath || ""
+            window.printPreviewPageImages = pageEntries || []
+            window.printPreviewPageCount = window.printPreviewPageImages.length
+        }
+        function onPrintPreviewFailed(requestId, message) {
+            window.printPreviewGenerating = false
+            window.printPreviewErrorMessage = message || "PDF 미리보기 생성에 실패했습니다."
+            window.printPreviewPageImages = []
+            window.printPreviewPageCount = 0
+            window.printPreviewPdfPath = ""
+        }
     }
 
     ColumnLayout {
@@ -1849,8 +2719,11 @@ Window {
             id: appHeader
             Layout.fillWidth: true
             currentNoteExportIconSource: "../assets/icons/export.svg"
+            printIconSource: "../assets/icons/print.svg"
+            printButtonEnabled: window.activeContentMode === "notes" && (window.selectedNoteId !== "" || window.isDraftNewNote)
             importIconSource: "../assets/icons/import.svg"
             exportIconSource: "../assets/icons/export.svg"
+            onPrintCurrentNoteClicked: window.openPrintDialog()
             onLogoClicked: {
                 // 사이클: 0=모두 표시 → 1=사이드바 숨김 → 2=모두 숨김 → 0
                 var sb = sidebar.Layout.preferredWidth > 0
@@ -1887,6 +2760,23 @@ Window {
             }
             onSettingsClicked: {
                 uiScaleDialog.visible = true
+            }
+            onHwpConversionToolClicked: {
+                // TODO: Load external tool path from settings (hwpConverterToolPath)
+                // TODO: Launch external HWP to HWPX converter using QProcess or Python subprocess
+                // HWP → HWPX conversion will be handled by a separate utility program using Hanword COM automation
+                // Nuninote will only read HWPX files directly, not HWP files
+                toolInfoDialog.title = "도구 준비 중"
+                toolInfoDialog.text = "한글 파일 변환 도구는 아직 연결되지 않았습니다.\n\n이후 HWP를 HWPX로 변환하는 별도 프로그램을 호출하도록 연결할 예정입니다."
+                toolInfoDialog.open()
+            }
+            onOllamaModelToolClicked: {
+                // TODO: Load external tool path from settings (ollamaModelToolPath)
+                // TODO: Launch external Ollama model registration tool using QProcess or Python subprocess
+                // Ollama model registration will be handled by a separate utility program
+                toolInfoDialog.title = "도구 준비 중"
+                toolInfoDialog.text = "Ollama 모델 등록 도구는 아직 연결되지 않았습니다.\n\n이후 별도 모델 등록 프로그램을 호출하도록 연결할 예정입니다."
+                toolInfoDialog.open()
             }
         }
 
@@ -7889,6 +8779,13 @@ Window {
         }
     }
 
+    // Tool info dialog for external tool placeholders
+    MessageDialog {
+        id: toolInfoDialog
+        title: "도구 준비 중"
+        buttons: MessageDialog.Ok
+    }
+
     // Prompt delete confirmation dialog
     MessageDialog {
         id: promptDeleteDialog
@@ -7906,6 +8803,43 @@ Window {
         }
         onRejected: {
             pendingPromptDocId = ""
+        }
+    }
+
+    // File dialog for PDF save
+    FileDialog {
+        id: fileDialog
+        title: "파일 저장"
+        nameFilters: ["PDF 파일 (*.pdf)", "모든 파일 (*.*)"]
+        onAccepted: {
+            if (window.printFileDialogMode === "pdf" && window.currentExportController) {
+                var localPath = window.fileUrlToLocalPath(fileDialog.currentFile || fileDialog.fileUrl || "")
+                if (!localPath || localPath.length === 0) {
+                    window.printDialogStatusMessage = "저장할 경로를 선택해주세요."
+                    return
+                }
+                localPath = localPath.replace(/\\/g, "/")
+                var dir = localPath.substring(0, localPath.lastIndexOf("/"))
+                if (dir && dir.length > 0) {
+                    exportOutputDir = dir
+                    exportLastOutputPath = dir
+                }
+                printPdfOutputPath = localPath
+                var result = window.currentExportController.saveLatestPreviewPdf(
+                    window.collectPrintPreviewOptions(),
+                    localPath
+                )
+                if (result && result.ok) {
+                    window.printDialogStatusMessage = result.message
+                    window.printDialogVisible = false
+                } else if (result) {
+                    window.printDialogStatusMessage = result.message
+                }
+            }
+            window.printFileDialogMode = ""
+        }
+        onRejected: {
+            window.printFileDialogMode = ""
         }
     }
 }

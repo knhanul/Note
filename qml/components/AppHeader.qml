@@ -8,13 +8,26 @@ Rectangle {
 
     signal logoClicked()
     signal importClicked()
+    signal printCurrentNoteClicked()
     signal currentNoteExportClicked()
     signal exportClicked()
     signal settingsClicked()
+    signal hwpConversionToolClicked()
+    signal ollamaModelToolClicked()
 
     property string currentNoteExportIconSource: ""
+    property string printIconSource: ""
     property string importIconSource: ""
     property string exportIconSource: ""
+    property bool printButtonEnabled: true
+
+    function openMenuAt(menuRef, anchorItem) {
+        if (!menuRef || !anchorItem) return
+        var point = anchorItem.mapToItem(root, 0, anchorItem.height)
+        menuRef.x = point.x
+        menuRef.y = point.y + 4
+        menuRef.open()
+    }
 
     height: Metrics.headerHeight
     color: "transparent"
@@ -104,133 +117,160 @@ Rectangle {
         spacing: Metrics.sm
 
         Rectangle {
-            id: currentNoteExportBtn
-            Layout.preferredWidth: 76
+            id: noteMenuButton
             Layout.preferredHeight: 32
-            radius: 6
-            color: currentNoteExportMA.containsMouse ? Colors.primary600 : Colors.primary500
-            border.width: 0
+            Layout.preferredWidth: noteMenuLabel.implicitWidth + noteMenuArrow.implicitWidth + Metrics.md * 2
+            radius: Metrics.radiusSm
+            color: (noteMenuMA.containsMouse || noteActionsMenu.visible) ? Colors.bgSecondary : "transparent"
+            border.width: 1
+            border.color: (noteMenuMA.containsMouse || noteActionsMenu.visible) ? Colors.borderLight : "transparent"
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.margins: Metrics.sm
+                spacing: Metrics.xs
+
+                Text {
+                    id: noteMenuLabel
+                    text: "노트 작업"
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.bodySmall
+                    font.weight: Typography.weightMedium
+                    color: Colors.textPrimary
+                }
+
+                Text {
+                    id: noteMenuArrow
+                    text: "▼"
+                    font.pixelSize: 12
+                    color: Colors.textSecondary
+                }
+            }
+
+            MouseArea {
+                id: noteMenuMA
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    if (noteActionsMenu.visible) {
+                        noteActionsMenu.close()
+                    } else {
+                        root.openMenuAt(noteActionsMenu, noteMenuButton)
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            id: fileMenuButton
+            Layout.preferredHeight: 32
+            Layout.preferredWidth: fileMenuLabel.implicitWidth + fileMenuArrow.implicitWidth + Metrics.md * 2
+            radius: Metrics.radiusSm
+            color: (fileMenuMA.containsMouse || fileActionsMenu.visible) ? Colors.bgSecondary : "transparent"
+            border.width: 1
+            border.color: (fileMenuMA.containsMouse || fileActionsMenu.visible) ? Colors.borderLight : "transparent"
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.margins: Metrics.sm
+                spacing: Metrics.xs
+
+                Text {
+                    id: fileMenuLabel
+                    text: "파일 작업"
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.bodySmall
+                    font.weight: Typography.weightMedium
+                    color: Colors.textPrimary
+                }
+
+                Text {
+                    id: fileMenuArrow
+                    text: "▼"
+                    font.pixelSize: 12
+                    color: Colors.textSecondary
+                }
+            }
+
+            MouseArea {
+                id: fileMenuMA
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    if (fileActionsMenu.visible) {
+                        fileActionsMenu.close()
+                    } else {
+                        root.openMenuAt(fileActionsMenu, fileMenuButton)
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            id: toolsMenuButton
+            Layout.preferredHeight: 32
+            Layout.preferredWidth: toolsMenuLabel.implicitWidth + toolsMenuArrow.implicitWidth + Metrics.md * 2
+            radius: Metrics.radiusSm
+            color: (toolsMenuMA.containsMouse || toolsActionsMenu.visible) ? Colors.bgSecondary : "transparent"
+            border.width: 1
+            border.color: (toolsMenuMA.containsMouse || toolsActionsMenu.visible) ? Colors.borderLight : "transparent"
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.margins: Metrics.sm
+                spacing: Metrics.xs
+
+                Text {
+                    id: toolsMenuLabel
+                    text: "도구"
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.bodySmall
+                    font.weight: Typography.weightMedium
+                    color: Colors.textPrimary
+                }
+
+                Text {
+                    id: toolsMenuArrow
+                    text: "▼"
+                    font.pixelSize: 12
+                    color: Colors.textSecondary
+                }
+            }
+
+            MouseArea {
+                id: toolsMenuMA
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    if (toolsActionsMenu.visible) {
+                        toolsActionsMenu.close()
+                    } else {
+                        root.openMenuAt(toolsActionsMenu, toolsMenuButton)
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            id: settingsTextButton
+            Layout.preferredHeight: 32
+            Layout.preferredWidth: settingsLabel.implicitWidth + Metrics.md * 2
+            radius: Metrics.radiusSm
+            color: settingsMA.containsMouse ? Colors.bgSecondary : "transparent"
+            border.width: 1
+            border.color: settingsMA.containsMouse ? Colors.borderLight : "transparent"
 
             Text {
-                id: currentNoteExportLabel
+                id: settingsLabel
                 anchors.centerIn: parent
-                text: "노트 변환"
+                text: "설정"
                 font.family: Typography.fontPrimary
                 font.pixelSize: Typography.bodySmall
                 font.weight: Typography.weightMedium
-                color: "white"
-            }
-
-            MouseArea {
-                id: currentNoteExportMA
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.currentNoteExportClicked()
-            }
-
-            ToolTip.visible: currentNoteExportMA.containsMouse
-            ToolTip.delay: 400
-            ToolTip.text: "현재 노트를 다른 형식으로 변환"
-        }
-
-        Rectangle {
-            id: importBtn
-            width: 32
-            height: 32
-            radius: 8
-            color: importMA.containsMouse ? "#F0F5FF" : "transparent"
-            border.width: 0
-
-            Image {
-                anchors.centerIn: parent
-                width: 19
-                height: 19
-                source: root.importIconSource
-                fillMode: Image.PreserveAspectFit
-                visible: !!root.importIconSource
-            }
-
-            Text {
-                anchors.centerIn: parent
-                visible: !root.importIconSource
-                text: "⤓"
-                font.pixelSize: 18
-                color: Colors.textSecondary
-            }
-
-            MouseArea {
-                id: importMA
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.importClicked()
-            }
-
-            ToolTip.visible: importMA.containsMouse
-            ToolTip.delay: 400
-            ToolTip.text: "가져오기"
-        }
-
-        Rectangle {
-            id: exportBtn
-            width: 32
-            height: 32
-            radius: 8
-            color: exportMA.containsMouse ? "#F0F5FF" : "transparent"
-            border.width: 0
-
-            Image {
-                anchors.centerIn: parent
-                width: 19
-                height: 19
-                source: root.exportIconSource
-                fillMode: Image.PreserveAspectFit
-                visible: !!root.exportIconSource
-            }
-
-            Text {
-                anchors.centerIn: parent
-                visible: !root.exportIconSource
-                text: "⤒"
-                font.pixelSize: 18
-                color: Colors.textSecondary
-            }
-
-            MouseArea {
-                id: exportMA
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.exportClicked()
-            }
-
-            ToolTip.visible: exportMA.containsMouse
-            ToolTip.delay: 400
-            ToolTip.text: "보내기"
-        }
-
-        // Separator
-        Rectangle {
-            Layout.alignment: Qt.AlignVCenter
-            width: 1
-            height: 20
-            color: Colors.borderLight
-            opacity: 0.9
-        }
-
-        // Settings button
-        Rectangle {
-            width: 32
-            height: 32
-            radius: Metrics.radiusSm
-            color: settingsMA.containsMouse ? Colors.bgTertiary : "transparent"
-
-            Text {
-                anchors.centerIn: parent
-                text: "⚙"
-                font.pixelSize: 18
-                color: Colors.textSecondary
+                color: Colors.textPrimary
             }
 
             MouseArea {
@@ -240,10 +280,131 @@ Rectangle {
                 cursorShape: Qt.PointingHandCursor
                 onClicked: root.settingsClicked()
             }
+        }
+    }
 
-            ToolTip.visible: settingsMA.containsMouse
-            ToolTip.delay: 400
-            ToolTip.text: "설정"
+    Menu {
+        id: noteActionsMenu
+        parent: root
+        visible: false
+        implicitWidth: 200
+        padding: Metrics.xs
+        background: Rectangle {
+            color: Colors.bgPrimary
+            radius: Metrics.radiusLg
+            border.color: Colors.borderLight
+            border.width: 1
+        }
+
+        MenuItem {
+            text: "현재 노트 출력"
+            enabled: root.printButtonEnabled
+            width: noteActionsMenu.implicitWidth
+            implicitHeight: 34
+            font.family: Typography.fontPrimary
+            font.pixelSize: Typography.bodySmall
+            onTriggered: root.printCurrentNoteClicked()
+            background: Rectangle {
+                color: control.down ? Colors.primary100 : (control.hovered ? Colors.bgSecondary : "transparent")
+                radius: Metrics.radiusSm
+            }
+        }
+
+        MenuItem {
+            text: "노트 변환"
+            width: noteActionsMenu.implicitWidth
+            implicitHeight: 34
+            font.family: Typography.fontPrimary
+            font.pixelSize: Typography.bodySmall
+            onTriggered: root.currentNoteExportClicked()
+            background: Rectangle {
+                color: control.down ? Colors.primary100 : (control.hovered ? Colors.bgSecondary : "transparent")
+                radius: Metrics.radiusSm
+            }
+        }
+    }
+
+    Menu {
+        id: fileActionsMenu
+        parent: root
+        visible: false
+        implicitWidth: 200
+        padding: Metrics.xs
+        background: Rectangle {
+            color: Colors.bgPrimary
+            radius: Metrics.radiusLg
+            border.color: Colors.borderLight
+            border.width: 1
+        }
+
+        MenuItem {
+            text: "노트 가져오기"
+            width: fileActionsMenu.implicitWidth
+            implicitHeight: 34
+            font.family: Typography.fontPrimary
+            font.pixelSize: Typography.bodySmall
+            onTriggered: root.importClicked()
+            background: Rectangle {
+                color: control.down ? Colors.primary100 : (control.hovered ? Colors.bgSecondary : "transparent")
+                radius: Metrics.radiusSm
+            }
+        }
+
+        MenuItem {
+            text: "노트 보내기"
+            width: fileActionsMenu.implicitWidth
+            implicitHeight: 34
+            font.family: Typography.fontPrimary
+            font.pixelSize: Typography.bodySmall
+            onTriggered: root.exportClicked()
+            background: Rectangle {
+                color: control.down ? Colors.primary100 : (control.hovered ? Colors.bgSecondary : "transparent")
+                radius: Metrics.radiusSm
+            }
+        }
+    }
+
+    Menu {
+        id: toolsActionsMenu
+        parent: root
+        visible: false
+        implicitWidth: 200
+        padding: Metrics.xs
+        background: Rectangle {
+            color: Colors.bgPrimary
+            radius: Metrics.radiusLg
+            border.color: Colors.borderLight
+            border.width: 1
+        }
+
+        MenuItem {
+            text: "한글 파일 변환"
+            width: toolsActionsMenu.implicitWidth
+            implicitHeight: 34
+            font.family: Typography.fontPrimary
+            font.pixelSize: Typography.bodySmall
+            onTriggered: root.hwpConversionToolClicked()
+            ToolTip.visible: hovered
+            ToolTip.text: "HWP 파일을 HWPX로 변환하는 외부 도구를 실행합니다."
+            background: Rectangle {
+                color: control.down ? Colors.primary100 : (control.hovered ? Colors.bgSecondary : "transparent")
+                radius: Metrics.radiusSm
+            }
+        }
+
+        MenuItem {
+            text: "Ollama 모델 등록"
+            width: toolsActionsMenu.implicitWidth
+            implicitHeight: 34
+            font.family: Typography.fontPrimary
+            font.pixelSize: Typography.bodySmall
+            onTriggered: root.ollamaModelToolClicked()
+            ToolTip.visible: hovered
+            ToolTip.text: "누니노트에서 사용할 Ollama 모델 등록 도구를 실행합니다."
+            background: Rectangle {
+                color: control.down ? Colors.primary100 : (control.hovered ? Colors.bgSecondary : "transparent")
+                radius: Metrics.radiusSm
+            }
         }
     }
 

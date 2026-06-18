@@ -80,7 +80,7 @@ class FakeAppService:
         return results[:limit]
 
     def ask_indexed_documents(
-        self, question: str, options: Any = None
+        self, question: str, prompt_id: str = "default_answer", options: Any = None
     ) -> RagAnswer:
         self._last_answer = RagAnswer(
             answer_text="Fake answer from FakeAppService",
@@ -329,8 +329,8 @@ class AiRagController(QObject):
             logger.error(f"[AiRagController] searchIndexedDocuments failed: {e}")
             self.errorOccurred.emit(f"검색 실패: {e}")
 
-    @pyqtSlot(str)
-    def askIndexedDocuments(self, question: str) -> None:
+    @pyqtSlot(str, str)
+    def askIndexedDocuments(self, question: str, prompt_id: str = "default_answer") -> None:
         try:
             if not question or not question.strip():
                 self.errorOccurred.emit("질문을 입력해주세요.")
@@ -342,10 +342,13 @@ class AiRagController(QObject):
 
             self._ask_in_progress = True
             normalized_question = question.strip()
+            normalized_prompt_id = prompt_id or "default_answer"
+
+            logger.info(f"[AiRagController] askIndexedDocuments: question={normalized_question[:50]}..., prompt_id={normalized_prompt_id}")
 
             def _worker() -> None:
                 try:
-                    answer = self._get_app_service().ask_indexed_documents(normalized_question)
+                    answer = self._get_app_service().ask_indexed_documents(normalized_question, normalized_prompt_id)
                     self._askCompleted.emit(answer)
                 except Exception as worker_error:
                     logger.error(f"[AiRagController] askIndexedDocuments worker failed: {worker_error}")

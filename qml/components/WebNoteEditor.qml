@@ -417,9 +417,25 @@ ColumnLayout {
     // Force live markdown refresh for same-note streaming updates.
     // Uses editorAPI.setMarkdown which does not ignore same noteId updates.
     function applyLiveMarkdown(md) {
-        var setMd = "window.__liveMd = " + JSON.stringify(md || "") + ";"
-        webView.runJavaScript(setMd +
-            "if (window.editorAPI && window.editorAPI.setMarkdown) { window.editorAPI.setMarkdown(window.__liveMd); }")
+        if (!md || md.length === 0) return
+        // Use chunk-based assignment to avoid JSON.stringify/runJavaScript length limits
+        var chunkSize = 50000
+        var chunks = []
+        for (var i = 0; i < md.length; i += chunkSize) {
+            chunks.push(md.substring(i, Math.min(i + chunkSize, md.length)))
+        }
+        // Build JavaScript to concatenate chunks
+        var js = "window.__liveMdChunks = " + JSON.stringify(chunks) + ";"
+        js += "window.__liveMd = window.__liveMdChunks.join('');"
+        js += "if (window.editorAPI && window.editorAPI.setMarkdown) { window.editorAPI.setMarkdown(window.__liveMd); }"
+        // Multiple scroll attempts with increasing delays for reliability during streaming
+        js += "setTimeout(function() { if (window.editorAPI && window.editorAPI.scrollToBottom) { window.editorAPI.scrollToBottom(); } }, 50);"
+        js += "setTimeout(function() { if (window.editorAPI && window.editorAPI.scrollToBottom) { window.editorAPI.scrollToBottom(); } }, 150);"
+        js += "setTimeout(function() { if (window.editorAPI && window.editorAPI.scrollToBottom) { window.editorAPI.scrollToBottom(); } }, 300);"
+        // Fallback: scroll the WebEngineView itself
+        js += "setTimeout(function() { window.scrollTo(0, document.body.scrollHeight); }, 100);"
+        js += "setTimeout(function() { window.scrollTo(0, document.body.scrollHeight); }, 250);"
+        webView.runJavaScript(js)
     }
     
     // Get markdown content from editor

@@ -5,8 +5,6 @@ import logging
 from pathlib import Path
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot, pyqtProperty
 
-from packages.import_export import convert_hwp_to_markdown_text, convert_hwpx_to_markdown_text, load_markdown_document
-
 from .action_registry import ActionRegistry
 from .ai_settings import AISettingsManager
 from .ai_worker import AIWorkerManager, AIWorker
@@ -14,18 +12,46 @@ from .ai_prompt_service import PromptService
 from .prompt_renderer import PromptRenderer
 from .simple_chunker import SimpleChunker
 from .simple_retriever import SimpleRetriever
-from services.folder_import_service import FolderImportService
+from services.document_loader import DocumentLoader
+from services.excel_loader import ExcelLoader
 
 logger = logging.getLogger(__name__)
 
 MAX_CONTENT_LENGTH = 4000
-MAX_OUTPUT_LENGTH = 500
 MAX_EXTERNAL_FOLDER_FILES = 30
 MAX_EXTERNAL_FOLDER_CONTENT_LENGTH = 50000
-RESPONSE_LENGTH_TO_NUM_PREDICT = {
-    "short": 512,
-    "medium": 1024,
-    "long": 1536,
+TRUNCATION_NOTICE = "\n\n※ 설정된 응답 길이 제한에 도달하여 일부 내용이 생략되었습니다. AI기능관리에서 응답 길이를 더 길게 설정할 수 있습니다."
+
+RESPONSE_LENGTH_POLICIES = {
+    "short": {
+        "label": "짧게",
+        "num_predict": 512,
+        "max_output_length": 2000,
+        "prompt_hint": "응답을 핵심 위주로 2,000자 이내에서 짧게 작성하세요."
+    },
+    "medium": {
+        "label": "보통",
+        "num_predict": 1024,
+        "max_output_length": 6000,
+        "prompt_hint": "일반 업무 분량(약 6,000자 이내)으로 필요한 내용을 균형 있게 답변하세요."
+    },
+    "detailed": {
+        "label": "자세히",
+        "num_predict": 2048,
+        "max_output_length": 12000,
+        "prompt_hint": "근거와 맥락을 포함해 약 12,000자 이내에서 자세히 답변하세요."
+    },
+    "very_detailed": {
+        "label": "매우 자세히",
+        "num_predict": 3072,
+        "max_output_length": 20000,
+        "prompt_hint": "보고서 수준으로 빠짐없이 서술하되 최대 20,000자 이내에서 답변하세요."
+    },
+}
+
+LEGACY_RESPONSE_LENGTH_ALIASES = {
+    "long": "detailed",
+    "very_long": "very_detailed",
 }
 
 
@@ -51,11 +77,16 @@ class AssistantController(QObject):
         self._retriever = SimpleRetriever(top_k=initial_settings.top_k or SimpleRetriever.DEFAULT_TOP_K)
         self._current_worker: AIWorker | None = None
         self._response_text = ""
+        self._response_truncated = False
+        self._current_output_limit = RESPONSE_LENGTH_POLICIES["medium"]["max_output_length"]
+        self._current_response_policy = RESPONSE_LENGTH_POLICIES["medium"].copy()
         self._retrieved_context = ""
         self._last_query = ""
         self._note_controller = None
         self._folder_controller = None
         self._app_data_dir = app_data_dir
+        self._document_loader = DocumentLoader()
+        self._excel_loader = ExcelLoader()
         self._legacy_fallback_stats = {
             "runTask_hits": 0,
             "listActions_hits": 0,
@@ -107,25 +138,54 @@ class AssistantController(QObject):
         self.runningChanged.emit(False)
         self._current_worker = None
         self._worker_manager.clear_worker()
-        
+
         # Check for empty response - this happens when worker emitted error for empty response
         if not self._response_text or len(self._response_text) == 0:
-            logger.warning(f"[AssistantController] Empty response detected, emitting error instead of resultReady")
+            logger.warning("[AssistantController] Empty response detected, emitting error instead of resultReady")
             self.errorOccurred.emit("AI 응답이 비어 있습니다. 모델 또는 응답 파싱을 확인해 주세요.")
             return
-            
-        logger.info(f"[AssistantController] Worker finished, emitting resultReady: response_text_len={len(self._response_text)}")
+
+        if self._response_truncated and not self._response_text.rstrip().endswith(TRUNCATION_NOTICE.strip()):
+            self._response_text = f"{self._response_text.rstrip()}{TRUNCATION_NOTICE}"
+
+        logger.info(
+            f"[AssistantController] Final response: response_text_len={len(self._response_text)}, "
+            f"truncated={self._response_truncated}, max_limit={self._current_output_limit}, "
+            f"action_id={self._current_response_policy.get('action_id', '')}"
+        )
         self.resultReady.emit(self._response_text)
-        logger.info("[AssistantController] Task finished")
+        logger.info("[AssistantController] Worker finished")
 
     def _on_token_received(self, token: str):
         """Handle token received."""
         logger.info(f"[AssistantController] Token received from worker: len={len(token)}, response_text_len={len(self._response_text)}")
-        if len(self._response_text) < MAX_OUTPUT_LENGTH:
+        limit = self._current_output_limit or 0
+        if limit <= 0:
             self._response_text += token
             self.tokenReceived.emit(token)
-        else:
-            logger.warning(f"[AssistantController] Token dropped due to MAX_OUTPUT_LENGTH limit: {MAX_OUTPUT_LENGTH}")
+            return
+
+        remaining = limit - len(self._response_text)
+        if remaining <= 0:
+            if not self._response_truncated:
+                logger.warning(
+                    f"[AssistantController] Token dropped due to response limit: limit={limit}, action_id={self._current_response_policy.get('action_id', '')}"
+                )
+            self._response_truncated = True
+            return
+
+        if len(token) <= remaining:
+            self._response_text += token
+            self.tokenReceived.emit(token)
+            return
+
+        # Partial token fits into remaining space
+        self._response_text += token[:remaining]
+        self.tokenReceived.emit(token[:remaining])
+        self._response_truncated = True
+        logger.warning(
+            f"[AssistantController] Response truncated mid-token: limit={limit}, emitted={remaining}, action_id={self._current_response_policy.get('action_id', '')}"
+        )
 
     def _on_error(self, error: str):
         """Handle error."""
@@ -138,19 +198,35 @@ class AssistantController(QObject):
         """Handle status changed."""
         self.statusChanged.emit(status)
 
-    def _resolve_response_length(self, action: dict | None) -> str:
-        value = (action or {}).get("response_length", "medium")
-        if value not in RESPONSE_LENGTH_TO_NUM_PREDICT:
+    def _normalize_response_length(self, value: str | None) -> str:
+        if not value:
             return "medium"
-        return value
+        if value in RESPONSE_LENGTH_POLICIES:
+            return value
+        if value in LEGACY_RESPONSE_LENGTH_ALIASES:
+            return LEGACY_RESPONSE_LENGTH_ALIASES[value]
+        return "medium"
 
-    def _build_generation_options(self, settings, action: dict | None = None) -> dict:
-        response_length = self._resolve_response_length(action)
+    def _resolve_response_policy(self, action: dict | None, action_id: str = "") -> dict:
+        key = self._normalize_response_length((action or {}).get("response_length"))
+        policy = RESPONSE_LENGTH_POLICIES.get(key, RESPONSE_LENGTH_POLICIES["medium"]).copy()
+        policy["key"] = key
+        policy["action_id"] = action_id
+        policy["title"] = (action or {}).get("name", "")
+        return policy
+
+    def _build_generation_options(self, settings, policy: dict) -> dict:
         return {
-            "num_predict": RESPONSE_LENGTH_TO_NUM_PREDICT[response_length],
+            "num_predict": policy.get("num_predict", RESPONSE_LENGTH_POLICIES["medium"]["num_predict"]),
             "num_ctx": settings.num_ctx,
             "temperature": settings.temperature,
         }
+
+    def _apply_prompt_hint(self, prompt: str, policy: dict) -> str:
+        hint = policy.get("prompt_hint", "").strip()
+        if not hint:
+            return prompt
+        return f"{hint}\n\n{prompt}" if not prompt.startswith(hint) else prompt
 
     def _run_ai_task(self, prompt: str, action_id: str = "", action: dict | None = None):
         """Run an AI task with the given prompt."""
@@ -164,21 +240,30 @@ class AssistantController(QObject):
             self.errorOccurred.emit("모델이 선택되지 않았습니다")
             return
 
-        options = self._build_generation_options(settings, action)
+        policy = self._resolve_response_policy(action, action_id)
+        prompt_to_send = self._apply_prompt_hint(prompt, policy)
+        options = self._build_generation_options(settings, policy)
 
         logger.info(
             f"[AssistantController] Running AI task: action_id={action_id}, "
             f"model={settings.chat_model}, prompt_len={len(prompt)}, "
             f"timeout={settings.timeout}, stream={settings.streaming}, "
             f"options={options}, keep_alive={settings.keep_alive}, "
-            f"response_length={self._resolve_response_length(action)}"
+            f"response_length={policy['key']}"
+        )
+        logger.info(
+            f"[AssistantController] Output policy: action_id={action_id}, title={policy.get('title', '')}, "
+            f"response_length={policy['key']}, max_output_length={policy['max_output_length']}"
         )
         self._response_text = ""
+        self._response_truncated = False
+        self._current_output_limit = policy.get("max_output_length", RESPONSE_LENGTH_POLICIES["medium"]["max_output_length"])
+        self._current_response_policy = policy
         self.runningChanged.emit(True)
         self.statusChanged.emit("실행 중...")
 
         self._current_worker = self._worker_manager.run_task(
-            prompt=prompt,
+            prompt=prompt_to_send,
             model=settings.chat_model,
             base_url=settings.base_url,
             timeout=settings.timeout,
@@ -299,6 +384,7 @@ class AssistantController(QObject):
         )
         action_dict = {
             "response_length": action.get("response_length", "medium"),
+            "name": action.get("name", action_id),
         }
         self._run_ai_task(prompt, action_id=action_id, action=action_dict)
 
@@ -448,82 +534,89 @@ class AssistantController(QObject):
         self._last_query = question
         self.runTask("current_note_qa", content)
 
-    @pyqtSlot(str, result=str)
-    def loadExternalDocumentJson(self, file_path: str) -> str:
-        """Load a single external document and return normalized content as JSON."""
+    def _resolve_external_file(self, file_path: str) -> tuple[Path | None, dict | None]:
         if not file_path or not str(file_path).strip():
-            return json.dumps({"ok": False, "error": "파일 경로가 비어 있습니다."}, ensure_ascii=False)
-
+            return None, {"ok": False, "error": "파일 경로가 비어 있습니다."}
         path = Path(file_path).expanduser()
         try:
             path = path.resolve()
         except Exception:
             path = path.absolute()
-
         if not path.exists() or not path.is_file():
-            return json.dumps({"ok": False, "error": "파일을 찾을 수 없습니다.", "source_path": str(path)}, ensure_ascii=False)
+            return None, {"ok": False, "error": "파일을 찾을 수 없습니다.", "source_path": str(path)}
+        return path, None
 
+    def _dump_payload(self, payload: dict) -> str:
+        return json.dumps(payload, ensure_ascii=False)
+
+    @pyqtSlot(str, result=str)
+    def loadExternalDocumentJson(self, file_path: str) -> str:
+        """Load a single external document and return normalized content as JSON."""
+        path, error_payload = self._resolve_external_file(file_path)
+        if error_payload:
+            return self._dump_payload(error_payload)
+
+        assert path is not None
         ext = path.suffix.lower()
-        title = path.stem
-        content = ""
-        warnings: list[str] = []
-        source_type = "external_file"
+        if ext in self._excel_loader.SUPPORTED_EXTENSIONS:
+            return self._dump_payload(
+                {
+                    "ok": False,
+                    "error": "엑셀 파일은 '엑셀' 입력 소스에서 불러와 주세요.",
+                    "source_path": str(path),
+                }
+            )
 
         try:
-            if ext in (".md", ".markdown"):
-                doc, asset_warnings = load_markdown_document(str(path))
-                title = doc.metadata.title or title
-                content = doc.body_markdown or ""
-                warnings.extend(asset_warnings)
-                warnings.extend(doc.warnings or [])
-                source_type = "markdown"
-            elif ext == ".txt":
-                content = FolderImportService._read_text(path)
-                source_type = "text"
-            elif ext in (".html", ".htm"):
-                raw_html = FolderImportService._read_text(path)
-                content = FolderImportService._html_to_markdown(raw_html)
-                source_type = "html"
-            elif ext == ".docx":
-                content = FolderImportService._docx_to_markdown(path)
-                source_type = "docx"
-                if not content.strip():
-                    warnings.append("DOCX 변환 결과가 비어 있습니다.")
-            elif ext == ".hwpx":
-                content, hwpx_warnings = convert_hwpx_to_markdown_text(str(path))
-                warnings.extend(hwpx_warnings)
-                source_type = "hwpx"
-            elif ext == ".hwp":
-                content, hwp_warnings = convert_hwp_to_markdown_text(str(path))
-                warnings.extend(hwp_warnings)
-                source_type = "hwp"
-            else:
-                return json.dumps(
-                    {
-                        "ok": False,
-                        "error": f"지원하지 않는 파일 형식입니다: {ext or '(확장자 없음)'}",
-                        "source_path": str(path),
-                    },
-                    ensure_ascii=False,
-                )
-        except Exception as e:
-            logger.error(f"[AssistantController] Failed to load external document: {e}")
-            warnings.append(str(e))
-            content = ""
+            payload = self._document_loader.load(path)
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"[AssistantController] Failed to load document: {exc}")
+            payload = {
+                "ok": False,
+                "error": "문서 분석 중 오류가 발생했습니다.",
+                "source_path": str(path),
+                "details": str(exc),
+            }
 
-        content = content or ""
-        result = {
-            "ok": bool(content.strip()),
-            "title": title,
-            "content": content,
-            "source_path": str(path),
-            "source_type": source_type,
-            "file_extension": ext,
-            "warnings": warnings,
-        }
-        if not result["ok"] and "error" not in result:
-            result["error"] = "문서 내용을 읽지 못했습니다."
-        return json.dumps(result, ensure_ascii=False)
+        return self._dump_payload(payload)
+
+    @pyqtSlot(str, result=str)
+    def loadExternalExcelJson(self, file_path: str) -> str:
+        path, error_payload = self._resolve_external_file(file_path)
+        if error_payload:
+            return self._dump_payload(error_payload)
+
+        assert path is not None
+        ext = path.suffix.lower()
+        if ext == ".xls":
+            return self._dump_payload(
+                {
+                    "ok": False,
+                    "error": "XLS 형식은 지원하지 않습니다. XLSX 또는 CSV로 저장한 뒤 다시 시도해주세요.",
+                    "source_path": str(path),
+                }
+            )
+        if ext not in self._excel_loader.SUPPORTED_EXTENSIONS:
+            return self._dump_payload(
+                {
+                    "ok": False,
+                    "error": "엑셀 입력은 XLSX/XLSM/CSV 형식만 지원합니다.",
+                    "source_path": str(path),
+                }
+            )
+
+        try:
+            payload = self._excel_loader.load(path)
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"[AssistantController] Failed to load excel: {exc}")
+            payload = {
+                "ok": False,
+                "error": "엑셀 분석 중 오류가 발생했습니다.",
+                "source_path": str(path),
+                "details": str(exc),
+            }
+
+        return self._dump_payload(payload)
 
     @pyqtSlot(str, result=str)
     def loadExternalFolderJson(self, folder_path: str) -> str:

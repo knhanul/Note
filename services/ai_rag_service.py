@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Protocol, Optional
 import re
 import time
 import logging
@@ -8,10 +8,11 @@ logger = logging.getLogger(__name__)
 
 from services.ai_context_builder import ContextBundle, ContextSource
 from services.ai_llm_client import LlmClient, LlmGenerateOptions, LlmGenerateResult
-from services.ai_rag_prompt_builder import RagPromptPayload
+from services.ai_rag_prompt_builder import RagPromptPayload, RagPromptSource
 from services.ai_search_service import AiSearchService
 from services.ai_context_builder import AiContextBuilder
 from services.ai_rag_prompt_builder import AiRagPromptBuilder
+from services.rag_answer_prompt_loader import RagAnswerPromptLoader
 
 
 @dataclass
@@ -24,6 +25,7 @@ class RagQueryOptions:
     model: str | None = None
     temperature: float = 0.2
     timeout_sec: float = 300.0
+    max_tokens: int | None = 4096
 
 
 @dataclass
@@ -57,16 +59,21 @@ class AiRagService:
         prompt_builder: AiRagPromptBuilder,
         llm_client: LlmClient,
         default_model: str = "llama3.2:3b",
+        rag_prompt_loader: Optional[RagAnswerPromptLoader] = None,
     ):
         self._search = search_service
         self._context = context_builder
         self._prompt = prompt_builder
         self._llm = llm_client
         self._default_model = default_model
+        self._rag_prompt_loader = rag_prompt_loader or RagAnswerPromptLoader()
+        if not self._rag_prompt_loader.is_loaded():
+            self._rag_prompt_loader.load()
 
     def answer_question(
         self,
         question: str,
+        prompt_id: str = "default_answer",
         options: RagQueryOptions | None = None,
     ) -> RagAnswer:
         if options is None:
@@ -74,6 +81,8 @@ class AiRagService:
 
         warnings: list[str] = []
         start_time = time.time()
+
+        logger.info(f"[AiRagService] RAG prompt loaded: prompt_id={prompt_id}")
 
         if not question or not question.strip():
             warnings.append("RAG_EMPTY_QUESTION")
@@ -95,7 +104,7 @@ class AiRagService:
         if not search_results:
             warnings.append("RAG_NO_SEARCH_RESULTS")
             return RagAnswer(
-                answer_text="",
+                answer_text="참고문서에서 관련 내용을 찾지 못했습니다.",
                 citations=[],
                 prompt_payload=None,
                 llm_result=None,
@@ -115,27 +124,47 @@ class AiRagService:
         if not context_bundle.items:
             warnings.append("RAG_NO_CONTEXT")
             return RagAnswer(
-                answer_text="",
+                answer_text="참고문서에서 관련 내용을 찾지 못했습니다.",
                 citations=context_bundle.sources,
                 prompt_payload=None,
                 llm_result=None,
                 warnings=self._deduplicate_warnings(warnings),
             )
 
-        prompt_payload = self._prompt.build_prompt(
-            question=question,
-            context_bundle=context_bundle,
-            max_context_chars=options.max_context_chars,
-            language=options.language,
+        # Build RAG context and sources strings
+        context_text, sources, ctx_warnings = self._build_context_text_and_sources(
+            context_bundle.items, options.max_context_chars
+        )
+        warnings.extend(ctx_warnings)
+
+        logger.info(f"[AiRagService] RAG context length={len(context_text)}, sources count={len(sources)}")
+
+        # Use RAG prompt loader to build custom prompts
+        system_prompt, user_prompt = self._rag_prompt_loader.build_user_prompt(
+            prompt_id=prompt_id,
+            user_input=question,
+            rag_context=context_text,
+            rag_sources=self._format_sources(sources)
         )
 
-        warnings.extend(prompt_payload.warnings)
+        logger.info(f"[AiRagService] System prompt length={len(system_prompt)}, User prompt length={len(user_prompt)}")
+
+        # Create prompt payload with custom prompts
+        prompt_payload = RagPromptPayload(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            context_text=context_text,
+            sources=sources,
+            warnings=warnings,
+            total_chars=len(system_prompt) + len(user_prompt),
+        )
 
         llm_start = time.time()
         llm_options = LlmGenerateOptions(
             model=options.model or self._default_model,
             temperature=options.temperature,
             timeout_sec=options.timeout_sec,
+            max_tokens=options.max_tokens,
         )
 
         llm_result = self._llm.generate_from_payload(prompt_payload, llm_options)
@@ -224,6 +253,7 @@ class AiRagService:
             model=options.model or self._default_model,
             temperature=options.temperature,
             timeout_sec=options.timeout_sec,
+            max_tokens=options.max_tokens,
         )
 
         llm_result = self._llm.generate_from_payload(prompt_payload, llm_options)
@@ -299,3 +329,102 @@ class AiRagService:
                 seen.add(w)
                 result.append(w)
         return result
+
+    def _build_context_text_and_sources(
+        self, items: list, max_chars: int
+    ) -> tuple[str, list[RagPromptSource], list[str]]:
+        """Build context text and sources list from context items."""
+        warnings: list[str] = []
+        blocks: list[str] = []
+        sources: list[RagPromptSource] = []
+        total_len = 0
+
+        for i, item in enumerate(items):
+            source_id = f"S{i + 1}"
+            heading_str = " > ".join(item.heading_path) if item.heading_path else "(없음)"
+            path_str = item.source.note_id or item.source.source_path or "unknown"
+
+            block = f"""[Source {i + 1}]
+Title: {item.source.title or "(제목 없음)"}
+Type: {item.source.source_type}
+Path: {path_str}
+Heading: {heading_str}
+Chunk Order: {item.chunk_order}
+Content:
+{item.chunk_text}"""
+
+            block_len = len(block)
+
+            if total_len + block_len > max_chars:
+                if not blocks:
+                    max_block_len = max_chars - 50
+                    truncated_text = item.chunk_text[:max_block_len] + "..."
+                    truncated_block = f"""[Source {i + 1}]
+Title: {item.source.title or "(제목 없음)"}
+Type: {item.source.source_type}
+Path: {path_str}
+Heading: {heading_str}
+Chunk Order: {item.chunk_order}
+Content:
+{truncated_text}"""
+                    blocks.append(truncated_block)
+                    warnings.append("RAG_SOURCE_TRUNCATED")
+
+                    sources.append(
+                        RagPromptSource(
+                            source_id=source_id,
+                            chunk_id=item.chunk_id,
+                            document_id=item.document_id,
+                            title=item.source.title,
+                            source_type=item.source.source_type,
+                            source_path=item.source.source_path,
+                            note_id=item.source.note_id,
+                            heading_path=item.heading_path,
+                            chunk_order=item.chunk_order,
+                        )
+                    )
+                    total_len = sum(len(b) for b in blocks) + len(blocks) * 2
+                else:
+                    warnings.append("RAG_CONTEXT_TRUNCATED")
+                    break
+            else:
+                blocks.append(block)
+                total_len += block_len + 2
+
+                sources.append(
+                    RagPromptSource(
+                        source_id=source_id,
+                        chunk_id=item.chunk_id,
+                        document_id=item.document_id,
+                        title=item.source.title,
+                        source_type=item.source.source_type,
+                        source_path=item.source.source_path,
+                        note_id=item.source.note_id,
+                        heading_path=item.heading_path,
+                        chunk_order=item.chunk_order,
+                    )
+                )
+
+        context_text = "\n\n".join(blocks)
+        return context_text, sources, warnings
+
+    def _format_sources(self, sources: list[RagPromptSource]) -> str:
+        """Format sources list for RAG_SOURCES placeholder."""
+        if not sources:
+            return "출처 정보 없음"
+
+        lines = []
+        for source in sources:
+            title = source.title or "(제목 없음)"
+            lines.append(f"- {source.source_id}: {title} ({source.source_type})")
+
+            path_info = source.note_id or source.source_path or ""
+            if path_info:
+                lines.append(f"  경로: {path_info}")
+
+            if source.heading_path:
+                heading = " > ".join(source.heading_path)
+                if heading and heading != "(없음)":
+                    lines.append(f"  위치: {heading}")
+
+        return "\n".join(lines)
