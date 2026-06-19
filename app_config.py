@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
+import sys
 
 
 @dataclass(frozen=True)
@@ -19,7 +20,25 @@ class AppConfig:
 
 
 def create_app_config(base_dir: Path, argv: Sequence[str]) -> AppConfig:
-    base_dir = base_dir.resolve()
+    # Determine base_dir for read-only data (qml, assets, packages)
+    if getattr(sys, 'frozen', False):
+        # Running as executable - use _MEIPASS for read-only data
+        if hasattr(sys, '_MEIPASS'):
+            base_dir = Path(sys._MEIPASS)
+        else:
+            base_dir = Path(sys.executable).parent
+    else:
+        # Running as script - use provided base_dir
+        base_dir = base_dir.resolve()
+    
+    # Determine app_data_dir for writable data
+    if getattr(sys, 'frozen', False):
+        # Running as executable - use executable directory for writable data
+        app_data_dir = Path(sys.executable).parent / "app_data"
+    else:
+        # Running as script - use base_dir
+        app_data_dir = base_dir / "app_data"
+    
     qml_dir = base_dir / "qml"
     brand_config = _resolve_brand(base_dir, argv)
 
@@ -32,7 +51,7 @@ def create_app_config(base_dir: Path, argv: Sequence[str]) -> AppConfig:
         qml_dir=qml_dir,
         main_qml_path=qml_dir / "Main.qml",
         qml_import_path=qml_dir,
-        app_data_dir=base_dir / "app_data",
+        app_data_dir=app_data_dir,
     )
 
 

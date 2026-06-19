@@ -3452,6 +3452,30 @@ Rectangle {
 
         }
 
+        if (warningText.startsWith("[RAG_NO_SEARCH_RESULTS]")) {
+
+            return "색인된 참고문서에서 질문과 관련된 내용을 찾지 못했습니다."
+
+        }
+
+        if (warningText.startsWith("[RAG_NO_DIRECT_EVIDENCE]")) {
+
+            return "참고문서에서 검색어와 관련된 문서는 찾았으나, 직접적인 근거는 확인되지 않았습니다."
+
+        }
+
+        if (warningText.startsWith("[RAG_INDEX_MAY_BE_INCOMPLETE]")) {
+
+            return "일부 문서의 텍스트 추출이 완전하지 않을 수 있습니다. 색인된 문서를 확인해 보세요."
+
+        }
+
+        if (warningText.startsWith("[RAG_POSSIBLE_RELATED_ONLY]")) {
+
+            return "관련 가능 문서는 있으나, 질문에 직접 답할 근거는 확인되지 않았습니다."
+
+        }
+
         return warningText
 
     }
@@ -3763,6 +3787,13 @@ Rectangle {
         if (noteId) {
 
             root.currentStreamingNoteId = noteId
+
+            // Refresh note list to show the newly created note
+            var nc = getNoteController()
+            if (nc) {
+                nc.notesChanged()
+                nc.filteredNotesChanged()
+            }
 
             if (!root.currentStreamingIsRag) {
 

@@ -2762,21 +2762,24 @@ Window {
                 uiScaleDialog.visible = true
             }
             onHwpConversionToolClicked: {
-                // TODO: Load external tool path from settings (hwpConverterToolPath)
-                // TODO: Launch external HWP to HWPX converter using QProcess or Python subprocess
-                // HWP → HWPX conversion will be handled by a separate utility program using Hanword COM automation
-                // Nuninote will only read HWPX files directly, not HWP files
-                toolInfoDialog.title = "도구 준비 중"
-                toolInfoDialog.text = "한글 파일 변환 도구는 아직 연결되지 않았습니다.\n\n이후 HWP를 HWPX로 변환하는 별도 프로그램을 호출하도록 연결할 예정입니다."
-                toolInfoDialog.open()
+                var toolCtrl = typeof toolController !== "undefined" && toolController !== null ? toolController : null
+                if (toolCtrl) {
+                    toolCtrl.launchHwpConversionTool()
+                } else {
+                    toolInfoDialog.title = "도구 오류"
+                    toolInfoDialog.text = "도구 컨트롤러를 사용할 수 없습니다."
+                    toolInfoDialog.open()
+                }
             }
             onOllamaModelToolClicked: {
-                // TODO: Load external tool path from settings (ollamaModelToolPath)
-                // TODO: Launch external Ollama model registration tool using QProcess or Python subprocess
-                // Ollama model registration will be handled by a separate utility program
-                toolInfoDialog.title = "도구 준비 중"
-                toolInfoDialog.text = "Ollama 모델 등록 도구는 아직 연결되지 않았습니다.\n\n이후 별도 모델 등록 프로그램을 호출하도록 연결할 예정입니다."
-                toolInfoDialog.open()
+                var toolCtrl = typeof toolController !== "undefined" && toolController !== null ? toolController : null
+                if (toolCtrl) {
+                    toolCtrl.launchOllamaModelTool()
+                } else {
+                    toolInfoDialog.title = "도구 오류"
+                    toolInfoDialog.text = "도구 컨트롤러를 사용할 수 없습니다."
+                    toolInfoDialog.open()
+                }
             }
         }
 

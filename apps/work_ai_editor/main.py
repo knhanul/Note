@@ -20,9 +20,50 @@ from app_config import create_app_config
 from packages.ollama_plugin import AIAssistantController, AssistantController, OllamaAssistantPlugin, PromptController, AIPromptDocumentController, AIActionController
 from packages.plugin_api import PluginRegistry, PluginContext
 from controllers.ai_rag_controller import AiRagController
+from controllers.tool_controller import ToolController
 from services.ai_rag_application_service import AiRagApplicationService
 
-logging.basicConfig(level=logging.INFO)
+# Setup logging to file for executable builds
+def setup_logging():
+    """Setup logging to console and file."""
+    log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    date_format = '%Y-%m-%d %H:%M:%S'
+    
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(logging.Formatter(log_format, date_format))
+    
+    # File handler for executable builds
+    if getattr(sys, 'frozen', False):
+        # Running as executable
+        prog_dir = Path(sys.executable).parent
+        logs_dir = prog_dir / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        log_file = logs_dir / "posid_note.log"
+        
+        file_handler = logging.FileHandler(log_file, encoding='utf-8')
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(logging.Formatter(log_format, date_format))
+        
+        logging.basicConfig(
+            level=logging.DEBUG,
+            handlers=[console_handler, file_handler],
+            format=log_format,
+            datefmt=date_format
+        )
+        local_logger = logging.getLogger(__name__)
+        local_logger.info(f"[Logging] Log file: {log_file}")
+    else:
+        # Running as script
+        logging.basicConfig(
+            level=logging.INFO,
+            handlers=[console_handler],
+            format=log_format,
+            datefmt=date_format
+        )
+
+setup_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -85,6 +126,20 @@ def plugin_setup(engine, services, config):
         logger.error(f"[work_ai_editor] Traceback: {traceback.format_exc()}")
         engine.rootContext().setContextProperty("aiRagController", None)
         engine._ai_rag_controller = None
+
+    # Setup ToolController for external tools
+    try:
+        logger.info("[work_ai_editor] Initializing ToolController...")
+        tool_controller = ToolController()
+        engine.rootContext().setContextProperty("toolController", tool_controller)
+        engine._tool_controller = tool_controller
+        logger.info("[work_ai_editor] ToolController initialized successfully")
+    except Exception as e:
+        import traceback
+        logger.error(f"[work_ai_editor] Failed to initialize ToolController: {e}")
+        logger.error(f"[work_ai_editor] Traceback: {traceback.format_exc()}")
+        engine.rootContext().setContextProperty("toolController", None)
+        engine._tool_controller = None
 
     registry = PluginRegistry()
     plugin = OllamaAssistantPlugin()

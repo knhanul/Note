@@ -1,7 +1,9 @@
 """Library service for managing multiple database files per library."""
 import sqlite3
+import sys
 import os
 import uuid
+import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict, Any
@@ -9,6 +11,8 @@ from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot, pyqtProperty
 
 from services.database import Database
 from services.settings_service import SettingsService
+
+logger = logging.getLogger(__name__)
 
 
 class LibraryService(QObject):
@@ -28,16 +32,29 @@ class LibraryService(QObject):
         self._settings = settings_service
         
         # Program directory (where the main script is located)
-        prog_dir = Path(__file__).parent.parent
+        if getattr(sys, 'frozen', False):
+            # Running as executable
+            prog_dir = Path(sys.executable).parent
+            data_dir = prog_dir / "data"
+            data_dir.mkdir(parents=True, exist_ok=True)
+            libraries_dir = prog_dir / "libraries"
+            libraries_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"[LibraryService] Executable mode: prog_dir={prog_dir}, data_dir={data_dir}, libraries_dir={libraries_dir}")
+        else:
+            # Running as script
+            prog_dir = Path(__file__).parent.parent
+            data_dir = prog_dir
+            libraries_dir = prog_dir / "libraries"
+            libraries_dir.mkdir(exist_ok=True)
+            logger.info(f"[LibraryService] Script mode: prog_dir={prog_dir}, libraries_dir={libraries_dir}")
         
-        # Main database for storing library metadata (in program directory)
-        self._meta_db = Database(str(prog_dir / "nuni_note.db"))
+        # Main database for storing library metadata (in data directory)
+        self._meta_db = Database(str(data_dir / "nuni_note.db"))
         self._meta_db.init_schema()
         self._init_libraries_table()
         
-        # Libraries directory (in program directory)
-        self._libraries_dir = prog_dir / "libraries"
-        self._libraries_dir.mkdir(exist_ok=True)
+        # Libraries directory
+        self._libraries_dir = libraries_dir
         
         # Current library
         self._current_library_id: Optional[str] = None

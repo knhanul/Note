@@ -12,20 +12,23 @@ from services.ai_rag_prompt_builder import RagPromptPayload, RagPromptSource
 from services.ai_search_service import AiSearchService
 from services.ai_context_builder import AiContextBuilder
 from services.ai_rag_prompt_builder import AiRagPromptBuilder
-from services.rag_answer_prompt_loader import RagAnswerPromptLoader
+from services.rag_answer_prompt_loader import RagAnswerPromptLoader, RagAnswerPrompt
 
 
 @dataclass
 class RagQueryOptions:
-    limit: int = 8
+    limit: int = 5
     neighbor_window: int = 1
-    max_context_chars: int = 6000
-    max_chunks: int = 8
+    max_context_chars: int = 4000
+    max_chunks: int = 5
+    max_chunk_chars: int = 1000
+    max_chunks_per_doc: int = 2
     language: str = "ko"
     model: str | None = None
     temperature: float = 0.2
     timeout_sec: float = 300.0
     max_tokens: int | None = 4096
+    is_low_mode: bool = False
 
 
 @dataclass
@@ -79,10 +82,16 @@ class AiRagService:
         if options is None:
             options = RagQueryOptions()
 
+        if options.is_low_mode:
+            options.max_context_chars = min(options.max_context_chars, 3000)
+            options.max_chunks = min(options.max_chunks, 4)
+            options.max_chunk_chars = min(options.max_chunk_chars, 900)
+            logger.info(f"[AiRagService] Low mode enabled: max_context_chars={options.max_context_chars}, max_chunks={options.max_chunks}")
+
         warnings: list[str] = []
         start_time = time.time()
 
-        logger.info(f"[AiRagService] RAG prompt loaded: prompt_id={prompt_id}")
+        logger.info(f"[AiRagService] RAG prompt loaded: prompt_id={prompt_id}, is_low_mode={options.is_low_mode}")
 
         if not question or not question.strip():
             warnings.append("RAG_EMPTY_QUESTION")
@@ -95,16 +104,34 @@ class AiRagService:
             )
 
         logger.info(f"[RAG_TIMING] Starting RAG for question: {question[:50]}...")
+        
+        normalized_query = self._search.normalize_query(question)
+        generated_queries = self._search.generate_search_queries(normalized_query)
+        
+        logger.info(f"[AiRagService] original_query='{question}', normalized_query='{normalized_query}', generated_search_queries={generated_queries}")
+        
+        term_counts = self._search.check_index_terms(normalized_query)
+        
         search_start = time.time()
         search_results = self._search.search_keyword(
-            question, limit=options.limit, fallback=True
+            question, limit=options.limit, fallback=False
         )
         logger.info(f"[RAG_TIMING] Search completed in {time.time() - search_start:.2f}s, results={len(search_results)}")
 
         if not search_results:
-            warnings.append("RAG_NO_SEARCH_RESULTS")
+            has_possible_related = False
+            no_result_reason = "RAG_NO_SEARCH_RESULTS"
+            
+            if any(count > 0 for count in term_counts.values()):
+                no_result_reason = "RAG_NO_DIRECT_EVIDENCE"
+            else:
+                no_result_reason = "RAG_INDEX_MAY_BE_INCOMPLETE"
+            
+            warnings.append(no_result_reason)
+            no_results_msg = self._build_no_results_message(question, normalized_query, generated_queries, term_counts, no_result_reason)
+            logger.warning(f"[AiRagService] no_result_reason={no_result_reason}, no_result_answer_len={len(no_results_msg)}")
             return RagAnswer(
-                answer_text="참고문서에서 관련 내용을 찾지 못했습니다.",
+                answer_text=no_results_msg,
                 citations=[],
                 prompt_payload=None,
                 llm_result=None,
@@ -168,9 +195,44 @@ class AiRagService:
         )
 
         llm_result = self._llm.generate_from_payload(prompt_payload, llm_options)
-        logger.info(f"[RAG_TIMING] LLM generation completed in {time.time() - llm_start:.2f}s")
+        logger.info(f"[RAG_TIMING] LLM generation completed in {time.time() - llm_start:.2f}s, answer_len={len(llm_result.text)}")
 
         warnings.extend(llm_result.warnings)
+
+        is_valid, validation_reason = self._validate_answer_quality(llm_result.text, prompt_id)
+        retry_used = False
+        
+        if not is_valid:
+            logger.warning(f"[AiRagService] Answer validation failed: answer_len={len(llm_result.text)}, reason={validation_reason}")
+            
+            original_prompt_obj = self._rag_prompt_loader.get_prompt(prompt_id)
+            if original_prompt_obj:
+                retry_system_prompt = self._build_retry_prompt(prompt_id, original_prompt_obj)
+                retry_user_prompt = user_prompt
+                
+                logger.info(f"[AiRagService] Retrying RAG answer with strict prompt")
+                
+                retry_payload = RagPromptPayload(
+                    system_prompt=retry_system_prompt,
+                    user_prompt=retry_user_prompt,
+                    context_text=context_text,
+                    sources=sources,
+                    warnings=warnings,
+                    total_chars=len(retry_system_prompt) + len(retry_user_prompt),
+                )
+                
+                retry_result = self._llm.generate_from_payload(retry_payload, llm_options)
+                logger.info(f"[AiRagService] Retry completed: answer_len={len(retry_result.text)}")
+                
+                if retry_result.text and len(retry_result.text.strip()) >= 30:
+                    llm_result = retry_result
+                    retry_used = True
+                    warnings.extend(retry_result.warnings)
+                    logger.info(f"[AiRagService] Retry successful: answer_len={len(llm_result.text)}")
+                else:
+                    logger.warning(f"[AiRagService] Retry also failed, using original answer")
+        
+        logger.info(f"[AiRagService] Final answer: answer_len={len(llm_result.text)}, retry_used={retry_used}")
 
         citations = self._build_citations(prompt_payload, llm_result.text, warnings)
 
@@ -428,3 +490,81 @@ Content:
                     lines.append(f"  위치: {heading}")
 
         return "\n".join(lines)
+
+    def _build_no_results_message(self, question: str, normalized_query: str, generated_queries: list[str], term_counts: dict[str, int], no_result_reason: str) -> str:
+        """Build a helpful message when no relevant documents are found."""
+        
+        found_terms = [term for term, count in term_counts.items() if count > 0]
+        not_found_terms = [term for term, count in term_counts.items() if count == 0]
+        
+        if no_result_reason == "RAG_INDEX_MAY_BE_INCOMPLETE":
+            status_section = """### 검색 결과 상태
+
+* 직접 근거 문서: 없음 (색인된 문서에서 검색어 미발견)
+* 관련 가능 문서: 없음
+* 최근 문서 임의 사용: 하지 않음"""
+        else:
+            status_section = """### 검색 결과 상태
+
+* 직접 근거 문서: 없음
+* 관련 가능 문서: 없음
+* 최근 문서 임의 사용: 하지 않음"""
+        
+        return f"""### 답변
+
+참고문서에서 '{normalized_query}'에 대한 직접적인 내용은 확인되지 않았습니다.
+
+### 확인되지 않은 항목
+
+* {", ".join(not_found_terms[:5]) if not_found_terms else "검색어와 관련된 내용"}
+
+### 검색 결과 상태
+
+* 직접 근거 문서: 없음
+* 관련 가능 문서: 없음
+* 최근 문서 임의 사용: 하지 않음
+
+### 추가로 필요한 문서
+
+* '{normalized_query}'와 관련된 업무 문서, 보고서, 지침, 계약서 등
+* 구체적인 내용이 포함된 PDF, HWP, 문서 파일
+
+### 다시 검색할 때 추천 표현
+
+* {", ".join(generated_queries[:6])}"""
+
+    def _validate_answer_quality(self, answer_text: str, prompt_id: str) -> tuple[bool, str]:
+        """Validate if the generated answer meets quality standards."""
+        if not answer_text or len(answer_text.strip()) < 30:
+            return False, "too_short"
+
+        answer_lower = answer_text.lower().strip()
+        greeting_patterns = [
+            "안녕하세요", "네", "알겠습니다", "감사합니다", 
+            "질문해 주셔서", "도움을 드리겠습니다", "반갑습니다"
+        ]
+        
+        if all(answer_lower.startswith(p) or len(answer_lower) < 50 for p in greeting_patterns):
+            return False, "greeting_only"
+
+        if prompt_id == "evidence_based_answer" and "[근거" not in answer_text and "근거:" not in answer_text:
+            return False, "no_evidence"
+
+        if prompt_id == "checklist" and "[ ]" not in answer_text and "체크" not in answer_lower:
+            return False, "no_checklist"
+
+        return True, "valid"
+
+    def _build_retry_prompt(self, prompt_id: str, original_prompt: RagAnswerPrompt) -> str:
+        """Build a stricter prompt for retry."""
+        retry_instructions = """
+
+[중요 재시도 지시]
+이전 답변은 부적절했습니다. 다음을 반드시 지켜주세요:
+1. 인사말만 하지 마세요.
+2. 아래 참고문서에 근거해 답변 형식을 반드시 채우세요.
+3. 참고문서에서 확인되지 않는 내용은 없다고 명확히 말하세요.
+4. 답변에는 최소 3개 이상의 의미 있는 문장을 포함하세요.
+5. 출처가 있는 경우 [S1], [S2]처럼 표시하세요."""
+
+        return original_prompt.system_prompt + retry_instructions

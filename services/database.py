@@ -1,9 +1,13 @@
 """SQLite database service for Nuni Note application."""
 import sqlite3
+import sys
 import os
+import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict, Any
+
+logger = logging.getLogger(__name__)
 
 
 class Database:
@@ -12,12 +16,23 @@ class Database:
     def __init__(self, db_path: Optional[str] = None):
         """Initialize database with optional custom path."""
         if db_path is None:
-            # Store in program directory (where main.py is located)
-            prog_dir = Path(__file__).parent.parent
-            db_path = prog_dir / "nuni_note.db"
+            # Try to use executable directory first, fallback to current directory
+            if getattr(sys, 'frozen', False):
+                # Running as executable - create data subdirectory
+                prog_dir = Path(sys.executable).parent
+                data_dir = prog_dir / "data"
+                data_dir.mkdir(parents=True, exist_ok=True)
+                db_path = data_dir / "nuni_note.db"
+                logger.info(f"[Database] Executable mode: DB path = {db_path}")
+            else:
+                # Running as script
+                prog_dir = Path(__file__).parent.parent
+                db_path = prog_dir / "nuni_note.db"
+                logger.info(f"[Database] Script mode: DB path = {db_path}")
         
         self.db_path = str(db_path)
         self._connection: Optional[sqlite3.Connection] = None
+        logger.info(f"[Database] Initialized with DB path: {self.db_path}")
         
     def connect(self) -> sqlite3.Connection:
         """Get or create database connection."""
