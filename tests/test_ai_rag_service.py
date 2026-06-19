@@ -111,8 +111,14 @@ class AiRagServiceTest(unittest.TestCase):
         try:
             result = rag_svc.answer_question("nonexistentword12345")
 
-            self.assertEqual(result.answer_text, "참고문서에서 관련 내용을 찾지 못했습니다.")
-            self.assertIn("RAG_NO_SEARCH_RESULTS", result.warnings)
+            # Check that the answer contains the new detailed no-result message format
+            self.assertIn("### 답변", result.answer_text)
+            self.assertIn("참고문서에서 'nonexistentword12345'에 대한 직접적인 내용은 확인되지 않았습니다", result.answer_text)
+            # Warning can be either RAG_NO_SEARCH_RESULTS or RAG_INDEX_MAY_BE_INCOMPLETE
+            self.assertTrue(
+                "RAG_NO_SEARCH_RESULTS" in result.warnings or "RAG_INDEX_MAY_BE_INCOMPLETE" in result.warnings,
+                f"Expected RAG_NO_SEARCH_RESULTS or RAG_INDEX_MAY_BE_INCOMPLETE, got {result.warnings}"
+            )
             self.assertIsNone(result.llm_result)
         finally:
             db.close()
