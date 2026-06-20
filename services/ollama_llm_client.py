@@ -1,18 +1,40 @@
 import json
+import logging
 import urllib.request
 import urllib.error
 from typing import Any
 
 from services.ai_llm_client import LlmClient, LlmGenerateOptions, LlmGenerateResult
 from services.ai_rag_prompt_builder import RagPromptPayload
+from services.ollama_health import (
+    OllamaHealthResult,
+    check_ollama_health,
+    check_ollama_model_available,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class OllamaLlmClient(LlmClient):
     def __init__(
-        self, base_url: str = "http://localhost:11434", default_model: str = "llama3.2:3b"
+        self,
+        base_url: str = "http://localhost:11434",
+        default_model: str = "llama3.2:3b",
+        health_timeout_sec: float = 5.0,
     ):
         self.base_url = base_url.rstrip("/")
         self.default_model = default_model
+        self.health_timeout_sec = health_timeout_sec
+
+    def check_health(self) -> OllamaHealthResult:
+        """Check if Ollama server is reachable and responding."""
+        return check_ollama_health(self.base_url, timeout_sec=self.health_timeout_sec)
+
+    def check_model(self, model: str) -> OllamaHealthResult:
+        """Check if the given model is installed on the Ollama server."""
+        return check_ollama_model_available(
+            self.base_url, model, timeout_sec=self.health_timeout_sec
+        )
 
     def generate(
         self, system_prompt: str, user_prompt: str, options: LlmGenerateOptions | None = None
@@ -46,7 +68,8 @@ class OllamaLlmClient(LlmClient):
                 url, data=data, method="POST", headers={"Content-Type": "application/json"}
             )
 
-            with urllib.request.urlopen(request, timeout=options.timeout_sec) as response:
+            timeout = options.timeout_sec if options.timeout_sec is not None else 60.0
+            with urllib.request.urlopen(request, timeout=timeout) as response:
                 raw_response = json.loads(response.read().decode("utf-8"))
                 text = raw_response.get("response", "")
 
@@ -64,7 +87,9 @@ class OllamaLlmClient(LlmClient):
                 )
 
         except urllib.error.URLError as e:
+            logger.error(f"[OllamaLlmClient] URLError during generation: {e}")
             warnings.append("[OLLAMA_CONNECTION_FAILED]")
+            warnings.append("Ollama 서버가 실행되지 않았습니다.")
             return LlmGenerateResult(
                 text="",
                 model=options.model,
@@ -74,7 +99,9 @@ class OllamaLlmClient(LlmClient):
             )
 
         except TimeoutError as e:
+            logger.error(f"[OllamaLlmClient] Timeout during generation: {e}")
             warnings.append("[OLLAMA_TIMEOUT]")
+            warnings.append("AI 응답 시간이 초과되었습니다. 더 가벼운 모델을 선택하거나 입력 길이를 줄여 다시 시도해보세요.")
             return LlmGenerateResult(
                 text="",
                 model=options.model,
@@ -84,7 +111,9 @@ class OllamaLlmClient(LlmClient):
             )
 
         except json.JSONDecodeError as e:
+            logger.error(f"[OllamaLlmClient] Invalid JSON response: {e}")
             warnings.append("[OLLAMA_INVALID_JSON]")
+            warnings.append("Ollama 서버의 응답을 해석할 수 없습니다.")
             return LlmGenerateResult(
                 text="",
                 model=options.model,
@@ -94,7 +123,9 @@ class OllamaLlmClient(LlmClient):
             )
 
         except Exception as e:
+            logger.error(f"[OllamaLlmClient] Unexpected error during generation: {e}")
             warnings.append("[OLLAMA_GENERATE_FAILED]")
+            warnings.append(f"Ollama 호출 중 오류가 발생했습니다: {e}")
             return LlmGenerateResult(
                 text="",
                 model=options.model,

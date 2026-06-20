@@ -59,7 +59,7 @@ class OllamaClient:
         except urllib.error.URLError as e:
             return OllamaConnectionResult(
                 success=False,
-                message="연결 안 됨",
+                message="Ollama 서버가 실행되지 않았습니다.",
                 base_url=self.base_url
             )
         except Exception as e:
@@ -69,6 +69,19 @@ class OllamaClient:
                 message=f"오류: {str(e)}",
                 base_url=self.base_url
             )
+
+    def is_model_available(self, model_name: str) -> bool:
+        """Check if a specific model is installed on the Ollama server."""
+        result = self.list_models()
+        if not result.success:
+            return False
+        target = model_name.lower()
+        for model in result.models:
+            if model.name.lower() == target:
+                return True
+            if model.name.split(":", 1)[0].lower() == target.split(":", 1)[0]:
+                return True
+        return False
 
     def list_models(self) -> OllamaModelListResult:
         """List installed Ollama models."""

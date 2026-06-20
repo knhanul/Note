@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import Optional, Callable
 
@@ -10,6 +11,7 @@ from services.ai_rag_prompt_builder import AiRagPromptBuilder
 from services.ai_rag_service import AiRagService, RagQueryOptions
 from services.ai_llm_client import LlmClient, LlmGenerateOptions, LlmGenerateResult
 from services.ollama_llm_client import OllamaLlmClient
+from services.ollama_health import OllamaHealthResult
 from services.document_chunk_model import IndexedDocument, IndexedDocumentSummary
 from services.ai_search_service import SearchResultChunk
 from services.ai_rag_service import RagAnswer, RagCitation
@@ -294,10 +296,63 @@ class AiRagApplicationService:
         self._ensure_initialized()
         return self._search_service.search_keyword(query, limit=limit, offset=offset)
 
+    def check_ollama_health(self) -> OllamaHealthResult:
+        """Check if the configured Ollama server is reachable.
+
+        This only applies when the underlying LLM client is an OllamaLlmClient.
+        Other clients (e.g. FakeLlmClient) are considered always healthy.
+        """
+        if isinstance(self._llm_client, OllamaLlmClient):
+            return self._llm_client.check_health()
+        return OllamaHealthResult(
+            reachable=True,
+            server_ok=True,
+            message="Non-Ollama LLM client is active.",
+            base_url="",
+        )
+
+    def check_ollama_model(self) -> OllamaHealthResult:
+        """Check if the default model is available on the Ollama server."""
+        if isinstance(self._llm_client, OllamaLlmClient):
+            return self._llm_client.check_model(self._default_model)
+        return OllamaHealthResult(
+            reachable=True,
+            server_ok=True,
+            model_available=True,
+            message="Non-Ollama LLM client is active.",
+            base_url="",
+        )
+
     def ask_indexed_documents(
         self, question: str, prompt_id: str = "default_answer", options: RagQueryOptions | None = None
     ) -> RagAnswer:
         self._ensure_initialized()
+
+        # Pre-flight check: fail fast if Ollama is not reachable or the model is missing.
+        if options is None:
+            options = RagQueryOptions()
+        model = options.model or self._default_model
+        if isinstance(self._llm_client, OllamaLlmClient):
+            health = self._llm_client.check_model(model)
+            if not health.is_healthy:
+                logger.warning(f"[AiRagApplicationService] Cannot answer: {health.message}")
+                return RagAnswer(
+                    answer_text="",
+                    citations=[],
+                    prompt_payload=None,
+                    llm_result=None,
+                    warnings=["[OLLAMA_CONNECTION_FAILED]", health.message],
+                )
+            if health.model_available is False:
+                logger.warning(f"[AiRagApplicationService] Cannot answer: {health.message}")
+                return RagAnswer(
+                    answer_text="",
+                    citations=[],
+                    prompt_payload=None,
+                    llm_result=None,
+                    warnings=["[OLLAMA_MODEL_NOT_FOUND]", health.message],
+                )
+
         self._last_answer = self._rag_service.answer_question(question, prompt_id, options)
         return self._last_answer
 

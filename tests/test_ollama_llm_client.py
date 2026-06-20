@@ -142,6 +142,63 @@ class OllamaLlmClientTest(unittest.TestCase):
             self.assertEqual(result.text, "")
             self.assertIn("[OLLAMA_CONNECTION_FAILED]", result.warnings)
 
+    @patch("urllib.request.urlopen")
+    def test_check_health_success(self, mock_urlopen):
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps({"models": []}).encode("utf-8")
+        mock_response.__enter__ = MagicMock(return_value=mock_response)
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_response.status = 200
+        mock_urlopen.return_value = mock_response
+
+        client = self._make_client()
+        result = client.check_health()
+
+        self.assertTrue(result.is_healthy)
+        self.assertEqual(result.message, "Ollama 서버가 정상입니다.")
+
+    @patch("urllib.request.urlopen")
+    def test_check_health_failure(self, mock_urlopen):
+        mock_urlopen.side_effect = urllib.error.URLError("Connection refused")
+
+        client = self._make_client()
+        result = client.check_health()
+
+        self.assertFalse(result.is_healthy)
+        self.assertEqual(result.message, "Ollama 서버가 실행되지 않았습니다.")
+
+    @patch("urllib.request.urlopen")
+    def test_check_model_success(self, mock_urlopen):
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps(
+            {"models": [{"name": "llama3.2:3b"}]}
+        ).encode("utf-8")
+        mock_response.__enter__ = MagicMock(return_value=mock_response)
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_response.status = 200
+        mock_urlopen.return_value = mock_response
+
+        client = self._make_client()
+        result = client.check_model("llama3.2:3b")
+
+        self.assertTrue(result.is_healthy)
+        self.assertTrue(result.model_available)
+
+    @patch("urllib.request.urlopen")
+    def test_check_model_missing(self, mock_urlopen):
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps({"models": []}).encode("utf-8")
+        mock_response.__enter__ = MagicMock(return_value=mock_response)
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_response.status = 200
+        mock_urlopen.return_value = mock_response
+
+        client = self._make_client()
+        result = client.check_model("llama3.2:3b")
+
+        self.assertTrue(result.is_healthy)
+        self.assertFalse(result.model_available)
+
 
 if __name__ == "__main__":
     unittest.main()

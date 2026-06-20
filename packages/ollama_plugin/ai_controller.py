@@ -79,6 +79,13 @@ class AIAssistantController(QObject):
 
         logger.info(f"[AIAssistant] Connection status: {self._connection_status}")
 
+    @pyqtSlot(str, result=bool)
+    def is_model_available(self, model_name: str) -> bool:
+        """Check if a specific model is installed on the Ollama server."""
+        if not model_name:
+            return False
+        return self._client.is_model_available(model_name)
+
     @pyqtSlot()
     def refresh_models(self) -> None:
         """Refresh model list from Ollama."""
@@ -137,7 +144,7 @@ class AIAssistantController(QObject):
             self.check_connection()
 
             # Verify saved model exists in available models
-            if self._chat_model not in self._models:
+            if not self.is_model_available(self._chat_model):
                 logger.warning(f"[AIAssistant] Saved model '{self._chat_model}' not found in available models, resetting")
                 self._chat_model = ""
                 self._settings_manager.update_chat_model("")

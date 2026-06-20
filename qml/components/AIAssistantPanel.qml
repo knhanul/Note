@@ -3420,6 +3420,12 @@ Rectangle {
 
         }
 
+        if (warningText.indexOf("OLLAMA_MODEL_NOT_FOUND") !== -1) {
+
+            return "Ollama 모델 없음: 사용하려는 모델이 Ollama에 설치되지 않았습니다. (" + warningText + ")"
+
+        }
+
         if (warningText.indexOf("OLLAMA_TIMEOUT") !== -1) {
 
             return "Ollama 응답 시간 초과: 더 작은 모델을 사용하거나 다시 시도해 주세요. (" + warningText + ")"
