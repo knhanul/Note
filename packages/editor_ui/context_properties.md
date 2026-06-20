@@ -12,10 +12,8 @@
 - `templateController`: instance of `TemplateController`
 - `currentExportController`: instance of `CurrentExportController`
 - `folderImportController`: instance of `FolderImportController`
-- `appBrand`: app brand string from `AppConfig`
 - `appName`: display app name from `AppConfig`
 - `appLogoPath`: logo path string from `AppConfig`
-- `folderControllerReady`: boolean readiness flag
 
 `settingsService` is created in Python but is not currently injected as a QML context property in `app_bootstrap.py`.
 
@@ -29,7 +27,7 @@
 - current note and folder export through `currentExportController`
 - folder import progress and execution through `folderImportController`
 - library switching/list updates through `libraryService`
-- app title/logo/branding through `appName`, `appBrand`, `appLogoPath`
+- app title/logo/branding through `appName`, `appLogoPath`
 
 `Main.qml` also creates `Connections` blocks for controller signals.
 
@@ -52,10 +50,8 @@ The following names are runtime API for QML and should not be renamed casually:
 - `templateController`
 - `currentExportController`
 - `folderImportController`
-- `appBrand`
 - `appName`
 - `appLogoPath`
-- `folderControllerReady`
 
 ## Signal names that are coupled to QML
 

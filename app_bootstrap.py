@@ -1,6 +1,5 @@
 import sys
 from dataclasses import dataclass
-from importlib.util import find_spec
 
 from PyQt6.QtCore import QUrl
 from PyQt6.QtQml import QQmlApplicationEngine
@@ -59,13 +58,9 @@ def configure_qml_engine(engine: QQmlApplicationEngine, config: AppConfig, servi
     engine.rootContext().setContextProperty("folderImportController", services.folder_import_controller)
     engine.rootContext().setContextProperty("settingsService", services.settings_service)
 
-    engine.rootContext().setContextProperty("appBrand", config.brand)
     engine.rootContext().setContextProperty("appName", config.app_name)
     engine.rootContext().setContextProperty("appLogoPath", config.logo_path)
     engine.rootContext().setContextProperty("appVariant", app_variant)
-    engine.rootContext().setContextProperty("webEngineAvailable", find_spec("PyQt6.QtWebEngineQuick") is not None)
-
-    engine.rootContext().setContextProperty("folderControllerReady", True)
     engine.rootContext().setContextProperty("uiScale", services.settings_service.get_ui_scale())
 
 

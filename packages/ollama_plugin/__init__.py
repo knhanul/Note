@@ -7,14 +7,12 @@ AUTHORITATIVE RUNTIME PATH:
 - AssistantController -> ai_prompt_service -> ai_prompt_repository is the active execution path
 
 LEGACY MODULES:
-- The following legacy prompt_* modules remain for compatibility but are NOT authoritative
-  for current AI runtime execution:
-  - prompt_manager.py
+- The following legacy prompt_* modules remain as files but are no longer publicly exported
+  and are NOT authoritative for current AI runtime execution:
   - prompt_service.py
   - prompt_controller.py
   - prompt_seed_service.py
   - prompt_repository.py
-- These modules are retained for potential future use or compatibility
 - DO NOT use these for new AI prompt resolution logic
 """
 
@@ -32,7 +30,6 @@ from .assistant_controller import AssistantController
 from .client import OllamaClient, OllamaConnectionResult, OllamaModel, OllamaModelListResult
 from .model_manager import ModelManager
 from .plugin import OllamaAssistantPlugin
-from .prompt_manager import PromptManager
 from .prompt_renderer import PromptRenderer
 from .settings import OllamaSettings
 
@@ -58,6 +55,5 @@ __all__ = [
     "PromptRepository",
     "PromptSeedService",
     "PromptService",
-    "PromptManager",
     "PromptRenderer",
 ]

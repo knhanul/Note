@@ -21,10 +21,8 @@ class AppBootstrapContractTest(unittest.TestCase):
             "templateController",
             "currentExportController",
             "folderImportController",
-            "appBrand",
             "appName",
             "appLogoPath",
-            "folderControllerReady",
         ]
 
         for name in expected_names:
