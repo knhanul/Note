@@ -26,10 +26,10 @@ Likely safer after theme path compatibility:
 - `GlassCard.qml`
 - `TagChip.qml`
 - `SaveStatusChip.qml`
-- `NotebookItem.qml`
-- `SidebarSection.qml`
 - `EditorToolbar.qml`
 - `NoteListItem.qml` after confirming its signals cover all app behavior
+
+> Removed: `NotebookItem.qml` and `SidebarSection.qml` were deleted because they had no runtime usage.
 
 `FolderItem.qml` should wait until its direct `folderController` dependency is removed or adapted.
 

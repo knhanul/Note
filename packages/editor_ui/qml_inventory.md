@@ -24,11 +24,11 @@
 - `GlassCard.qml`: visual container component. Uses `theme`. Mostly common UI.
 - `NoteEditor.qml`: older/native note editor component. Uses `theme` and `components`. Has title/content/save/image-paste signals. Kept for compatibility.
 - `NoteListItem.qml`: note list row component. Uses `theme`. Has note title/preview/date/tags/pin/selection state and emits click/selection/pin/delete signals. Good common candidate with adapter data.
-- `NotebookItem.qml`: notebook/folder-like row component. Uses `theme`. Simple common component.
 - `SaveStatusChip.qml`: save status visual component. Uses `theme`. Common component.
-- `SidebarSection.qml`: generic sidebar section/list component. Uses `theme`. Mostly common.
 - `TagChip.qml`: tag visual chip. Uses `theme`. Emits clicked/removed. Common component.
 - `WebNoteEditor.qml`: WebEngine-based editor bridge. Uses `QtWebEngine`, `QtQuick.Dialogs`, `theme`, and `components`. Directly depends on global `noteController` for local image insertion and relies on the React editor bridge contract. High-risk component.
+
+> Removed: `NotebookItem.qml` and `SidebarSection.qml` were deleted because they had no runtime usage.
 
 ## Theme files
 
