@@ -1,4 +1,6 @@
 import json
+import logging
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -27,6 +29,24 @@ class AiSearchService:
     STRICT_SCORE_THRESHOLD = 0.5
     RELAXED_SCORE_THRESHOLD = 0.3
     TITLE_SCORE_THRESHOLD = 0.5
+    STOPWORDS = {
+        "관련",
+        "내용",
+        "정보",
+        "자료",
+        "건",
+        "사항",
+        "알려줘",
+        "알려주세요",
+        "설명",
+        "설명해줘",
+        "정리",
+        "정리해줘",
+        "대해서",
+        "관련해서",
+        "무엇",
+        "어떻게",
+    }
 
     QUERY_EXPRESSION_PATTERNS = [
         "알려줘", "알려주세요", "알겠어요", "알겠습니다",
@@ -68,38 +88,95 @@ class AiSearchService:
 
     def normalize_query(self, query: str) -> str:
         """Normalize user query by removing query expressions and extracting core keywords."""
-        import logging
         logger = logging.getLogger(__name__)
         
-        normalized = query.lower().strip()
-        
+        original = (query or "").strip()
+        normalized = original.lower()
+        removed_phrases: list[str] = []
+
         for pattern in self.QUERY_EXPRESSION_PATTERNS:
+            if pattern in normalized:
+                removed_phrases.append(pattern)
             normalized = normalized.replace(pattern, " ")
-        
-        normalized = " ".join(normalized.split())
-        
-        logger.info(f"[AiSearchService] Query normalization: original='{query}', normalized='{normalized}'")
-        return normalized
+
+        tokens = [token.strip(".,!?()[]{}\"'“”‘’·") for token in re.split(r"\s+", normalized) if token.strip()]
+        kept_tokens: list[str] = []
+        removed_tokens: list[str] = []
+
+        for token in tokens:
+            if self._is_meaningful_token(token):
+                kept_tokens.append(token)
+            else:
+                removed_tokens.append(token)
+
+        if not kept_tokens:
+            fallback_token = self._pick_fallback_token(tokens, original)
+            if fallback_token:
+                kept_tokens = [fallback_token]
+
+        normalized_query = " ".join(self._dedupe_preserve_order(kept_tokens))
+        normalized_query = " ".join(normalized_query.split())
+
+        logger.info(f"[AiSearchService] removed_stopwords={self._dedupe_preserve_order(removed_phrases + removed_tokens)}")
+        logger.info(f"[AiSearchService] Query normalization: original='{query}', normalized='{normalized_query}'")
+        return normalized_query
+
+    def _is_meaningful_token(self, token: str) -> bool:
+        if not token:
+            return False
+        if any(char.isdigit() for char in token):
+            return True
+        return token not in self.STOPWORDS
+
+    def _pick_fallback_token(self, tokens: list[str], original: str) -> str:
+        for token in tokens:
+            if any(char.isdigit() for char in token):
+                return token
+        for token in tokens:
+            if token and token not in self.STOPWORDS:
+                return token
+        original_tokens = [token.strip(".,!?()[]{}\"'“”‘’·") for token in original.split() if token.strip()]
+        return original_tokens[0] if original_tokens else ""
+
+    def _dedupe_preserve_order(self, values: list[str]) -> list[str]:
+        seen: set[str] = set()
+        result: list[str] = []
+        for value in values:
+            if value and value not in seen:
+                seen.add(value)
+                result.append(value)
+        return result
 
     def generate_search_queries(self, normalized_query: str) -> list[str]:
         """Generate search queries from normalized query."""
-        import logging
         logger = logging.getLogger(__name__)
-        
-        queries = [normalized_query]
-        
+
+        queries: list[str] = []
+        seen: set[str] = set()
+
+        if normalized_query:
+            queries.append(normalized_query)
+            seen.add(normalized_query)
+
+        for term in normalized_query.split():
+            if term and term not in seen:
+                queries.append(term)
+                seen.add(term)
+
         for key, synonyms in self.QUERY_EXPANSION_MAP.items():
             if key in normalized_query:
                 for syn in synonyms:
-                    if syn not in queries:
+                    if syn not in seen and syn not in self.STOPWORDS:
                         queries.append(syn)
-                
+                        seen.add(syn)
+
                 for syn in synonyms[:3]:
                     combined = f"{normalized_query.replace(key, '').strip()} {syn}".strip()
-                    if combined and combined not in queries:
+                    if combined and combined not in seen and combined not in self.STOPWORDS:
                         queries.append(combined)
-        
-        result = queries[:8]
+                        seen.add(combined)
+
+        result = queries[:10]
         logger.info(f"[AiSearchService] Generated search queries: {result}")
         return result
 

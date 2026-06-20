@@ -67,6 +67,7 @@ class AiRagApplicationService:
         self._rag_prompt_loader: Optional[RagAnswerPromptLoader] = None
         self._last_answer: Optional[RagAnswer] = None
         self._initialized = False
+        self._cancel_requested = False
 
     def initialize(self) -> None:
         if self._initialized:
@@ -115,6 +116,11 @@ class AiRagApplicationService:
         self._prompt_builder = None
         self._rag_service = None
         self._initialized = False
+        self._cancel_requested = False
+
+    def cancel_indexing(self) -> None:
+        """Request cancellation of ongoing indexing operations."""
+        self._cancel_requested = True
 
     def clear_index(self) -> None:
         self._ensure_initialized()
@@ -184,6 +190,7 @@ class AiRagApplicationService:
         progress_callback: ProgressCallback | None = None,
     ) -> dict:
         self._ensure_initialized()
+        self._cancel_requested = False
 
         indexed_count = 0
         failed_count = 0
@@ -193,6 +200,10 @@ class AiRagApplicationService:
         processed = 0
 
         for path in file_paths:
+            if self._cancel_requested:
+                warnings.append("색인 작업이 중지되었습니다.")
+                break
+
             processed += 1
             label = Path(path).name or str(path)
             self._notify_progress(progress_callback, "file", label, processed, total or processed)
@@ -312,6 +323,7 @@ class AiRagApplicationService:
         progress_callback: ProgressCallback | None = None,
     ) -> dict:
         self._ensure_initialized()
+        self._cancel_requested = False
 
         indexed_count = 0
         failed_count = 0
@@ -321,6 +333,10 @@ class AiRagApplicationService:
         processed = 0
 
         for item in note_items:
+            if self._cancel_requested:
+                warnings.append("색인 작업이 중지되었습니다.")
+                break
+
             processed += 1
             label = (
                 item.get("title")

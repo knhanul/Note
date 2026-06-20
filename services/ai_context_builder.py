@@ -1,8 +1,12 @@
+import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
 from services.ai_document_index_repository import AiDocumentIndexRepository
 from services.ai_search_service import SearchResultChunk
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -27,6 +31,10 @@ class ContextItem:
     chunk_order: int
     is_primary: bool
     source: ContextSource
+    original_len: int = 0
+    used_len: int = 0
+    truncated: bool = False
+    truncation_reason: str = ""
 
 
 @dataclass
@@ -124,6 +132,8 @@ class AiContextBuilder:
                 chunk_order=result.chunk_order,
                 is_primary=is_primary,
                 source=source,
+                original_len=len(result.chunk_text or ""),
+                used_len=len(result.chunk_text or ""),
             )
             items.append(item)
 
@@ -132,37 +142,89 @@ class AiContextBuilder:
         total_chars = sum(len(item.chunk_text) for item in items)
 
         if total_chars > max_chars:
-            truncated_items: list[ContextItem] = []
-            chars_count = 0
-            for item in items:
-                if chars_count + len(item.chunk_text) <= max_chars:
-                    truncated_items.append(item)
-                    chars_count += len(item.chunk_text)
-                elif not item.is_primary:
-                    continue
-                elif chars_count < max_chars:
-                    max_len = max_chars - chars_count
-                    truncated_item = ContextItem(
-                        chunk_id=item.chunk_id,
-                        document_id=item.document_id,
-                        heading_path=item.heading_path,
-                        chunk_text=item.chunk_text[:max_len] + "...",
-                        chunk_order=item.chunk_order,
-                        is_primary=item.is_primary,
-                        source=item.source,
-                    )
-                    truncated_items.append(truncated_item)
-                    chars_count = max_chars
-                    warnings.append("CONTEXT_PRIMARY_CHUNK_TRUNCATED")
+            balanced_items: list[ContextItem] = []
+            budget_left = max_chars
+            excluded_chunks = 0
+
+            for index, item in enumerate(items):
+                remaining_items = len(items) - index
+                if budget_left <= 0:
+                    excluded_chunks += remaining_items
                     break
+
+                share_budget = budget_left if remaining_items <= 1 else budget_left // remaining_items
+                share_budget = max(250, min(900, share_budget))
+                share_budget = min(share_budget, budget_left)
+
+                original_text = item.chunk_text or ""
+                original_len = len(original_text)
+
+                if original_len > share_budget:
+                    truncated_len = max(0, share_budget - 3)
+                    used_text = original_text[:truncated_len] + "..."
+                    used_len = len(used_text)
+                    truncated = True
+                    truncation_reason = "balanced_budget"
+                    warnings.append("CONTEXT_PRIMARY_CHUNK_TRUNCATED" if item.is_primary else "CONTEXT_CHUNK_TRUNCATED")
                 else:
-                    break
+                    used_text = original_text
+                    used_len = original_len
+                    truncated = False
+                    truncation_reason = ""
 
-            if len(truncated_items) < len(items):
+                balanced_item = ContextItem(
+                    chunk_id=item.chunk_id,
+                    document_id=item.document_id,
+                    heading_path=item.heading_path,
+                    chunk_text=used_text,
+                    chunk_order=item.chunk_order,
+                    is_primary=item.is_primary,
+                    source=item.source,
+                    original_len=original_len,
+                    used_len=used_len,
+                    truncated=truncated,
+                    truncation_reason=truncation_reason,
+                )
+                balanced_items.append(balanced_item)
+                budget_left -= used_len
+
+                logger.info(
+                    "[AiContextBuilder] selected_chunk[%s]: doc='%s', source_type=%s, chunk_order=%s, original_len=%s, used_len=%s, truncated=%s, reason=%s",
+                    index,
+                    balanced_item.source.title or balanced_item.document_id,
+                    balanced_item.source.source_type,
+                    balanced_item.chunk_order,
+                    original_len,
+                    used_len,
+                    truncated,
+                    truncation_reason or "none",
+                )
+
+            if len(balanced_items) < len(items):
                 warnings.append("CONTEXT_MAX_CHARS_REACHED")
+                excluded_chunks = max(excluded_chunks, len(items) - len(balanced_items))
 
-            items = truncated_items
+            items = balanced_items
             total_chars = sum(len(item.chunk_text) for item in items)
+            logger.info(
+                "[AiContextBuilder] context_budget: max=%s, used=%s, excluded_chunks=%s",
+                max_chars,
+                total_chars,
+                excluded_chunks,
+            )
+        else:
+            for index, item in enumerate(items):
+                logger.info(
+                    "[AiContextBuilder] selected_chunk[%s]: doc='%s', source_type=%s, chunk_order=%s, original_len=%s, used_len=%s, truncated=%s, reason=%s",
+                    index,
+                    item.source.title or item.document_id,
+                    item.source.source_type,
+                    item.chunk_order,
+                    item.original_len,
+                    item.used_len,
+                    item.truncated,
+                    item.truncation_reason or "none",
+                )
 
         sources = list(sources_dict.values())
 

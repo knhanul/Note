@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Protocol, Optional
 import re
 import time
@@ -9,7 +10,7 @@ logger = logging.getLogger(__name__)
 from services.ai_context_builder import ContextBundle, ContextSource
 from services.ai_llm_client import LlmClient, LlmGenerateOptions, LlmGenerateResult
 from services.ai_rag_prompt_builder import RagPromptPayload, RagPromptSource
-from services.ai_search_service import AiSearchService
+from services.ai_search_service import AiSearchService, SearchResultChunk
 from services.ai_context_builder import AiContextBuilder
 from services.ai_rag_prompt_builder import AiRagPromptBuilder
 from services.rag_answer_prompt_loader import RagAnswerPromptLoader, RagAnswerPrompt
@@ -148,14 +149,42 @@ class AiRagService:
 
         warnings.extend(context_bundle.warnings)
 
+        hwp_warnings = self._collect_hwp_warnings(context_bundle, search_results)
+        warnings.extend(hwp_warnings)
+
         if not context_bundle.items:
+            if search_results:
+                fallback_text, fallback_citations, fallback_warnings = self._build_fallback_answer(
+                    question=question,
+                    normalized_query=normalized_query,
+                    search_results=search_results,
+                    context_bundle=context_bundle,
+                )
+                warnings.extend(fallback_warnings)
+                warnings.append("RAG_CONTEXT_EMPTY_FALLBACK")
+                fallback_result = LlmGenerateResult(
+                    text=fallback_text,
+                    model=options.model or self._default_model,
+                    provider="fallback",
+                    raw={"reason": "context_empty_fallback"},
+                    warnings=[],
+                )
+                logger.warning(f"[AiRagService] context empty but search results exist, using fallback answer_len={len(fallback_text)}")
+                return RagAnswer(
+                    answer_text=fallback_text,
+                    citations=fallback_citations,
+                    prompt_payload=None,
+                    llm_result=fallback_result,
+                    warnings=self._finalize_warnings(warnings, fallback_citations),
+                )
+
             warnings.append("RAG_NO_CONTEXT")
             return RagAnswer(
                 answer_text="참고문서에서 관련 내용을 찾지 못했습니다.",
                 citations=context_bundle.sources,
                 prompt_payload=None,
                 llm_result=None,
-                warnings=self._deduplicate_warnings(warnings),
+                warnings=self._finalize_warnings(warnings, context_bundle.sources),
             )
 
         # Build RAG context and sources strings
@@ -199,19 +228,24 @@ class AiRagService:
 
         warnings.extend(llm_result.warnings)
 
-        is_valid, validation_reason = self._validate_answer_quality(llm_result.text, prompt_id)
+        citations = self._build_citations(prompt_payload, llm_result.text, warnings)
+        is_valid, validation_reason = self._validate_answer_quality(llm_result.text, prompt_id, citations)
         retry_used = False
-        
+
         if not is_valid:
             logger.warning(f"[AiRagService] Answer validation failed: answer_len={len(llm_result.text)}, reason={validation_reason}")
-            
+            warnings.append(f"RAG_ANSWER_VALIDATION_FAILED:{validation_reason}")
+
             original_prompt_obj = self._rag_prompt_loader.get_prompt(prompt_id)
+            retry_result = None
+            retry_citations: list[RagCitation] = []
+
             if original_prompt_obj:
                 retry_system_prompt = self._build_retry_prompt(prompt_id, original_prompt_obj)
                 retry_user_prompt = user_prompt
-                
+
                 logger.info(f"[AiRagService] Retrying RAG answer with strict prompt")
-                
+
                 retry_payload = RagPromptPayload(
                     system_prompt=retry_system_prompt,
                     user_prompt=retry_user_prompt,
@@ -220,21 +254,46 @@ class AiRagService:
                     warnings=warnings,
                     total_chars=len(retry_system_prompt) + len(retry_user_prompt),
                 )
-                
+
                 retry_result = self._llm.generate_from_payload(retry_payload, llm_options)
                 logger.info(f"[AiRagService] Retry completed: answer_len={len(retry_result.text)}")
-                
-                if retry_result.text and len(retry_result.text.strip()) >= 30:
+                warnings.extend(retry_result.warnings)
+                retry_citations = self._build_citations(retry_payload, retry_result.text, warnings)
+
+                retry_valid, retry_reason = self._validate_answer_quality(retry_result.text, prompt_id, retry_citations)
+                if retry_valid:
                     llm_result = retry_result
+                    citations = retry_citations
                     retry_used = True
-                    warnings.extend(retry_result.warnings)
                     logger.info(f"[AiRagService] Retry successful: answer_len={len(llm_result.text)}")
                 else:
-                    logger.warning(f"[AiRagService] Retry also failed, using original answer")
-        
-        logger.info(f"[AiRagService] Final answer: answer_len={len(llm_result.text)}, retry_used={retry_used}")
+                    logger.warning(f"[AiRagService] Retry failed: reason={retry_reason}")
+                    warnings.append(f"RAG_RETRY_FAILED:{retry_reason}")
 
-        citations = self._build_citations(prompt_payload, llm_result.text, warnings)
+            if not retry_used:
+                fallback_text, fallback_citations, fallback_warnings = self._build_fallback_answer(
+                    question=question,
+                    normalized_query=normalized_query,
+                    search_results=search_results,
+                    context_bundle=context_bundle,
+                )
+                warnings.extend(fallback_warnings)
+                warnings.append("RAG_FALLBACK_USED")
+                llm_result = LlmGenerateResult(
+                    text=fallback_text,
+                    model=llm_options.model,
+                    provider="fallback",
+                    raw={
+                        "reason": validation_reason,
+                        "retry_used": retry_used,
+                        "search_result_count": len(search_results),
+                    },
+                    warnings=[],
+                )
+                citations = fallback_citations
+                logger.info(f"[AiRagService] Fallback answer generated: answer_len={len(fallback_text)}")
+
+        logger.info(f"[AiRagService] Final answer: answer_len={len(llm_result.text)}, retry_used={retry_used}, citations={len(citations)}")
 
         total_time = time.time() - start_time
         logger.info(f"[RAG_TIMING] Total RAG time: {total_time:.2f}s, answer_len={len(llm_result.text)}")
@@ -244,7 +303,7 @@ class AiRagService:
             citations=citations,
             prompt_payload=prompt_payload,
             llm_result=llm_result,
-            warnings=self._deduplicate_warnings(warnings),
+            warnings=self._finalize_warnings(warnings, citations),
         )
 
     def answer_question_in_document(
@@ -299,7 +358,7 @@ class AiRagService:
                 citations=context_bundle.sources,
                 prompt_payload=None,
                 llm_result=None,
-                warnings=self._deduplicate_warnings(warnings),
+                warnings=self._finalize_warnings(warnings, context_bundle.sources),
             )
 
         prompt_payload = self._prompt.build_prompt(
@@ -329,7 +388,7 @@ class AiRagService:
             citations=citations,
             prompt_payload=prompt_payload,
             llm_result=llm_result,
-            warnings=self._deduplicate_warnings(warnings),
+            warnings=self._finalize_warnings(warnings, citations),
         )
 
     def _build_citations(
@@ -391,6 +450,12 @@ class AiRagService:
                 seen.add(w)
                 result.append(w)
         return result
+
+    def _finalize_warnings(self, warnings: list[str], citations: list[RagCitation]) -> list[str]:
+        final_warnings = self._deduplicate_warnings(warnings)
+        if any(c.cited_in_answer for c in citations):
+            final_warnings = [w for w in final_warnings if not w.startswith("RAG_NO_CITATIONS")]
+        return final_warnings
 
     def _build_context_text_and_sources(
         self, items: list, max_chars: int
@@ -494,7 +559,6 @@ Content:
     def _build_no_results_message(self, question: str, normalized_query: str, generated_queries: list[str], term_counts: dict[str, int], no_result_reason: str) -> str:
         """Build a helpful message when no relevant documents are found."""
         
-        found_terms = [term for term, count in term_counts.items() if count > 0]
         not_found_terms = [term for term, count in term_counts.items() if count == 0]
         
         if no_result_reason == "RAG_INDEX_MAY_BE_INCOMPLETE":
@@ -518,11 +582,7 @@ Content:
 
 * {", ".join(not_found_terms[:5]) if not_found_terms else "검색어와 관련된 내용"}
 
-### 검색 결과 상태
-
-* 직접 근거 문서: 없음
-* 관련 가능 문서: 없음
-* 최근 문서 임의 사용: 하지 않음
+{status_section}
 
 ### 추가로 필요한 문서
 
@@ -533,19 +593,43 @@ Content:
 
 * {", ".join(generated_queries[:6])}"""
 
-    def _validate_answer_quality(self, answer_text: str, prompt_id: str) -> tuple[bool, str]:
+    def _validate_answer_quality(
+        self,
+        answer_text: str,
+        prompt_id: str,
+        citations: list[RagCitation] | None = None,
+    ) -> tuple[bool, str]:
         """Validate if the generated answer meets quality standards."""
-        if not answer_text or len(answer_text.strip()) < 30:
+        stripped = (answer_text or "").strip()
+        if len(stripped) < 80:
             return False, "too_short"
 
-        answer_lower = answer_text.lower().strip()
+        answer_lower = stripped.lower()
         greeting_patterns = [
-            "안녕하세요", "네", "알겠습니다", "감사합니다", 
-            "질문해 주셔서", "도움을 드리겠습니다", "반갑습니다"
+            "안녕하세요", "네", "알겠습니다", "감사합니다",
+            "질문해 주셔서", "도움을 드리겠습니다", "반갑습니다",
         ]
-        
-        if all(answer_lower.startswith(p) or len(answer_lower) < 50 for p in greeting_patterns):
+
+        if any(answer_lower.startswith(p) for p in greeting_patterns):
             return False, "greeting_only"
+
+        evasive_patterns = [
+            "어떤 정보가 필요하신가요",
+            "무엇이 필요하신가요",
+            "더 구체적으로",
+            "좀 더 자세히",
+            "질문을 다시",
+            "다시 말씀",
+            "참고문서에서 확인되지 않습니다",
+        ]
+        if any(pattern in answer_lower for pattern in evasive_patterns):
+            return False, "evasive_reply"
+
+        if answer_text.strip().endswith("?") and len(stripped) < 180:
+            return False, "question_only"
+
+        if citations is not None and citations and not any(c.cited_in_answer for c in citations):
+            return False, "no_cited_sources"
 
         if prompt_id == "evidence_based_answer" and "[근거" not in answer_text and "근거:" not in answer_text:
             return False, "no_evidence"
@@ -554,6 +638,232 @@ Content:
             return False, "no_checklist"
 
         return True, "valid"
+
+    def _collect_hwp_warnings(
+        self,
+        context_bundle: ContextBundle,
+        search_results: list[SearchResultChunk],
+    ) -> list[str]:
+        warnings: list[str] = []
+
+        def has_hwp_source(source_type: str | None, source_path: str | None) -> bool:
+            if not source_type and not source_path:
+                return False
+            if source_type == "hwp_file":
+                return True
+            if source_path:
+                try:
+                    return Path(source_path).suffix.lower() == ".hwp"
+                except Exception:
+                    return ".hwp" in str(source_path).lower()
+            return False
+
+        if any(has_hwp_source(src.source_type, src.source_path) for src in context_bundle.sources):
+            warnings.append("RAG_HWP_SOURCE_QUALITY")
+        elif any(has_hwp_source(result.source_type, result.source_path) for result in search_results):
+            warnings.append("RAG_HWP_SOURCE_QUALITY")
+
+        return warnings
+
+    def _build_fallback_answer(
+        self,
+        question: str,
+        normalized_query: str,
+        search_results: list[SearchResultChunk],
+        context_bundle: ContextBundle,
+    ) -> tuple[str, list[RagCitation], list[str]]:
+        groups = self._group_fallback_sources(search_results, context_bundle)
+        warnings: list[str] = []
+
+        if not groups:
+            return "참고문서에서 관련 내용을 찾지 못했습니다.", [], ["RAG_NO_CONTEXT"]
+
+        lines: list[str] = []
+        lines.append("### 답변")
+        lines.append("")
+        lines.append(
+            f'참고문서에서 "{normalized_query}"와 관련된 문서가 검색되었습니다. 다만 AI 모델이 충분한 답변을 생성하지 못해, 검색된 참고문서 기준으로 확인 가능한 내용을 정리합니다.'
+        )
+        lines.append("")
+        lines.append("### 검색된 참고문서")
+        lines.append("")
+
+        citations: list[RagCitation] = []
+        has_hwp = False
+
+        for index, group in enumerate(groups, start=1):
+            source_id = f"S{index}"
+            group["source_id"] = source_id
+            title = group["title"] or "제목 없음"
+            source_type = group["source_type"] or "unknown"
+            short_path = self._shorten_source_path(group.get("source_path"), group.get("note_id"))
+            chunk_count = group["chunk_count"]
+
+            lines.append(f"* {source_id} {title}")
+            lines.append("")
+            lines.append(f"  * 사용된 문서 조각 수: {chunk_count}개")
+            lines.append(f"  * 파일 형식: {source_type}")
+            lines.append(f"  * 경로: {short_path}")
+            lines.append("")
+
+            if source_type == "hwp_file" or (group.get("source_path") and str(group.get("source_path")).lower().endswith(".hwp")):
+                has_hwp = True
+
+            first_chunk = group["chunks"][0] if group["chunks"] else None
+            citations.append(
+                RagCitation(
+                    source_id=source_id,
+                    chunk_id=first_chunk["chunk_id"] if first_chunk else f"{group['document_id']}:0",
+                    document_id=group["document_id"],
+                    title=title,
+                    source_type=source_type,
+                    source_path=group.get("source_path"),
+                    note_id=group.get("note_id"),
+                    heading_path=first_chunk["heading_path"] if first_chunk else [],
+                    chunk_order=first_chunk["chunk_order"] if first_chunk else 0,
+                    cited_in_answer=True,
+                )
+            )
+
+        lines.append("### 확인 가능한 내용")
+        lines.append("")
+
+        content_lines: list[str] = []
+        for group in groups:
+            if len(content_lines) >= 5:
+                break
+            source_id = group["source_id"]
+            snippets = group["snippets"][:3]
+            if snippets:
+                for snippet in snippets:
+                    if len(content_lines) >= 5:
+                        break
+                    content_lines.append(f"* [{source_id}] {snippet}")
+            else:
+                content_lines.append("* 색인된 문서 조각에서 충분한 본문 내용을 확인하지 못했습니다.")
+
+        if content_lines:
+            lines.extend(content_lines)
+        else:
+            lines.append("* 색인된 문서 조각에서 충분한 본문 내용을 확인하지 못했습니다.")
+
+        lines.append("")
+        lines.append("### 추가 확인 필요")
+        lines.append("")
+        lines.append("* 원문 문서를 열어 세부 내용을 확인하세요.")
+        if has_hwp:
+            lines.append("* 이 문서는 HWP 파일에서 추출되었습니다. 표, 서식, 일부 본문이 누락될 수 있습니다. 정확한 분석이 필요하면 도구 메뉴의 한글 파일 변환 기능으로 HWPX 변환 후 다시 색인하는 것을 권장합니다.")
+
+        lines.append("")
+        lines.append("### 참고 출처")
+        lines.append("")
+        for group in groups:
+            source_id = group["source_id"]
+            lines.append(f"* [{source_id}] {group['title'] or '제목 없음'}")
+
+        if has_hwp:
+            warnings.append("RAG_HWP_SOURCE_QUALITY")
+
+        return "\n".join(lines), citations, warnings
+
+    def _group_fallback_sources(
+        self,
+        search_results: list[SearchResultChunk],
+        context_bundle: ContextBundle,
+    ) -> list[dict[str, Any]]:
+        grouped: dict[str, dict[str, Any]] = {}
+
+        def ensure_group(document_id: str, source_type: str | None, source_path: str | None, note_id: str | None, title: str | None) -> dict[str, Any]:
+            group = grouped.get(document_id)
+            if group is None:
+                group = {
+                    "document_id": document_id,
+                    "source_type": source_type or "unknown",
+                    "source_path": source_path,
+                    "note_id": note_id,
+                    "title": title,
+                    "chunks": [],
+                    "snippets": [],
+                    "chunk_count": 0,
+                }
+                grouped[document_id] = group
+            if not group.get("title") and title:
+                group["title"] = title
+            if not group.get("source_path") and source_path:
+                group["source_path"] = source_path
+            if not group.get("note_id") and note_id:
+                group["note_id"] = note_id
+            if source_type and group.get("source_type") == "unknown":
+                group["source_type"] = source_type
+            return group
+
+        for item in context_bundle.items:
+            group = ensure_group(
+                item.document_id,
+                item.source.source_type,
+                item.source.source_path,
+                item.source.note_id,
+                item.source.title,
+            )
+            chunk_text = (item.chunk_text or "").strip()
+            group["chunk_count"] += 1
+            group["chunks"].append(
+                {
+                    "chunk_id": item.chunk_id,
+                    "chunk_order": item.chunk_order,
+                    "heading_path": item.heading_path,
+                    "text": chunk_text,
+                }
+            )
+            snippet = self._extract_fallback_snippet(chunk_text)
+            if snippet:
+                group["snippets"].append(snippet)
+
+        for result in search_results:
+            group = ensure_group(result.document_id, result.source_type, result.source_path, result.note_id, result.title)
+            if any(chunk["chunk_id"] == result.chunk_id for chunk in group["chunks"]):
+                continue
+            chunk_text = (result.snippet or result.chunk_text or "").strip()
+            group["chunk_count"] += 1
+            group["chunks"].append(
+                {
+                    "chunk_id": result.chunk_id,
+                    "chunk_order": result.chunk_order,
+                    "heading_path": result.heading_path,
+                    "text": chunk_text,
+                }
+            )
+            snippet = self._extract_fallback_snippet(chunk_text)
+            if snippet:
+                group["snippets"].append(snippet)
+
+        groups = list(grouped.values())
+        groups.sort(key=lambda g: (-g["chunk_count"], g["title"] or "", g["document_id"]))
+        return groups
+
+    def _extract_fallback_snippet(self, text: str, max_len: int = 180) -> str:
+        if not text:
+            return ""
+
+        cleaned = " ".join(text.split())
+        if len(cleaned) <= max_len:
+            return cleaned
+        return cleaned[: max_len - 3].rstrip() + "..."
+
+    def _shorten_source_path(self, source_path: str | None, note_id: str | None) -> str:
+        if note_id:
+            return f"note_id:{note_id}"
+        if not source_path:
+            return "(경로 없음)"
+
+        try:
+            path = Path(source_path)
+            parts = path.parts
+            if len(parts) <= 2:
+                return str(path)
+            return str(Path(*parts[-2:]))
+        except Exception:
+            return str(source_path)
 
     def _build_retry_prompt(self, prompt_id: str, original_prompt: RagAnswerPrompt) -> str:
         """Build a stricter prompt for retry."""
@@ -565,6 +875,7 @@ Content:
 2. 아래 참고문서에 근거해 답변 형식을 반드시 채우세요.
 3. 참고문서에서 확인되지 않는 내용은 없다고 명확히 말하세요.
 4. 답변에는 최소 3개 이상의 의미 있는 문장을 포함하세요.
-5. 출처가 있는 경우 [S1], [S2]처럼 표시하세요."""
+5. 출처가 있는 경우 [S1], [S2]처럼 표시하세요.
+6. 가능한 경우 핵심 문장 끝에 [S1] 형식의 출처를 표시하고, 어려우면 마지막에 "참고 출처" 섹션을 추가하세요."""
 
         return original_prompt.system_prompt + retry_instructions

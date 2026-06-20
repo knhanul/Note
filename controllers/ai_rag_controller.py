@@ -238,6 +238,7 @@ class AiRagController(QObject):
     searchResultsChanged = pyqtSignal()
     _askCompleted = pyqtSignal(object)
     _askFailed = pyqtSignal(str)
+    indexingCancelled = pyqtSignal()
 
     def __init__(self, app_service: AiRagApplicationService | None = None, parent=None):
         super().__init__(parent)
@@ -247,6 +248,8 @@ class AiRagController(QObject):
         self._last_search_results: list[SearchResultChunk] = []
         self._last_index_result: dict = {}
         self._ask_in_progress = False
+        self._indexing_in_progress = False
+        self._cancel_requested = False
         self._askCompleted.connect(self._on_ask_completed)
         self._askFailed.connect(self._on_ask_failed)
 
@@ -287,6 +290,21 @@ class AiRagController(QObject):
         except Exception as e:
             logger.error(f"[AiRagController] close failed: {e}")
             self.errorOccurred.emit(f"종료 실패: {e}")
+
+    @pyqtSlot()
+    def cancelIndexing(self) -> None:
+        """Cancel ongoing RAG indexing operation."""
+        try:
+            if self._indexing_in_progress:
+                self._cancel_requested = True
+                if self._app_service:
+                    self._app_service.cancel_indexing()
+                logger.info("[AiRagController] Indexing cancellation requested")
+                self.indexingCancelled.emit()
+            else:
+                logger.info("[AiRagController] No indexing in progress to cancel")
+        except Exception as e:
+            logger.error(f"[AiRagController] cancelIndexing failed: {e}")
 
     @pyqtSlot(str, str, str, str)
     def indexCurrentNote(self, note_id: str, title: str, content: str, tags_json: str = "[]") -> None:

@@ -139,7 +139,7 @@ class RagAnswerPromptLoader:
         rag_sources: str
     ) -> tuple[str, str]:
         """Build fallback prompts when JSON loading fails."""
-        system_prompt = "당신은 제공된 참고문서를 바탕으로 답변하는 AI 어시스턴트입니다. 참고문서에 없는 내용은 추측하지 말고 \"참고문서에서 확인되지 않습니다\"라고 답하세요."
+        system_prompt = "당신은 제공된 참고문서를 바탕으로 답변하는 AI 어시스턴트입니다. 참고문서에 없는 내용은 추측하지 말고 \"참고문서에서 확인되지 않습니다\"라고 답하세요. 가능한 경우 핵심 문장 끝에 [S1], [S2]처럼 출처를 표시하고, 문장에 넣기 어렵다면 마지막에 \"참고 출처\" 섹션을 추가하세요. 검색된 참고문서를 먼저 요약하고, 필요하면 마지막에 추가 질문을 제안하세요."
         
         user_prompt = f"""## 사용자 질문
 
@@ -155,7 +155,7 @@ class RagAnswerPromptLoader:
 
 ## 답변 지시
 
-위 참고문서 내용을 바탕으로 사용자 질문에 답변하세요."""
+위 참고문서 내용을 바탕으로 사용자 질문에 답변하세요. 가능하면 핵심 문장 끝에 [S1] 형식의 출처를 붙이고, 출처를 문장에 넣기 어렵다면 마지막에 "참고 출처" 섹션을 반드시 포함하세요."""
         
         return system_prompt, user_prompt
     

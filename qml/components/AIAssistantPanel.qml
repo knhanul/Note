@@ -2547,7 +2547,23 @@ Rectangle {
 
 
 
-        root.ragWarnings = warnings
+        var dedupedWarnings = []
+        var seenWarnings = {}
+
+        for (var j = 0; j < warnings.length; j++) {
+
+            var warning = warnings[j]
+
+            if (!seenWarnings[warning]) {
+
+                seenWarnings[warning] = true
+                dedupedWarnings.push(warning)
+
+            }
+
+        }
+
+        root.ragWarnings = dedupedWarnings
 
         refreshRagStreamingNoteContent()
 
@@ -3398,79 +3414,145 @@ Rectangle {
 
 
 
-        if (warningText.startsWith("[OLLAMA_CONNECTION_FAILED]")) {
+        if (warningText.indexOf("OLLAMA_CONNECTION_FAILED") !== -1) {
 
             return "Ollama 연결 실패: Ollama 실행 상태와 모델 설치 여부를 확인해 주세요. (" + warningText + ")"
 
         }
 
-        if (warningText.startsWith("[OLLAMA_TIMEOUT]")) {
+        if (warningText.indexOf("OLLAMA_TIMEOUT") !== -1) {
 
             return "Ollama 응답 시간 초과: 더 작은 모델을 사용하거나 다시 시도해 주세요. (" + warningText + ")"
 
         }
 
-        if (warningText.startsWith("[OLLAMA_EMPTY_RESPONSE]")) {
+        if (warningText.indexOf("OLLAMA_EMPTY_RESPONSE") !== -1) {
 
             return "Ollama가 빈 응답을 반환했습니다. 모델 상태를 확인해 주세요. (" + warningText + ")"
 
         }
 
-        if (warningText.startsWith("[OLLAMA_INVALID_JSON]")) {
+        if (warningText.indexOf("OLLAMA_INVALID_JSON") !== -1) {
 
             return "Ollama 응답을 해석하지 못했습니다. (" + warningText + ")"
 
         }
 
-        if (warningText.startsWith("[OLLAMA_GENERATE_FAILED]")) {
+        if (warningText.indexOf("OLLAMA_GENERATE_FAILED") !== -1) {
 
             return "Ollama 답변 생성 중 오류가 발생했습니다. (" + warningText + ")"
 
         }
 
-        if (warningText.startsWith("[OLLAMA_HTTP_ERROR]")) {
+        if (warningText.indexOf("OLLAMA_HTTP_ERROR") !== -1) {
 
             return "Ollama HTTP 오류가 발생했습니다. (" + warningText + ")"
 
         }
 
-        if (warningText.startsWith("[HWPX_FILE_NOT_FOUND]")) {
+        if (warningText.indexOf("HWPX_FILE_NOT_FOUND") !== -1) {
 
             return "HWPX 파일을 찾을 수 없습니다. (" + warningText + ")"
 
         }
 
-        if (warningText.startsWith("[HWPX_BROKEN_ZIP]")) {
+        if (warningText.indexOf("HWPX_BROKEN_ZIP") !== -1) {
 
             return "HWPX 파일이 손상되었습니다. (" + warningText + ")"
 
         }
 
-        if (warningText.startsWith("[HWPX_CONVERSION_EMPTY]")) {
+        if (warningText.indexOf("HWPX_CONVERSION_EMPTY") !== -1) {
 
             return "HWPX 변환 결과가 비어 있습니다. (" + warningText + ")"
 
         }
 
-        if (warningText.startsWith("[RAG_NO_SEARCH_RESULTS]")) {
+        if (warningText.indexOf("RAG_NO_SEARCH_RESULTS") !== -1) {
 
             return "색인된 참고문서에서 질문과 관련된 내용을 찾지 못했습니다."
 
         }
 
-        if (warningText.startsWith("[RAG_NO_DIRECT_EVIDENCE]")) {
+        if (warningText.indexOf("RAG_NO_CONTEXT") !== -1) {
+
+            return "검색 결과는 있었지만 답변에 사용할 본문을 충분히 확보하지 못했습니다."
+
+        }
+
+        if (warningText.indexOf("RAG_NO_CITATIONS") !== -1) {
+
+            return "답변은 생성되었지만 본문 내 출처 표시는 확인되지 않았습니다."
+
+        }
+
+        if (warningText.indexOf("RAG_NO_DIRECT_EVIDENCE") !== -1) {
 
             return "참고문서에서 검색어와 관련된 문서는 찾았으나, 직접적인 근거는 확인되지 않았습니다."
 
         }
 
-        if (warningText.startsWith("[RAG_INDEX_MAY_BE_INCOMPLETE]")) {
+        if (warningText.indexOf("RAG_ANSWER_VALIDATION_FAILED") !== -1) {
+
+            return "AI 답변 품질 검증에 실패해 참고문서 기준의 보조 답변으로 전환했습니다."
+
+        }
+
+        if (warningText.indexOf("RAG_RETRY_FAILED") !== -1) {
+
+            return "재시도한 AI 답변도 품질 기준을 통과하지 못했습니다. 참고문서 기반 보조 답변을 사용했습니다."
+
+        }
+
+        if (warningText.indexOf("RAG_FALLBACK_USED") !== -1) {
+
+            return "AI 답변이 충분하지 않아 검색된 참고문서 내용을 바탕으로 보조 답변을 생성했습니다."
+
+        }
+
+        if (warningText.indexOf("RAG_CONTEXT_EMPTY_FALLBACK") !== -1) {
+
+            return "검색 결과는 있었지만 본문 컨텍스트가 부족해 문서 메타데이터와 일부 문서 조각을 바탕으로 답변했습니다."
+
+        }
+
+        if (warningText.indexOf("RAG_HWP_SOURCE_QUALITY") !== -1) {
+
+            return "이 참고문서는 HWP 파일에서 추출되었습니다. 표, 서식, 일부 본문이 누락될 수 있으므로 HWPX 변환 후 다시 색인하면 품질이 좋아질 수 있습니다."
+
+        }
+
+        if (warningText.indexOf("CONTEXT_PRIMARY_CHUNK_TRUNCATED") !== -1) {
+
+            return "일부 문서 조각이 길어 앞부분만 사용되었습니다."
+
+        }
+
+        if (warningText.indexOf("CONTEXT_CHUNK_TRUNCATED") !== -1) {
+
+            return "일부 검색 결과 문서 조각이 모델 입력 길이에 맞게 줄어들었습니다."
+
+        }
+
+        if (warningText.indexOf("CONTEXT_MAX_CHARS_REACHED") !== -1) {
+
+            return "모델 입력 길이 제한 때문에 일부 검색 결과가 제외되었습니다."
+
+        }
+
+        if (warningText.indexOf("RAG_CONTEXT_TRUNCATED") !== -1) {
+
+            return "참고문서 내용 중 일부만 AI 답변에 사용되었습니다."
+
+        }
+
+        if (warningText.indexOf("RAG_INDEX_MAY_BE_INCOMPLETE") !== -1) {
 
             return "일부 문서의 텍스트 추출이 완전하지 않을 수 있습니다. 색인된 문서를 확인해 보세요."
 
         }
 
-        if (warningText.startsWith("[RAG_POSSIBLE_RELATED_ONLY]")) {
+        if (warningText.indexOf("RAG_POSSIBLE_RELATED_ONLY") !== -1) {
 
             return "관련 가능 문서는 있으나, 질문에 직접 답할 근거는 확인되지 않았습니다."
 
@@ -3482,7 +3564,7 @@ Rectangle {
 
 
 
-    function formatRagCitationLine(citation) {
+    function formatRagCitationLine(citation, chunkCount) {
 
         if (!citation)
 
@@ -3532,7 +3614,57 @@ Rectangle {
 
         }
 
-        return "- " + (citation.title || "제목 없음") + headingSuffix + detailText + linkText
+        var countText = chunkCount && chunkCount > 1 ? " (사용된 조각: " + chunkCount + "개)" : " (사용된 조각: 1개)"
+
+        var sourceLabel = citation.source_id ? "[" + citation.source_id + "] " : ""
+
+        return "- " + sourceLabel + (citation.title || "제목 없음") + countText + headingSuffix + detailText + linkText
+
+    }
+
+
+
+    function buildRagCitationGroups() {
+
+        var groups = []
+
+        var map = {}
+
+        for (var i = 0; i < root.ragCitations.length; i++) {
+
+            var citation = root.ragCitations[i]
+
+            if (!citation)
+
+                continue
+
+            var key = citation.document_id || citation.chunk_id || citation.source_id || ("idx_" + i)
+
+            if (!map[key]) {
+
+                map[key] = {
+
+                    citation: citation,
+
+                    chunkCount: 0,
+
+                    citedInAnswer: false
+
+                }
+
+                groups.push(map[key])
+
+            }
+
+            map[key].chunkCount += 1
+
+            if (citation.cited_in_answer)
+
+                map[key].citedInAnswer = true
+
+        }
+
+        return groups
 
     }
 
@@ -3548,9 +3680,13 @@ Rectangle {
 
         var lines = ["## 근거 문서"]
 
-        for (var i = 0; i < root.ragCitations.length; i++) {
+        var groups = buildRagCitationGroups()
 
-            lines.push(formatRagCitationLine(root.ragCitations[i]))
+        for (var i = 0; i < groups.length; i++) {
+
+            groups[i].citation.cited_in_answer = groups[i].citedInAnswer
+
+            lines.push(formatRagCitationLine(groups[i].citation, groups[i].chunkCount))
 
         }
 
@@ -7726,6 +7862,68 @@ Rectangle {
                     horizontalAlignment: Text.AlignHCenter
 
                     width: parent.width
+
+                }
+
+
+
+                Button {
+
+                    visible: root.ragIndexingRunning
+
+                    Layout.fillWidth: true
+
+                    Layout.preferredHeight: 36
+
+                    text: "작업 중지"
+
+                    font.family: Typography.fontPrimary
+
+                    font.pixelSize: Typography.bodySmall
+
+                    background: Rectangle {
+
+                        color: stopMouse.containsMouse ? Colors.bgSecondary : Colors.bgTertiary
+
+                        radius: Metrics.radiusSm
+
+                        border.color: Colors.borderPrimary
+
+                        border.width: 1
+
+                    }
+
+                    contentItem: Text {
+
+                        text: parent.text
+
+                        font: parent.font
+
+                        color: Colors.textPrimary
+
+                        horizontalAlignment: Text.AlignHCenter
+
+                        verticalAlignment: Text.AlignVCenter
+
+                    }
+
+                    MouseArea {
+
+                        id: stopMouse
+
+                        anchors.fill: parent
+
+                        hoverEnabled: true
+
+                        onClicked: {
+
+                            console.log("[AIAssistantPanel] RAG indexing cancel requested")
+
+                            ragCtrl.cancelIndexing()
+
+                        }
+
+                    }
 
                 }
 
