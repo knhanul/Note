@@ -124,7 +124,7 @@ class AiSearchServiceTest(unittest.TestCase):
             results = search_svc.search_keyword("Python")
             self.assertGreater(len(results), 0)
             self.assertEqual(results[0].document_id, "doc-title")
-            self.assertEqual(results[0].score, 3.0)
+            self.assertEqual(results[0].score, 5.0)
         finally:
             db.close()
 

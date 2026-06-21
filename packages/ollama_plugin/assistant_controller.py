@@ -558,6 +558,7 @@ class AssistantController(QObject):
 
         assert path is not None
         ext = path.suffix.lower()
+
         if ext in self._excel_loader.SUPPORTED_EXTENSIONS:
             return self._dump_payload(
                 {
@@ -633,7 +634,7 @@ class AssistantController(QObject):
         if not folder.exists() or not folder.is_dir():
             return json.dumps({"ok": False, "error": "폴더를 찾을 수 없습니다.", "source_path": str(folder)}, ensure_ascii=False)
 
-        supported_extensions = {".md", ".markdown", ".txt", ".html", ".htm", ".docx", ".hwp", ".hwpx"}
+        supported_extensions = {".md", ".markdown", ".txt", ".html", ".htm", ".docx", ".hwpx"}
         file_paths = [p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() in supported_extensions]
         file_paths.sort(key=lambda p: str(p).lower())
         total_supported_count = len(file_paths)

@@ -114,6 +114,8 @@ Rectangle {
 
     property var ragWarnings: []
 
+    property var ragIndexWarnings: []
+
     property bool hasRagCitations: ragCitations && ragCitations.length > 0
 
     property bool hasRagWarnings: ragWarnings && ragWarnings.length > 0
@@ -1609,8 +1611,6 @@ Rectangle {
 
                 resetDocumentState()
 
-                documentLoadError = payload.error || root.currentExternalDocumentError
-
                 documentLoading = false
 
                 return false
@@ -2289,7 +2289,9 @@ Rectangle {
 
             source_type: sourceDocument.source_type || "",
 
-            source_path: sourceDocument.source_path || ""
+            source_path: sourceDocument.source_path || "",
+
+            metadata: sourceDocument.metadata || {}
 
         })
 
@@ -2511,9 +2513,9 @@ Rectangle {
 
         var json = ragCtrl.getLastWarningsJson()
 
-        var warnings = parseJsonArraySafe(json, [])
+        var answerWarnings = parseJsonArraySafe(json, [])
 
-
+        var indexWarnings = []
 
         var indexResultJson = ragCtrl.getLastIndexResultJson()
 
@@ -2529,11 +2531,11 @@ Rectangle {
 
                     if (!w.startsWith("[등록]")) {
 
-                        warnings.push("[등록] " + w)
+                        indexWarnings.push("[등록] " + w)
 
                     } else {
 
-                        warnings.push(w)
+                        indexWarnings.push(w)
 
                     }
 
@@ -2545,25 +2547,9 @@ Rectangle {
 
         }
 
+        root.ragIndexWarnings = indexWarnings
 
-
-        var dedupedWarnings = []
-        var seenWarnings = {}
-
-        for (var j = 0; j < warnings.length; j++) {
-
-            var warning = warnings[j]
-
-            if (!seenWarnings[warning]) {
-
-                seenWarnings[warning] = true
-                dedupedWarnings.push(warning)
-
-            }
-
-        }
-
-        root.ragWarnings = dedupedWarnings
+        root.ragWarnings = answerWarnings
 
         refreshRagStreamingNoteContent()
 
@@ -2576,6 +2562,8 @@ Rectangle {
         root.ragCitations = []
 
         root.ragWarnings = []
+
+        root.ragIndexWarnings = []
 
         root.currentRagAnswerText = ""
 
@@ -3412,6 +3400,24 @@ Rectangle {
 
         if (warningText.startsWith("[등록]")) return warningText
 
+        var technicalPrefixes = [
+            "RAG_ANSWER_VALIDATION_FAILED",
+            "RAG_RETRY_FAILED",
+            "RAG_REPETITION_REMOVED",
+            "RAG_CITATION_MISMATCH",
+            "RAG_DUPLICATE_SOURCE_REMOVED",
+            "RAG_SOURCE_TRUNCATED",
+            "RAG_CONTEXT_TRUNCATED",
+            "CONTEXT_EXCLUDED_BROKEN_TABLES",
+            "CONTEXT_PRIMARY_CHUNK_TRUNCATED",
+            "CONTEXT_CHUNK_TRUNCATED",
+            "CONTEXT_MAX_CHARS_REACHED",
+        ]
+
+        for (var i = 0; i < technicalPrefixes.length; i++) {
+            if (warningText.indexOf(technicalPrefixes[i]) !== -1) return ""
+        }
+
 
 
         if (warningText.indexOf("OLLAMA_CONNECTION_FAILED") !== -1) {
@@ -3710,11 +3716,35 @@ Rectangle {
 
 
 
-        var lines = ["## 경고"]
+        var lines = ["## 참고 및 제한사항"]
 
         for (var i = 0; i < root.ragWarnings.length; i++) {
 
-            lines.push("- " + formatRagWarningMessage(root.ragWarnings[i]))
+            var formatted = formatRagWarningMessage(root.ragWarnings[i])
+
+            if (formatted && formatted !== "")
+
+                lines.push("- " + formatted)
+
+        }
+
+        if (lines.length <= 1) return ""
+
+        return lines.join("\n")
+
+    }
+
+    function buildRagIndexWarningsSection() {
+
+        if (!root.ragIndexWarnings || root.ragIndexWarnings.length === 0)
+
+            return ""
+
+        var lines = ["## 색인 관련 알림"]
+
+        for (var i = 0; i < root.ragIndexWarnings.length; i++) {
+
+            lines.push("- " + formatRagWarningMessage(root.ragIndexWarnings[i]))
 
         }
 
@@ -3748,7 +3778,11 @@ Rectangle {
 
             sections.push(warningsSection)
 
+        var indexWarningsSection = buildRagIndexWarningsSection()
 
+        if (indexWarningsSection !== "")
+
+            sections.push(indexWarningsSection)
 
         return sections.join("\n\n---\n\n")
 
@@ -4508,6 +4542,24 @@ Rectangle {
 
                 updateRagRunStatus(true, root.currentStreamingNoteId, root.currentStreamingTitle, "")
 
+                // 자동 저장 트리거: RAG 답변을 DB에 영속화
+                var nc = getNoteController()
+                if (nc && nc.saveCurrentNote) {
+                    console.log("[AIAssistantPanel] Triggering auto-save for RAG result note")
+                    nc.saveCurrentNote()
+                }
+
+                // AI결과 폴더로 이동하여 노트 목록 갱신
+                var ac2 = getAssistantController()
+                var fc = getFolderController()
+                if (ac2 && fc) {
+                    var aiFolderId = ac2.getOrCreateAIResultFolder()
+                    if (aiFolderId) {
+                        console.log("[AIAssistantPanel] Switching to AI result folder for RAG:", aiFolderId)
+                        fc.selectFolder(aiFolderId)
+                    }
+                }
+
             })
 
 
@@ -4672,9 +4724,31 @@ Rectangle {
 
                 console.log("[AIAssistantPanel] RAG 오류: " + error)
 
+                if (root.currentStreamingIsRag && root.currentStreamingNoteId !== "") {
+                    updateStreamingNote("\n\n[오류] " + error, true)
+                }
+
                 // 상태 업데이트: 실패
 
                 updateRagRunStatus(false, root.currentStreamingNoteId, root.currentStreamingTitle, error)
+
+                // 오류 발생 시에도 부분 결과 저장
+                var nc = getNoteController()
+                if (nc && nc.saveCurrentNote && root.currentStreamingNoteId !== "") {
+                    console.log("[AIAssistantPanel] Triggering auto-save for RAG error note")
+                    nc.saveCurrentNote()
+                }
+
+                // AI결과 폴더로 이동
+                var ac2 = getAssistantController()
+                var fc = getFolderController()
+                if (ac2 && fc && root.currentStreamingNoteId !== "") {
+                    var aiFolderId = ac2.getOrCreateAIResultFolder()
+                    if (aiFolderId) {
+                        console.log("[AIAssistantPanel] Switching to AI result folder for RAG error:", aiFolderId)
+                        fc.selectFolder(aiFolderId)
+                    }
+                }
 
             })
 
@@ -8055,6 +8129,8 @@ Rectangle {
 
                 Button {
 
+                    visible: !root.ragIndexingRunning
+
                     text: "작업 중지"
 
                     width: 160
@@ -8112,12 +8188,12 @@ Rectangle {
         title: "외부 문서 선택"
 
         nameFilters: [
-            "아래아한글 (*.hwp *.hwpx)",
+            "HWPX 문서 (*.hwpx)",
             "파워포인트 (*.pptx)",
             "워드 문서 (*.docx)",
             "PDF (*.pdf)",
             "텍스트/마크다운 (*.txt *.md *.markdown)",
-            "지원 문서 (*.hwp *.hwpx *.pptx *.docx *.pdf *.txt *.md *.markdown)",
+            "지원 문서 (*.hwpx *.pptx *.docx *.pdf *.txt *.md *.markdown)",
             "모든 파일 (*.*)"
         ]
 
@@ -8166,12 +8242,12 @@ Rectangle {
         title: "현재 문서용 외부 파일 선택"
 
         nameFilters: [
-            "아래아한글 (*.hwp *.hwpx)",
+            "HWPX 문서 (*.hwpx)",
             "파워포인트 (*.pptx)",
             "워드 문서 (*.docx)",
             "PDF (*.pdf)",
             "텍스트/마크다운 (*.txt *.md *.markdown)",
-            "지원 문서 (*.hwp *.hwpx *.pptx *.docx *.pdf *.txt *.md *.markdown)",
+            "지원 문서 (*.hwpx *.pptx *.docx *.pdf *.txt *.md *.markdown)",
             "모든 파일 (*.*)"
         ]
 

@@ -38,12 +38,15 @@ class AiDocumentIndexRepositoryTest(unittest.TestCase):
             title="제목",
             heading_path=["대제목"],
             chunk_text=f"본문 {order}",
+            search_text=f"본문 {order}",
             chunk_order=order,
             start_offset=order * 10,
             end_offset=order * 10 + 5,
             warnings=["cw"],
             created_at="2026-01-01T00:00:00Z",
             updated_at="2026-01-02T00:00:00Z",
+            block_type="markdown",
+            metadata={"source": "test"},
         )
 
     def test_database_initialization(self):

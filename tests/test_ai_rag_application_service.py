@@ -78,7 +78,10 @@ class AiRagApplicationServiceTest(unittest.TestCase):
             svc.close()
 
     def test_ask_indexed_documents(self):
-        llm = TestLlmClient("Python은 프로그래밍 언어입니다.")
+        llm = TestLlmClient(
+            "Python은 high-level 프로그래밍 언어입니다. [S1] "
+            "다양한 분야에서 사용되며, 데이터 분석, 웹 개발, 자동화 등에 활용됩니다. [S1]"
+        )
         svc = AiRagApplicationService(db_path=":memory:", llm_client=llm)
         svc.initialize()
         try:
@@ -88,13 +91,16 @@ class AiRagApplicationServiceTest(unittest.TestCase):
                 content="# Python\n\nPython은 high-level 프로그래밍 언어입니다.",
             )
             answer = svc.ask_indexed_documents("프로그래밍")
-            self.assertEqual(answer.answer_text, "Python은 프로그래밍 언어입니다.")
+            self.assertIn("Python은 high-level 프로그래밍 언어입니다.", answer.answer_text)
             self.assertGreater(len(answer.citations), 0)
         finally:
             svc.close()
 
     def test_ask_indexed_document(self):
-        llm = TestLlmClient("답변입니다")
+        llm = TestLlmClient(
+            "이 문서는 content에 대한 테스트 문서입니다. [S1] "
+            "다양한 내용이 포함되어 있으며, 충분한 길이의 답변을 제공합니다."
+        )
         svc = AiRagApplicationService(db_path=":memory:", llm_client=llm)
         svc.initialize()
         try:
@@ -104,13 +110,16 @@ class AiRagApplicationServiceTest(unittest.TestCase):
                 content="Some content here",
             )
             answer = svc.ask_indexed_document("note:note-doc", "content")
-            self.assertEqual(answer.answer_text, "답변입니다")
+            self.assertIn("테스트 문서", answer.answer_text)
             self.assertTrue(all("note:note-doc" in c.document_id for c in answer.citations))
         finally:
             svc.close()
 
     def test_get_last_answer(self):
-        llm = TestLlmClient("마지막 답변")
+        llm = TestLlmClient(
+            "이 문서는 Content에 대한 테스트 문서입니다. [S1] "
+            "다양한 내용이 포함되어 있으며, 충분한 길이의 답변을 제공합니다."
+        )
         svc = AiRagApplicationService(db_path=":memory:", llm_client=llm)
         svc.initialize()
         try:
@@ -127,7 +136,10 @@ class AiRagApplicationServiceTest(unittest.TestCase):
             svc.close()
 
     def test_get_citations_for_last_answer(self):
-        llm = TestLlmClient("답변")
+        llm = TestLlmClient(
+            "이 문서는 Content에 대한 테스트 문서입니다. [S1] "
+            "다양한 내용이 포함되어 있으며, 충분한 길이의 답변을 제공합니다."
+        )
         svc = AiRagApplicationService(db_path=":memory:", llm_client=llm)
         svc.initialize()
         try:
@@ -216,7 +228,11 @@ class AiRagApplicationServiceTest(unittest.TestCase):
             svc.close()
 
     def test_no_real_ollama_call(self):
-        llm = TestLlmClient("No network call")
+        llm = TestLlmClient(
+            "이 문서는 Content에 대한 테스트 문서입니다. [S1] "
+            "다양한 내용이 포함되어 있으며, 네트워크 연결 없이 테스트용으로 작성되었습니다. "
+            "충분한 길이의 답변을 제공합니다."
+        )
         svc = AiRagApplicationService(db_path=":memory:", llm_client=llm)
         svc.initialize()
         try:

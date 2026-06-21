@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -11,12 +12,15 @@ class DocumentChunk:
     title: str | None
     heading_path: list[str] = field(default_factory=list)
     chunk_text: str = ""
+    search_text: str = ""
     chunk_order: int = 0
     start_offset: int | None = None
     end_offset: int | None = None
     warnings: list[str] = field(default_factory=list)
     created_at: str | None = None
     updated_at: str | None = None
+    block_type: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

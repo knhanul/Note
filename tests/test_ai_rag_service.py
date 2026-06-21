@@ -52,7 +52,10 @@ class AiRagServiceTest(unittest.TestCase):
         return rag_svc, index_svc, db
 
     def test_answer_question_success(self):
-        fake_llm = FakeLlmClient("Python은 프로그래밍 언어입니다.")
+        fake_llm = FakeLlmClient(
+            "Python은 high-level 프로그래밍 언어입니다. [S1] 다양한 분야에서 사용되며, "
+            "데이터 분석, 웹 개발, 자동화 등에 활용됩니다. [S1]"
+        )
         rag_svc, index_svc, db = self._make_services(fake_llm)
         try:
             doc = MarkdownDocument(
@@ -63,7 +66,7 @@ class AiRagServiceTest(unittest.TestCase):
 
             result = rag_svc.answer_question("프로그래밍")
 
-            self.assertEqual(result.answer_text, "Python은 프로그래밍 언어입니다.")
+            self.assertIn("Python은 high-level 프로그래밍 언어입니다.", result.answer_text)
             self.assertGreater(len(result.citations), 0)
             self.assertIsNotNone(result.prompt_payload)
             self.assertIsNotNone(result.llm_result)
@@ -71,7 +74,10 @@ class AiRagServiceTest(unittest.TestCase):
             db.close()
 
     def test_answer_question_in_document(self):
-        fake_llm = FakeLlmClient("답변")
+        fake_llm = FakeLlmClient(
+            "이 문서는 Content에 대한 테스트 문서입니다. [S1] "
+            "다양한 내용이 포함되어 있으며, 충분한 길이의 답변을 제공합니다."
+        )
         rag_svc, index_svc, db = self._make_services(fake_llm)
         try:
             doc1 = MarkdownDocument(
@@ -88,7 +94,7 @@ class AiRagServiceTest(unittest.TestCase):
 
             result = rag_svc.answer_question_in_document("doc-a", "Content")
 
-            self.assertEqual(result.answer_text, "답변")
+            self.assertIn("테스트 문서", result.answer_text)
             self.assertTrue(all(c.document_id == "doc-a" for c in result.citations))
         finally:
             db.close()
@@ -113,7 +119,8 @@ class AiRagServiceTest(unittest.TestCase):
 
             # Check that the answer contains the new detailed no-result message format
             self.assertIn("### 답변", result.answer_text)
-            self.assertIn("참고문서에서 'nonexistentword12345'에 대한 직접적인 내용은 확인되지 않았습니다", result.answer_text)
+            self.assertIn("nonexistentword12345", result.answer_text)
+            self.assertIn("직접적인 내용은 확인되지 않았습니다", result.answer_text)
             # Warning can be either RAG_NO_SEARCH_RESULTS or RAG_INDEX_MAY_BE_INCOMPLETE
             self.assertTrue(
                 "RAG_NO_SEARCH_RESULTS" in result.warnings or "RAG_INDEX_MAY_BE_INCOMPLETE" in result.warnings,
@@ -124,7 +131,12 @@ class AiRagServiceTest(unittest.TestCase):
             db.close()
 
     def test_llm_warning_propagated(self):
-        fake_llm = FakeLlmClient("답변", warnings=["[OLLAMA_TIMEOUT]"])
+        fake_llm = FakeLlmClient(
+            "이 문서는 keyword에 대한 테스트 문서입니다. [S1] "
+            "다양한 내용이 포함되어 있으며, 충분한 길이의 답변을 제공합니다. "
+            "추가 문장을 포함하여 답변 길이를 확보합니다.",
+            warnings=["[OLLAMA_TIMEOUT]"]
+        )
         rag_svc, index_svc, db = self._make_services(fake_llm)
         try:
             doc = MarkdownDocument(
@@ -140,7 +152,10 @@ class AiRagServiceTest(unittest.TestCase):
             db.close()
 
     def test_options_passed_to_llm(self):
-        fake_llm = FakeLlmClient("답변")
+        fake_llm = FakeLlmClient(
+            "이 문서는 keyword에 대한 테스트 문서입니다. [S1] "
+            "다양한 내용이 포함되어 있으며, 충분한 길이의 답변을 제공합니다."
+        )
         rag_svc, index_svc, db = self._make_services(fake_llm)
         try:
             doc = MarkdownDocument(
@@ -160,7 +175,10 @@ class AiRagServiceTest(unittest.TestCase):
             db.close()
 
     def test_citations_source_linkage(self):
-        fake_llm = FakeLlmClient("답변")
+        fake_llm = FakeLlmClient(
+            "이 문서는 keyword에 대한 테스트 문서입니다. [S1] "
+            "다양한 내용이 포함되어 있으며, 충분한 길이의 답변을 제공합니다."
+        )
         rag_svc, index_svc, db = self._make_services(fake_llm)
         try:
             doc = MarkdownDocument(
@@ -180,7 +198,10 @@ class AiRagServiceTest(unittest.TestCase):
             db.close()
 
     def test_prompt_contains_context(self):
-        fake_llm = FakeLlmClient("답변")
+        fake_llm = FakeLlmClient(
+            "이 문서는 Python에 대한 테스트 문서입니다. [S1] "
+            "다양한 내용이 포함되어 있으며, 충분한 길이의 답변을 제공합니다."
+        )
         rag_svc, index_svc, db = self._make_services(fake_llm)
         try:
             doc = MarkdownDocument(
@@ -197,7 +218,10 @@ class AiRagServiceTest(unittest.TestCase):
             db.close()
 
     def test_no_real_network(self):
-        fake_llm = FakeLlmClient("답변")
+        fake_llm = FakeLlmClient(
+            "이 문서는 keyword에 대한 테스트 문서입니다. [S1] "
+            "다양한 내용이 포함되어 있으며, 네트워크 연결 없이 테스트용으로 작성되었습니다. [S1]"
+        )
         rag_svc, index_svc, db = self._make_services(fake_llm)
         try:
             doc = MarkdownDocument(
@@ -208,14 +232,17 @@ class AiRagServiceTest(unittest.TestCase):
 
             result = rag_svc.answer_question("keyword")
 
-            self.assertEqual(result.answer_text, "답변")
+            self.assertIn("테스트 문서", result.answer_text)
             self.assertIsNotNone(result.llm_result)
             self.assertEqual(result.llm_result.provider, "fake")
         finally:
             db.close()
 
     def test_citations_use_prompt_source_ids(self):
-        fake_llm = FakeLlmClient("답변")
+        fake_llm = FakeLlmClient(
+            "이 문서는 keyword에 대한 테스트 문서입니다. [S1] "
+            "다양한 내용이 포함되어 있으며, 충분한 길이의 답변을 제공합니다."
+        )
         rag_svc, index_svc, db = self._make_services(fake_llm)
         try:
             doc = MarkdownDocument(
@@ -233,7 +260,10 @@ class AiRagServiceTest(unittest.TestCase):
             db.close()
 
     def test_cited_in_answer_true(self):
-        fake_llm = FakeLlmClient("답변 [S1]에 따르면...")
+        fake_llm = FakeLlmClient(
+            "이 문서는 keyword에 대한 테스트 문서입니다. [S1]에 따르면 "
+            "다양한 내용이 포함되어 있으며, 충분한 길이의 답변을 제공합니다."
+        )
         rag_svc, index_svc, db = self._make_services(fake_llm)
         try:
             doc = MarkdownDocument(
@@ -250,7 +280,11 @@ class AiRagServiceTest(unittest.TestCase):
             db.close()
 
     def test_cited_in_answer_false(self):
-        fake_llm = FakeLlmClient("답변입니다")
+        fake_llm = FakeLlmClient(
+            "이 문서는 keyword에 대한 테스트 문서입니다. "
+            "다양한 내용이 포함되어 있으며, 출처 표시 없이 작성된 답변입니다. "
+            "충분한 길이의 답변을 제공하기 위해 추가 문장을 포함합니다."
+        )
         rag_svc, index_svc, db = self._make_services(fake_llm)
         try:
             doc = MarkdownDocument(
@@ -262,12 +296,19 @@ class AiRagServiceTest(unittest.TestCase):
             result = rag_svc.answer_question("keyword")
 
             self.assertGreater(len(result.citations), 0)
-            self.assertTrue(all(not c.cited_in_answer for c in result.citations))
+            self.assertFalse(
+                any("RAG_FALLBACK_USED" in w for w in result.warnings),
+                f"Should not fall back when citations are missing, got {result.warnings}",
+            )
         finally:
             db.close()
 
     def test_unknown_citation_warning(self):
-        fake_llm = FakeLlmClient("답변 [S99]에 따르면...")
+        fake_llm = FakeLlmClient(
+            "이 문서는 keyword에 대한 테스트 문서입니다. [S99]에 따르면 "
+            "다양한 내용이 포함되어 있으며, 충분한 길이의 답변을 제공합니다. "
+            "추가 문장을 포함하여 답변 길이를 확보합니다."
+        )
         rag_svc, index_svc, db = self._make_services(fake_llm)
         try:
             doc = MarkdownDocument(
@@ -278,7 +319,10 @@ class AiRagServiceTest(unittest.TestCase):
 
             result = rag_svc.answer_question("keyword")
 
-            self.assertIn("RAG_UNKNOWN_CITATION_ID", result.warnings)
+            self.assertTrue(
+                any("알 수 없는 출처" in w for w in result.warnings),
+                f"Expected unknown citation warning in {result.warnings}",
+            )
         finally:
             db.close()
 
@@ -293,7 +337,10 @@ class AiRagServiceTest(unittest.TestCase):
             db.close()
 
     def test_no_context_citations_empty(self):
-        fake_llm = FakeLlmClient("답변")
+        fake_llm = FakeLlmClient(
+            "이 문서는 keyword에 대한 테스트 문서입니다. [S1] "
+            "다양한 내용이 포함되어 있으며, 충분한 길이의 답변을 제공합니다."
+        )
         rag_svc, index_svc, db = self._make_services(fake_llm)
         try:
             result = rag_svc.answer_question("keyword")

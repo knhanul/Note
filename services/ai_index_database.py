@@ -62,15 +62,22 @@ class AiIndexDatabase:
                 chunk_order INTEGER NOT NULL,
                 heading_path_json TEXT NOT NULL DEFAULT '[]',
                 chunk_text TEXT NOT NULL,
+                search_text TEXT NOT NULL DEFAULT '',
                 start_offset INTEGER,
                 end_offset INTEGER,
                 warnings_json TEXT NOT NULL DEFAULT '[]',
+                block_type TEXT,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT,
                 updated_at TEXT,
                 FOREIGN KEY(document_id) REFERENCES ai_documents(document_id) ON DELETE CASCADE
             )
             """
         )
+
+        _ensure_column(cursor, "ai_document_chunks", "search_text", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(cursor, "ai_document_chunks", "block_type", "TEXT")
+        _ensure_column(cursor, "ai_document_chunks", "metadata_json", "TEXT NOT NULL DEFAULT '{}'" )
 
         cursor.execute(
             """
@@ -142,3 +149,10 @@ class AiIndexDatabase:
         if self._conn is not None:
             self._conn.close()
             self._conn = None
+
+
+def _ensure_column(cursor: sqlite3.Cursor, table: str, column: str, definition: str) -> None:
+    columns = {row["name"] for row in cursor.execute(f"PRAGMA table_info({table})")} 
+    if column in columns:
+        return
+    cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")

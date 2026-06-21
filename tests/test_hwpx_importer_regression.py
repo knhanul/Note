@@ -202,7 +202,8 @@ class HwpxImporterRegressionTest(unittest.TestCase):
             result = hwpx_to_markdown(str(hwpx_path))
 
             self.assertIsInstance(result, str)
-            self.assertIn("<br>", result)
+            self.assertNotIn("<br>", result)
+            self.assertIn("|", result)
 
     def test_mismatched_row_length(self):
         with tempfile.TemporaryDirectory() as tmp:

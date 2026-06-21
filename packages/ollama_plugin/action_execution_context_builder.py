@@ -27,6 +27,28 @@ class ActionExecutionContextBuilder:
     ) -> dict[str, str]:
         """Build context dictionary for action execution."""
         content = current_note.get("content", "") if current_note else ""
+        structured_content = None
+        if current_note:
+            structured_content = current_note.get("structured_content")
+            if structured_content is None:
+                metadata = current_note.get("metadata") or {}
+                if isinstance(metadata, dict):
+                    structured_content = metadata.get("structured_content")
+
+        if structured_content and user_input:
+            try:
+                from services.hwpx_evidence_pack_builder import build_evidence_pack
+
+                evidence = build_evidence_pack(structured_content, user_input)
+                if evidence.content:
+                    content = evidence.content
+                    logger.info(
+                        "[ActionExecutionContextBuilder] evidence_pack blocks=%s content_len=%s",
+                        len(evidence.used_block_ids),
+                        len(evidence.content),
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[ActionExecutionContextBuilder] evidence_pack failed: %s", exc)
         title = current_note.get("title", "") if current_note else ""
         tags = current_note.get("tags", "") if current_note else ""
 

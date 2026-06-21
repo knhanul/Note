@@ -789,8 +789,11 @@ class CurrentExportController(QObject):
     def exportCurrentNoteAsync(self, title, markdown, content_json, fmt, out_dir):
         """Start async single-note export."""
         if self._thread is not None:
-            self._thread.quit()
-            self._thread.wait(3000)
+            try:
+                self._thread.quit()
+                self._thread.wait(3000)
+            except RuntimeError:
+                pass
             self._thread = None
 
         worker = _SingleExportWorker(self._service, title, markdown, content_json, fmt, out_dir)
@@ -1049,8 +1052,11 @@ class CurrentExportController(QObject):
     def exportFolderNotesAsync(self, scope, folder_id, fmt, out_dir):
         """Start async batch export."""
         if self._thread is not None:
-            self._thread.quit()
-            self._thread.wait(3000)
+            try:
+                self._thread.quit()
+                self._thread.wait(3000)
+            except RuntimeError:
+                pass
             self._thread = None
 
         worker = _BatchExportWorker(

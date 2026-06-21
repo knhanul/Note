@@ -3,6 +3,7 @@ import re
 from dataclasses import dataclass
 
 from services.document_chunk_model import DocumentChunk, IndexedDocument
+from services.hwpx_structured_preprocessor import StructuredDocument
 from services.markdown_document_model import MarkdownDocument
 
 
@@ -90,10 +91,60 @@ def chunk_markdown_document(
                 title=title,
                 heading_path=list(block.heading_path),
                 chunk_text=chunk_text,
+                search_text=chunk_text,
                 chunk_order=order,
                 start_offset=start_offset,
                 end_offset=end_offset,
                 warnings=list(doc_warnings),
+                block_type="markdown",
+                metadata={},
+            )
+        )
+
+    return chunks
+
+
+def chunk_structured_document(
+    structured_document: StructuredDocument,
+    document_id: str,
+    source_type: str,
+    source_path: str | None = None,
+    note_id: str | None = None,
+) -> list[DocumentChunk]:
+    chunks: list[DocumentChunk] = []
+    resolved_source_path = source_path if source_path is not None else structured_document.source_path
+
+    for block in structured_document.blocks:
+        chunk_text = block.markdown or block.normalized_text or block.raw_text
+        if not chunk_text:
+            continue
+        metadata = {
+            "block_type": block.block_type,
+            "section_path": block.section_path,
+            "raw_text": block.raw_text,
+            "normalized_text": block.normalized_text,
+            "markdown": block.markdown,
+            "search_text": block.search_text,
+        }
+        if block.metadata:
+            metadata.update(block.metadata)
+        metadata["keywords"] = _extract_keywords(block.search_text)
+
+        chunks.append(
+            DocumentChunk(
+                chunk_id=_make_chunk_id(document_id, block.order, chunk_text),
+                document_id=document_id,
+                source_type=source_type,
+                source_path=resolved_source_path,
+                note_id=note_id,
+                title=None,
+                heading_path=list(block.heading_path),
+                chunk_text=chunk_text,
+                search_text=block.search_text or chunk_text,
+                chunk_order=block.order,
+                warnings=list(structured_document.warnings),
+                block_type=block.block_type,
+                metadata=metadata,
             )
         )
 
@@ -169,9 +220,13 @@ def _split_large_section(section: _Section, max_size: int, target_size: int) -> 
         if not block:
             continue
 
+        is_table_block = block.startswith("|")
+
         if not current:
             if len(block) <= max_size:
                 current = block
+            elif is_table_block:
+                chunks.extend(_split_large_table(block, max_size=max_size))
             else:
                 chunks.extend(_split_hard(block, max_size=max_size, target_size=target_size))
         else:
@@ -182,6 +237,9 @@ def _split_large_section(section: _Section, max_size: int, target_size: int) -> 
                 chunks.append(current)
                 if len(block) <= max_size:
                     current = block
+                elif is_table_block:
+                    chunks.extend(_split_large_table(block, max_size=max_size))
+                    current = ""
                 else:
                     chunks.extend(_split_hard(block, max_size=max_size, target_size=target_size))
                     current = ""
@@ -287,6 +345,40 @@ def _split_hard(text: str, max_size: int, target_size: int) -> list[str]:
     return [p for p in final_parts if p]
 
 
+def _split_large_table(table_text: str, max_size: int) -> list[str]:
+    """Split a large markdown table by rows, preserving header+separator in every chunk."""
+    lines = table_text.strip().splitlines()
+    if len(lines) < 3:
+        return [table_text.strip()]
+
+    header_line = lines[0]
+    separator_line = lines[1]
+    body_lines = [l for l in lines[2:] if l.strip()]
+
+    header_block = f"{header_line}\n{separator_line}"
+    header_len = len(header_block)
+
+    chunks: list[str] = []
+    current_rows: list[str] = []
+    current_len = header_len
+
+    for row_line in body_lines:
+        row_len = len(row_line) + 1
+        if current_rows and current_len + row_len > max_size:
+            chunk = header_block + "\n" + "\n".join(current_rows)
+            chunks.append(chunk)
+            current_rows = []
+            current_len = header_len
+        current_rows.append(row_line)
+        current_len += row_len
+
+    if current_rows:
+        chunk = header_block + "\n" + "\n".join(current_rows)
+        chunks.append(chunk)
+
+    return chunks if chunks else [table_text.strip()]
+
+
 def _is_list_line(line: str) -> bool:
     return bool(_LIST_RE.match(line))
 
@@ -311,6 +403,22 @@ def _checksum_text(text: str) -> str:
     return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
 
 
+def _extract_keywords(text: str) -> list[str]:
+    if not text:
+        return []
+    tokens = [token.strip(".,!?()[]{}\"'“”‘’·") for token in text.split()]
+    keywords = []
+    seen: set[str] = set()
+    for token in tokens:
+        if len(token) < 2:
+            continue
+        if token in seen:
+            continue
+        seen.add(token)
+        keywords.append(token)
+    return keywords
+
+
 def _find_offsets(body: str, chunk_text: str, cursor: int) -> tuple[int | None, int | None]:
     idx = body.find(chunk_text, cursor)
     if idx >= 0:
@@ -325,5 +433,6 @@ def _find_offsets(body: str, chunk_text: str, cursor: int) -> tuple[int | None, 
 
 __all__ = [
     "chunk_markdown_document",
+    "chunk_structured_document",
     "build_indexed_document",
 ]

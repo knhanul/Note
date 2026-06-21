@@ -21,7 +21,17 @@ import zipfile
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["hwpx_to_markdown"]
+__all__ = [
+    "HWPXDocument",
+    "ParagraphBlock",
+    "HeadingBlock",
+    "ListItemBlock",
+    "ImageBlock",
+    "TableBlock",
+    "UnknownBlock",
+    "hwpx_to_markdown",
+    "parse_hwpx_document",
+]
 
 _TABLE_TAGS = {"tbl", "table"}
 _ROW_TAGS = {"tr", "row"}
@@ -103,6 +113,39 @@ def hwpx_to_markdown(hwpx_path: str, assets_dir: str | None = None) -> str:
     except Exception:
         logger.exception("Unexpected failure while parsing HWPX: %s", hwpx_path)
         return ""
+    finally:
+        try:
+            zf.close()
+        except Exception:
+            logger.debug("Failed to close HWPX zip: %s", hwpx_path, exc_info=True)
+
+
+def parse_hwpx_document(hwpx_path: str, assets_dir: str | None = None) -> HWPXDocument:
+    """Parse HWPX file and return structured document blocks.
+
+    Args:
+        hwpx_path: Path to .hwpx file.
+        assets_dir: Optional output directory for extracted assets.
+
+    Returns:
+        HWPXDocument with parsed blocks and extracted assets.
+    """
+    zf = _open_hwpx_zip(hwpx_path)
+    if zf is None:
+        return HWPXDocument(blocks=[], extracted_images=[])
+
+    try:
+        hwpx_file = Path(hwpx_path)
+        base_dir = hwpx_file.parent.resolve()
+        target_assets_dir = _resolve_assets_dir(hwpx_file, assets_dir)
+        image_map, extracted_images = _extract_images_from_zip(zf, target_assets_dir, base_dir)
+
+        _detect_header_footer(zf)
+
+        return _parse_hwpx_document(zf, hwpx_path, image_map, extracted_images)
+    except Exception:
+        logger.exception("Unexpected failure while parsing HWPX: %s", hwpx_path)
+        return HWPXDocument(blocks=[], extracted_images=[])
     finally:
         try:
             zf.close()
@@ -526,7 +569,7 @@ def _parse_table(table_elem: ET.Element) -> Block:
             for cell in cell_elems:
                 cell_text = _extract_text_from_paragraph(cell)
                 cell_text = _clean_text(cell_text)
-                cell_text = cell_text.replace("\n", "<br>")
+                cell_text = cell_text.replace("\n", " ")
                 cells.append(cell_text)
 
             if cells:
@@ -582,13 +625,14 @@ def _render_simple_table_to_markdown(table: TableBlock) -> str:
 
     lines = [
         "| " + " | ".join(header) + " |",
-        "|" + "|".join(["---"] * col_count) + "|",
+        "| " + " | ".join(["---"] * col_count) + " |",
     ]
 
     for row in body:
         lines.append("| " + " | ".join(row) + " |")
 
-    return "\n".join(lines)
+    table_text = "\n".join(lines)
+    return f"\n\n{table_text}\n\n"
 
 
 def _render_complex_table_to_html(table_elem: ET.Element) -> str:

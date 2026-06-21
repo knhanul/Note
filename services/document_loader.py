@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,6 +19,11 @@ from packages.import_export import (
     load_markdown_document,
 )
 from services.folder_import_service import FolderImportService
+from services.hwpx_structured_preprocessor import preprocess_hwpx_file
+from services.hwp_policy import HWP_CURRENT_NOTE_MESSAGE
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -53,7 +59,6 @@ class DocumentLoader:
     """Loads external documents into structured AI-ready context."""
 
     SUPPORTED_EXTENSIONS = {
-        ".hwp",
         ".hwpx",
         ".pptx",
         ".docx",
@@ -72,6 +77,20 @@ class DocumentLoader:
 
     def load(self, file_path: Path) -> Dict[str, Any]:
         ext = file_path.suffix.lower()
+        if ext == ".hwp":
+            logger.info(
+                "[DocumentLoader] HWP is not supported in AI Markdown Editor: path=%s",
+                file_path,
+            )
+            return {
+                "ok": False,
+                "error": HWP_CURRENT_NOTE_MESSAGE,
+                "source_path": str(file_path),
+                "source_type": "hwp",
+                "file_extension": ext,
+                "warnings": [],
+            }
+
         if ext not in self.SUPPORTED_EXTENSIONS:
             return {
                 "ok": False,
@@ -92,8 +111,6 @@ class DocumentLoader:
             result = self._load_html(file_path)
         elif ext == ".hwpx":
             result = self._load_hwpx(file_path)
-        elif ext == ".hwp":
-            result = self._load_hwp(file_path)
         elif ext == ".pptx":
             result = self._load_pptx(file_path)
         elif ext == ".pdf":
@@ -209,6 +226,9 @@ class DocumentLoader:
 
     def _load_hwpx(self, path: Path) -> DocumentLoadResult:
         markdown, warnings = convert_hwpx_to_markdown_text(str(path))
+        structured_doc = preprocess_hwpx_file(path)
+        if structured_doc.warnings:
+            warnings.extend(structured_doc.warnings)
         stats = self._build_hwp_stats(markdown)
         content = self._build_hwp_context(
             file_name=path.name,
@@ -226,7 +246,11 @@ class DocumentLoader:
             extract_mode="hwpx",
             warnings=warnings,
             display_text=f"문서: {path.name} / HWPX / 문단 {stats['paragraphs']}개",
-            metadata=stats,
+            metadata={
+                **stats,
+                "structured_content": structured_doc.to_dict(),
+                "structured_stats": structured_doc.stats,
+            },
         )
 
     def _load_hwp(self, path: Path) -> DocumentLoadResult:

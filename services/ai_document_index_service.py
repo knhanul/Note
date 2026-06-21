@@ -1,16 +1,34 @@
 import hashlib
+import logging
 from pathlib import Path
 from typing import Optional
 
 from services.ai_document_index_repository import AiDocumentIndexRepository
-from services.document_chunker import build_indexed_document, chunk_markdown_document
+from services.document_chunker import (
+    build_indexed_document,
+    chunk_markdown_document,
+    chunk_structured_document,
+)
 from services.folder_import_service import FolderImportService
+from services.hwp_policy import HWP_RAG_FILE_MESSAGE
 from services.markdown_document_model import MarkdownDocument, MarkdownMetadata
+from services.chroma_vector_store import ChromaVectorStore
+from services.ollama_embedding_service import OllamaEmbeddingService
+
+
+logger = logging.getLogger(__name__)
 
 
 class AiDocumentIndexService:
-    def __init__(self, repository: AiDocumentIndexRepository):
+    def __init__(
+        self,
+        repository: AiDocumentIndexRepository,
+        embedding_service: OllamaEmbeddingService | None = None,
+        vector_store: ChromaVectorStore | None = None,
+    ):
         self._repo = repository
+        self._embedding = embedding_service
+        self._vector_store = vector_store
 
     def index_markdown_document(
         self,
@@ -37,6 +55,7 @@ class AiDocumentIndexService:
             note_id=note_id,
         )
         self._repo.replace_chunks(document_id, chunks)
+        self._index_vectors_for_chunks(document_id, chunks)
 
         return indexed
 
@@ -168,50 +187,60 @@ class AiDocumentIndexService:
         document_id: Optional[str] = None,
     ) -> "IndexedDocument":
         from packages.import_export.hwpx_import_service import import_hwpx_as_markdown_document
+        from services.hwpx_structured_preprocessor import preprocess_hwpx_file
 
         path = Path(file_path).resolve()
         doc = import_hwpx_as_markdown_document(str(path))
+        structured_doc = preprocess_hwpx_file(path)
 
         if document_id is None:
             document_id = _make_file_document_id("hwpx_file", path)
 
-        return self.index_markdown_document(
+        indexed = build_indexed_document(
             document=doc,
             document_id=document_id,
             source_type="hwpx_file",
             source_path=str(path),
             note_id=None,
         )
+        self._repo.upsert_document(indexed)
+
+        chunks = chunk_markdown_document(
+            document=doc,
+            document_id=document_id,
+            source_type="hwpx_file",
+            source_path=str(path),
+            note_id=None,
+        )
+        structured_chunks = chunk_structured_document(
+            structured_document=structured_doc,
+            document_id=document_id,
+            source_type="hwpx_file",
+            source_path=str(path),
+            note_id=None,
+        )
+        combined_chunks = chunks + structured_chunks
+        logger.info(
+            "[AiDocumentIndexService] HWPX parsing completed: path=%s, total_chunks=%d",
+            path,
+            len(combined_chunks),
+        )
+        self._repo.replace_chunks(document_id, combined_chunks)
+        self._index_vectors_for_chunks(document_id, combined_chunks)
+
+        return indexed
 
     def index_hwp_file(
         self,
         file_path: str | Path,
         document_id: Optional[str] = None,
     ) -> "IndexedDocument":
-        from packages.import_export.hwp_import_service import convert_hwp_to_markdown_text
-        from services.markdown_document_model import MarkdownDocument
-
         path = Path(file_path).resolve()
-        markdown_text, warnings = convert_hwp_to_markdown_text(str(path))
-
-        metadata = MarkdownMetadata(title=path.stem)
-        document = MarkdownDocument(
-            metadata=metadata,
-            body_markdown=markdown_text,
-            source_path=str(path),
-            warnings=warnings,
+        logger.warning(
+            "[AiDocumentIndexService] index_hwp_file called but HWP support is disabled: path=%s",
+            path,
         )
-
-        if document_id is None:
-            document_id = _make_file_document_id("hwp_file", path)
-
-        return self.index_markdown_document(
-            document=document,
-            document_id=document_id,
-            source_type="hwp_file",
-            source_path=str(path),
-            note_id=None,
-        )
+        raise RuntimeError(HWP_RAG_FILE_MESSAGE)
 
     @staticmethod
     def _read_text_with_fallback(path: Path) -> str:
@@ -221,6 +250,48 @@ class AiDocumentIndexService:
             except Exception:
                 continue
         return ""
+
+    def _index_vectors_for_chunks(self, document_id: str, chunks: list) -> None:
+        if not self._embedding or not self._vector_store or not self._vector_store.enabled:
+            return
+
+        if not chunks:
+            return
+
+        texts = [(chunk.search_text or chunk.chunk_text or "").strip() for chunk in chunks]
+        chunk_ids = [chunk.chunk_id for chunk in chunks]
+
+        try:
+            self._vector_store.delete_document_chunks(document_id)
+        except Exception as e:
+            logger.warning("[AiDocumentIndexService] Failed to delete existing vectors: document_id=%s error=%s", document_id, e)
+
+        try:
+            def _log_progress(current: int, total: int) -> None:
+                logger.info("[Embedding] Processing chunk %d/%d...", current, total)
+
+            embeddings = self._embedding.embed_texts(
+                texts,
+                batch_size=16,
+                progress_callback=_log_progress,
+            )
+            metadatas = [
+                {
+                    "document_id": chunk.document_id,
+                    "chunk_order": int(chunk.chunk_order),
+                    "source_type": chunk.source_type or "",
+                }
+                for chunk in chunks
+            ]
+            upserted = self._vector_store.upsert_chunks(
+                chunk_ids=chunk_ids,
+                embeddings=embeddings,
+                texts=texts,
+                metadatas=metadatas,
+            )
+            logger.info("[AiDocumentIndexService] Chroma upserted vectors: document_id=%s chunks=%d upserted=%d", document_id, len(chunks), upserted)
+        except Exception as e:
+            logger.warning("[AiDocumentIndexService] Vector indexing failed: document_id=%s error=%s", document_id, e)
 
 
 def _make_note_document_id(note_id: str) -> str:

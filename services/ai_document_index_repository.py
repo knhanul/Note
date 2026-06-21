@@ -60,9 +60,9 @@ class AiDocumentIndexRepository:
                     """
                     INSERT INTO ai_document_chunks (
                         chunk_id, document_id, chunk_order, heading_path_json,
-                        chunk_text, start_offset, end_offset, warnings_json,
-                        created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        chunk_text, search_text, start_offset, end_offset, warnings_json,
+                        block_type, metadata_json, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         chunk.chunk_id,
@@ -70,9 +70,12 @@ class AiDocumentIndexRepository:
                         chunk.chunk_order,
                         _to_json(chunk.heading_path),
                         chunk.chunk_text,
+                        chunk.search_text,
                         chunk.start_offset,
                         chunk.end_offset,
                         _to_json(chunk.warnings),
+                        chunk.block_type,
+                        _to_json(chunk.metadata),
                         chunk.created_at,
                         chunk.updated_at,
                     ),
@@ -199,8 +202,8 @@ class AiDocumentIndexRepository:
         rows = conn.execute(
             """
             SELECT chunk_id, document_id, chunk_order, heading_path_json,
-                   chunk_text, start_offset, end_offset, warnings_json,
-                   created_at, updated_at
+                   chunk_text, search_text, start_offset, end_offset, warnings_json,
+                   block_type, metadata_json, created_at, updated_at
             FROM ai_document_chunks
             WHERE document_id = ?
             ORDER BY chunk_order ASC
@@ -224,12 +227,15 @@ class AiDocumentIndexRepository:
                 title=title,
                 heading_path=_from_json_list(row["heading_path_json"]),
                 chunk_text=row["chunk_text"],
+                search_text=row["search_text"],
                 chunk_order=row["chunk_order"],
                 start_offset=row["start_offset"],
                 end_offset=row["end_offset"],
                 warnings=_from_json_list(row["warnings_json"]),
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
+                block_type=row["block_type"],
+                metadata=_from_json_dict(row["metadata_json"]),
             )
             for row in rows
         ]
@@ -254,8 +260,8 @@ class AiDocumentIndexRepository:
         row = conn.execute(
             """
             SELECT c.chunk_id, c.document_id, c.chunk_order, c.heading_path_json,
-                   c.chunk_text, c.start_offset, c.end_offset, c.warnings_json,
-                   c.created_at, c.updated_at,
+                   c.chunk_text, c.search_text, c.start_offset, c.end_offset, c.warnings_json,
+                   c.block_type, c.metadata_json, c.created_at, c.updated_at,
                    d.source_type, d.source_path, d.note_id, d.title
             FROM ai_document_chunks c
             JOIN ai_documents d ON c.document_id = d.document_id
@@ -276,12 +282,15 @@ class AiDocumentIndexRepository:
             title=row["title"],
             heading_path=_from_json_list(row["heading_path_json"]),
             chunk_text=row["chunk_text"],
+            search_text=row["search_text"],
             chunk_order=row["chunk_order"],
             start_offset=row["start_offset"],
             end_offset=row["end_offset"],
             warnings=_from_json_list(row["warnings_json"]),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            block_type=row["block_type"],
+            metadata=_from_json_dict(row["metadata_json"]),
         )
 
     def get_neighbor_chunks(
@@ -291,8 +300,8 @@ class AiDocumentIndexRepository:
         rows = conn.execute(
             """
             SELECT c.chunk_id, c.document_id, c.chunk_order, c.heading_path_json,
-                   c.chunk_text, c.start_offset, c.end_offset, c.warnings_json,
-                   c.created_at, c.updated_at,
+                   c.chunk_text, c.search_text, c.start_offset, c.end_offset, c.warnings_json,
+                   c.block_type, c.metadata_json, c.created_at, c.updated_at,
                    d.source_type, d.source_path, d.note_id, d.title
             FROM ai_document_chunks c
             JOIN ai_documents d ON c.document_id = d.document_id
@@ -313,12 +322,15 @@ class AiDocumentIndexRepository:
                 title=row["title"],
                 heading_path=_from_json_list(row["heading_path_json"]),
                 chunk_text=row["chunk_text"],
+                search_text=row["search_text"],
                 chunk_order=row["chunk_order"],
                 start_offset=row["start_offset"],
                 end_offset=row["end_offset"],
                 warnings=_from_json_list(row["warnings_json"]),
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
+                block_type=row["block_type"],
+                metadata=_from_json_dict(row["metadata_json"]),
             )
             for row in rows
         ]
@@ -336,6 +348,16 @@ def _from_json_list(value: str | None) -> list:
     except Exception:
         return []
     return parsed if isinstance(parsed, list) else []
+
+
+def _from_json_dict(value: str | None) -> dict:
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _utc_now_iso() -> str:

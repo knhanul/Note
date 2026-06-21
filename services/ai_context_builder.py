@@ -50,6 +50,9 @@ class AiContextBuilder:
     MIN_MAX_CHARS = 1000
     DEFAULT_MAX_CHARS = 6000
     DEFAULT_MAX_CHUNKS = 8
+    BROKEN_TABLE_MARKERS = ["column 1", "column 2", "column 3"]
+    TABLE_BLOCK_TYPES = {"table_row", "key_value", "table"}
+    TABLE_ROW_MIN_BUDGET = 500
 
     def __init__(self, repository: AiDocumentIndexRepository):
         self._repo = repository
@@ -77,9 +80,38 @@ class AiContextBuilder:
         max_chars = max(max_chars, self.MIN_MAX_CHARS)
         max_chunks = max(max_chunks, 1)
 
+        filtered_results = []
+        excluded_empty_tables = []
+        for result in search_results:
+            if self._is_broken_table(result.chunk_text or ""):
+                excluded_empty_tables.append(result.chunk_id)
+                continue
+            if self._is_empty_table(result.chunk_text or ""):
+                excluded_empty_tables.append(result.chunk_id)
+                continue
+            filtered_results.append(result)
+
+        if excluded_empty_tables:
+            logger.info(
+                "[AiContextBuilder] excluded_empty_tables=%s",
+                excluded_empty_tables,
+            )
+            warnings.append(f"CONTEXT_EXCLUDED_BROKEN_TABLES:{len(excluded_empty_tables)}")
+
+        table_results = [r for r in filtered_results if self._is_table_chunk(r)]
+        non_table_results = [r for r in filtered_results if not self._is_table_chunk(r)]
+        prioritized_results = table_results + non_table_results
+
         primary_chunks: dict[str, tuple[SearchResultChunk, bool]] = {}
-        for i, result in enumerate(search_results[:max_chunks]):
+        for i, result in enumerate(prioritized_results[:max_chunks]):
             primary_chunks[result.chunk_id] = (result, True)
+
+        preserved_table_rows = sum(1 for r in primary_chunks.values() if self._is_table_chunk(r[0]))
+        if preserved_table_rows > 0:
+            logger.info(
+                "[AiContextBuilder] preserved_table_rows=%d",
+                preserved_table_rows,
+            )
 
         neighbor_chunks: dict[str, tuple[SearchResultChunk, bool]] = {}
         if neighbor_window > 0:
@@ -153,7 +185,10 @@ class AiContextBuilder:
                     break
 
                 share_budget = budget_left if remaining_items <= 1 else budget_left // remaining_items
-                share_budget = max(250, min(900, share_budget))
+                is_table = self._is_table_chunk(item)
+                min_budget = self.TABLE_ROW_MIN_BUDGET if is_table else 250
+                max_budget = 1200 if is_table else 900
+                share_budget = max(min_budget, min(max_budget, share_budget))
                 share_budget = min(share_budget, budget_left)
 
                 original_text = item.chunk_text or ""
@@ -235,3 +270,33 @@ class AiContextBuilder:
             warnings=warnings,
             total_chars=total_chars,
         )
+
+    def _is_broken_table(self, text: str) -> bool:
+        """Check if text contains broken table markers like 'Column 1', 'Column 2'."""
+        if not text:
+            return False
+        text_lower = text.lower()
+        marker_count = sum(1 for m in self.BROKEN_TABLE_MARKERS if m in text_lower)
+        return marker_count >= 2
+
+    def _is_empty_table(self, text: str) -> bool:
+        """Check if text is an empty or near-empty table."""
+        if not text:
+            return True
+        stripped = text.strip()
+        if not stripped:
+            return True
+        if len(stripped) < 10 and all(c in "|- \n" for c in stripped):
+            return True
+        return False
+
+    def _is_table_chunk(self, result) -> bool:
+        """Check if a search result or context item is a table-type chunk."""
+        if hasattr(result, "source") and hasattr(result.source, "source_type"):
+            pass
+        chunk_text = result.chunk_text or ""
+        if "| " in chunk_text or "|--" in chunk_text or "---|" in chunk_text:
+            return True
+        if hasattr(result, "chunk_text") and chunk_text.startswith("|"):
+            return True
+        return False

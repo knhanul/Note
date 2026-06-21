@@ -56,6 +56,13 @@ class RagAnswer:
 
 
 class AiRagService:
+    CONTEXT_TECHNICAL_LINE_PATTERNS = (
+        re.compile(r"^\s*\[[^\]]*등록[^\]]*\]"),
+        re.compile(r"^\s*파일\s*색인\s*실패"),
+        re.compile(r"^\s*지원하지\s*않는\s*파일\s*형식"),
+        re.compile(r"^\s*HWP\s*파일.*(직접\s*색인|제외|지원\s*대상)"),
+    )
+
     def __init__(
         self,
         search_service: AiSearchService,
@@ -106,10 +113,11 @@ class AiRagService:
 
         logger.info(f"[RAG_TIMING] Starting RAG for question: {question[:50]}...")
         
+        question_type = self._search.classify_question_type(question)
         normalized_query = self._search.normalize_query(question)
-        generated_queries = self._search.generate_search_queries(normalized_query)
+        generated_queries = self._search.generate_search_queries(normalized_query, question_type)
         
-        logger.info(f"[AiRagService] original_query='{question}', normalized_query='{normalized_query}', generated_search_queries={generated_queries}")
+        logger.info(f"[AiRagService] question_type={question_type}, original_query='{question}', normalized_query='{normalized_query}', generated_search_queries={generated_queries}")
         
         term_counts = self._search.check_index_terms(normalized_query)
         
@@ -119,7 +127,18 @@ class AiRagService:
         )
         logger.info(f"[RAG_TIMING] Search completed in {time.time() - search_start:.2f}s, results={len(search_results)}")
 
-        if not search_results:
+        direct_evidence_results = [r for r in search_results if r.relevance_tier == "direct_evidence"]
+        possible_related_results = [r for r in search_results if r.relevance_tier == "possible_related"]
+        excluded_unrelated = [r for r in search_results if r.relevance_tier == "unrelated"]
+
+        logger.info(
+            "[AiRagService] search_classification: direct=%d, possible_related=%d, excluded_unrelated=%d",
+            len(direct_evidence_results), len(possible_related_results), len(excluded_unrelated),
+        )
+
+        context_results = direct_evidence_results if direct_evidence_results else possible_related_results
+
+        if not context_results:
             has_possible_related = False
             no_result_reason = "RAG_NO_SEARCH_RESULTS"
             
@@ -141,7 +160,7 @@ class AiRagService:
 
         context_bundle = self._context.build_context_bundle(
             query=question,
-            search_results=search_results,
+            search_results=context_results,
             max_chars=options.max_context_chars,
             neighbor_window=options.neighbor_window,
             max_chunks=options.max_chunks,
@@ -149,16 +168,14 @@ class AiRagService:
 
         warnings.extend(context_bundle.warnings)
 
-        hwp_warnings = self._collect_hwp_warnings(context_bundle, search_results)
-        warnings.extend(hwp_warnings)
-
         if not context_bundle.items:
-            if search_results:
+            if context_results:
                 fallback_text, fallback_citations, fallback_warnings = self._build_fallback_answer(
                     question=question,
                     normalized_query=normalized_query,
-                    search_results=search_results,
+                    search_results=context_results,
                     context_bundle=context_bundle,
+                    question_type=question_type,
                 )
                 warnings.extend(fallback_warnings)
                 warnings.append("RAG_CONTEXT_EMPTY_FALLBACK")
@@ -274,8 +291,9 @@ class AiRagService:
                 fallback_text, fallback_citations, fallback_warnings = self._build_fallback_answer(
                     question=question,
                     normalized_query=normalized_query,
-                    search_results=search_results,
+                    search_results=context_results,
                     context_bundle=context_bundle,
+                    question_type=question_type,
                 )
                 warnings.extend(fallback_warnings)
                 warnings.append("RAG_FALLBACK_USED")
@@ -286,24 +304,49 @@ class AiRagService:
                     raw={
                         "reason": validation_reason,
                         "retry_used": retry_used,
-                        "search_result_count": len(search_results),
+                        "search_result_count": len(context_results),
                     },
                     warnings=[],
                 )
                 citations = fallback_citations
                 logger.info(f"[AiRagService] Fallback answer generated: answer_len={len(fallback_text)}")
 
+        processed_text, rep_count = self._remove_repeated_sentences(llm_result.text)
+        if rep_count > 0:
+            logger.warning(f"[AiRagService] Removed {rep_count} repeated sentences from answer")
+            warnings.append(f"RAG_REPETITION_REMOVED:{rep_count}")
+            llm_result = LlmGenerateResult(
+                text=processed_text,
+                model=llm_result.model,
+                provider=llm_result.provider,
+                raw=llm_result.raw,
+                warnings=llm_result.warnings,
+            )
+            citations = self._rebuild_citations_after_postprocess(citations, processed_text)
+
+        citation_valid = self._validate_citations(citations, processed_text)
+        logger.info(f"[AiRagService] citation_validation_result={citation_valid}")
+        if not citation_valid:
+            warnings.append("RAG_CITATION_MISMATCH")
+
+        logger.info(f"[AiRagService] output_style=business_readable")
         logger.info(f"[AiRagService] Final answer: answer_len={len(llm_result.text)}, retry_used={retry_used}, citations={len(citations)}")
 
         total_time = time.time() - start_time
         logger.info(f"[RAG_TIMING] Total RAG time: {total_time:.2f}s, answer_len={len(llm_result.text)}")
+
+        final_warnings = self._finalize_warnings(warnings, citations)
+        user_visible, hidden_technical = self._filter_user_visible_warnings(final_warnings)
+        logger.info(f"[AiRagService] user_visible_warnings={user_visible}")
+        logger.info(f"[AiRagService] hidden_technical_warnings={hidden_technical}")
+        logger.info(f"[AiRagService] final_answer_quality={'passed' if is_valid or retry_used else 'fallback_used'}")
 
         return RagAnswer(
             answer_text=llm_result.text,
             citations=citations,
             prompt_payload=prompt_payload,
             llm_result=llm_result,
-            warnings=self._finalize_warnings(warnings, citations),
+            warnings=user_visible,
         )
 
     def answer_question_in_document(
@@ -457,6 +500,88 @@ class AiRagService:
             final_warnings = [w for w in final_warnings if not w.startswith("RAG_NO_CITATIONS")]
         return final_warnings
 
+    TECHNICAL_WARNING_PREFIXES = (
+        "RAG_ANSWER_VALIDATION_FAILED",
+        "RAG_RETRY_FAILED",
+        "RAG_REPETITION_REMOVED",
+        "RAG_CITATION_MISMATCH",
+        "RAG_DUPLICATE_SOURCE_REMOVED",
+        "RAG_SOURCE_TRUNCATED",
+        "RAG_CONTEXT_TRUNCATED",
+        "CONTEXT_EXCLUDED_BROKEN_TABLES",
+        "CONTEXT_PRIMARY_CHUNK_TRUNCATED",
+        "CONTEXT_CHUNK_TRUNCATED",
+        "CONTEXT_MAX_CHARS_REACHED",
+    )
+
+    USER_VISIBLE_WARNING_MAP = {
+        "RAG_FALLBACK_USED": "참고문서 기반 요약입니다. 세부 내용은 원문을 확인하세요.",
+        "RAG_CONTEXT_EMPTY_FALLBACK": "참고문서 기반 요약입니다. 세부 내용은 원문을 확인하세요.",
+        "RAG_NO_CONTEXT": "참고문서에서 관련 내용을 찾지 못했습니다.",
+        "RAG_NO_SEARCH_RESULTS": "검색 결과가 없습니다.",
+        "RAG_NO_DIRECT_EVIDENCE": "직접적인 근거 문서를 찾지 못했습니다.",
+        "RAG_INDEX_MAY_BE_INCOMPLETE": "색인이 완료되지 않았을 수 있습니다.",
+        "RAG_HWP_SOURCE_QUALITY": "HWP 파일은 텍스트 추출 품질이 낮을 수 있습니다. HWPX 변환을 권장합니다.",
+        "RAG_UNKNOWN_CITATION_ID": "답변에 알 수 없는 출처 번호가 포함되어 있습니다.",
+        "RAG_POSSIBLE_RELATED_ONLY": "관련 가능 문서는 있으나, 직접적인 근거는 확인되지 않았습니다.",
+        "RAG_EMPTY_QUESTION": "질문이 비어 있습니다.",
+    }
+
+    def _filter_user_visible_warnings(self, warnings: list[str]) -> tuple[list[str], list[str]]:
+        """Split warnings into user-visible and hidden technical warnings."""
+        user_visible: list[str] = []
+        hidden: list[str] = []
+        for w in warnings:
+            is_technical = any(w.startswith(prefix) for prefix in self.TECHNICAL_WARNING_PREFIXES)
+            if is_technical:
+                hidden.append(w)
+            elif w.startswith("OLLAMA_") or w.startswith("[OLLAMA_"):
+                user_visible.append(w)
+            elif w in self.USER_VISIBLE_WARNING_MAP:
+                user_visible.append(self.USER_VISIBLE_WARNING_MAP[w])
+            else:
+                hidden.append(w)
+        user_visible = list(dict.fromkeys(user_visible))
+        return user_visible, hidden
+
+    def _reconstruct_broken_tables(self, text: str) -> str:
+        """Attempt to reconstruct broken markdown tables into proper format."""
+        if not text:
+            return text
+        lines = text.split("\n")
+        reconstructed: list[str] = []
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            if line.startswith("|") and i + 1 < len(lines):
+                next_line = lines[i + 1].strip() if i + 1 < len(lines) else ""
+                if next_line.startswith("|") and ("---" in next_line or "--" in next_line):
+                    reconstructed.append(lines[i])
+                    reconstructed.append(lines[i + 1])
+                    i += 2
+                    while i < len(lines) and lines[i].strip().startswith("|"):
+                        reconstructed.append(lines[i])
+                        i += 1
+                    continue
+            if "Column 1" in line and "Column 2" in line:
+                parts = [p.strip() for p in line.split("|") if p.strip()]
+                if parts:
+                    header = "| " + " | ".join(parts) + " |"
+                    separator = "| " + " | ".join(["---"] * len(parts)) + " |"
+                    reconstructed.append(header)
+                    reconstructed.append(separator)
+                    i += 1
+                    while i < len(lines) and lines[i].strip() and not lines[i].strip().startswith("#"):
+                        row_parts = [p.strip() for p in lines[i].split("|") if p.strip()]
+                        if row_parts:
+                            row = "| " + " | ".join(row_parts) + " |"
+                            reconstructed.append(row)
+                        i += 1
+                    continue
+            reconstructed.append(lines[i])
+            i += 1
+        return "\n".join(reconstructed)
+
     def _build_context_text_and_sources(
         self, items: list, max_chars: int
     ) -> tuple[str, list[RagPromptSource], list[str]]:
@@ -470,6 +595,11 @@ class AiRagService:
             source_id = f"S{i + 1}"
             heading_str = " > ".join(item.heading_path) if item.heading_path else "(없음)"
             path_str = item.source.note_id or item.source.source_path or "unknown"
+            clean_chunk_text = self._sanitize_context_content(item.chunk_text or "")
+
+            if not clean_chunk_text:
+                warnings.append("RAG_CONTEXT_CHUNK_SKIPPED_NOISY")
+                continue
 
             block = f"""[Source {i + 1}]
 Title: {item.source.title or "(제목 없음)"}
@@ -478,14 +608,14 @@ Path: {path_str}
 Heading: {heading_str}
 Chunk Order: {item.chunk_order}
 Content:
-{item.chunk_text}"""
+{clean_chunk_text}"""
 
             block_len = len(block)
 
             if total_len + block_len > max_chars:
                 if not blocks:
                     max_block_len = max_chars - 50
-                    truncated_text = item.chunk_text[:max_block_len] + "..."
+                    truncated_text = clean_chunk_text[:max_block_len] + "..."
                     truncated_block = f"""[Source {i + 1}]
 Title: {item.source.title or "(제목 없음)"}
 Type: {item.source.source_type}
@@ -535,6 +665,63 @@ Content:
         context_text = "\n\n".join(blocks)
         return context_text, sources, warnings
 
+    def _sanitize_context_content(self, text: str) -> str:
+        if not text:
+            return ""
+
+        lines = text.splitlines()
+        cleaned_lines: list[str] = []
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped:
+                cleaned_lines.append("")
+                continue
+
+            if self._is_technical_context_line(stripped):
+                continue
+
+            if self._is_markdown_divider_line(stripped):
+                prev_stripped = cleaned_lines[-1].strip() if cleaned_lines else ""
+                if prev_stripped.startswith("|"):
+                    cleaned_lines.append(line)
+                    continue
+                continue
+
+            if self._is_meaningless_table_row(stripped):
+                continue
+
+            cleaned_lines.append(line)
+
+        cleaned = "\n".join(cleaned_lines)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        return cleaned.strip()
+
+    def _is_technical_context_line(self, line: str) -> bool:
+        return any(pattern.search(line) for pattern in self.CONTEXT_TECHNICAL_LINE_PATTERNS)
+
+    def _is_markdown_divider_line(self, line: str) -> bool:
+        return bool(re.match(r"^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?$", line))
+
+    def _is_meaningless_table_row(self, line: str) -> bool:
+        if not line.startswith("|"):
+            return False
+
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if len(cells) < 2:
+            return False
+
+        non_empty = [cell for cell in cells if cell]
+        if not non_empty:
+            return True
+
+        if all(re.fullmatch(r"[A-Za-z]", cell) for cell in non_empty):
+            return True
+
+        if all(not re.search(r"[0-9A-Za-z가-힣]", cell) for cell in non_empty):
+            return True
+
+        return False
+
     def _format_sources(self, sources: list[RagPromptSource]) -> str:
         """Format sources list for RAG_SOURCES placeholder."""
         if not sources:
@@ -576,7 +763,7 @@ Content:
         
         return f"""### 답변
 
-참고문서에서 '{normalized_query}'에 대한 직접적인 내용은 확인되지 않았습니다.
+현재 색인된 참고문서에서 "{normalized_query}"에 대한 직접적인 내용은 확인되지 않았습니다.
 
 ### 확인되지 않은 항목
 
@@ -584,14 +771,14 @@ Content:
 
 {status_section}
 
-### 추가로 필요한 문서
-
-* '{normalized_query}'와 관련된 업무 문서, 보고서, 지침, 계약서 등
-* 구체적인 내용이 포함된 PDF, HWP, 문서 파일
-
 ### 다시 검색할 때 추천 표현
 
-* {", ".join(generated_queries[:6])}"""
+* {", ".join(generated_queries[:6])}
+
+### 추가 등록이 필요한 문서
+
+* 관련 내용을 포함한 HWPX, DOCX, PDF, TXT, MD 파일을 참고문서로 등록해 주세요.
+* HWP 파일은 별도 HWPX 변환 프로그램으로 HWPX로 변환한 뒤 등록해 주세요."""
 
     def _validate_answer_quality(
         self,
@@ -629,13 +816,26 @@ Content:
             return False, "question_only"
 
         if citations is not None and citations and not any(c.cited_in_answer for c in citations):
-            return False, "no_cited_sources"
+            logger.info("[AiRagService] Answer has no cited sources, but keeping LLM answer (model may omit citations)")
 
         if prompt_id == "evidence_based_answer" and "[근거" not in answer_text and "근거:" not in answer_text:
             return False, "no_evidence"
 
         if prompt_id == "checklist" and "[ ]" not in answer_text and "체크" not in answer_lower:
             return False, "no_checklist"
+
+        technical_terms = ["rag_", "chunk_id", "embedding", "context_bundle", "search_result_chunk"]
+        for term in technical_terms:
+            if term in answer_lower:
+                return False, "technical_term_in_answer"
+
+        broken_table_markers = ["column 1", "column 2", "column 3"]
+        marker_count = sum(1 for m in broken_table_markers if m in answer_lower)
+        if marker_count >= 2:
+            return False, "broken_table_in_answer"
+
+        if "[Source" in stripped and "Content:" in stripped and "Chunk Order:" in stripped:
+            return False, "raw_chunk_dump"
 
         return True, "valid"
 
@@ -671,6 +871,7 @@ Content:
         normalized_query: str,
         search_results: list[SearchResultChunk],
         context_bundle: ContextBundle,
+        question_type: str = "general",
     ) -> tuple[str, list[RagCitation], list[str]]:
         groups = self._group_fallback_sources(search_results, context_bundle)
         warnings: list[str] = []
@@ -679,35 +880,34 @@ Content:
             return "참고문서에서 관련 내용을 찾지 못했습니다.", [], ["RAG_NO_CONTEXT"]
 
         lines: list[str] = []
-        lines.append("### 답변")
+        lines.append("### 📌 요약")
         lines.append("")
         lines.append(
-            f'참고문서에서 "{normalized_query}"와 관련된 문서가 검색되었습니다. 다만 AI 모델이 충분한 답변을 생성하지 못해, 검색된 참고문서 기준으로 확인 가능한 내용을 정리합니다.'
+            f'참고문서에서 "{normalized_query}"와 관련된 자료가 확인되었습니다. 아래에 주요 내용을 정리합니다.'
         )
         lines.append("")
-        lines.append("### 검색된 참고문서")
+        lines.append("### 📊 상세 내용")
         lines.append("")
 
         citations: list[RagCitation] = []
-        has_hwp = False
 
         for index, group in enumerate(groups, start=1):
             source_id = f"S{index}"
             group["source_id"] = source_id
             title = group["title"] or "제목 없음"
-            source_type = group["source_type"] or "unknown"
-            short_path = self._shorten_source_path(group.get("source_path"), group.get("note_id"))
-            chunk_count = group["chunk_count"]
 
-            lines.append(f"* {source_id} {title}")
-            lines.append("")
-            lines.append(f"  * 사용된 문서 조각 수: {chunk_count}개")
-            lines.append(f"  * 파일 형식: {source_type}")
-            lines.append(f"  * 경로: {short_path}")
+            lines.append(f"* [{source_id}] {title}")
             lines.append("")
 
-            if source_type == "hwp_file" or (group.get("source_path") and str(group.get("source_path")).lower().endswith(".hwp")):
-                has_hwp = True
+            snippets = group["snippets"][:3]
+            if snippets:
+                for snippet in snippets:
+                    clean_snippet = self._sanitize_context_content(snippet)
+                    if clean_snippet:
+                        lines.append(f"  * {clean_snippet}")
+            else:
+                lines.append("  * 본문 내용이 충분하지 않습니다.")
+            lines.append("")
 
             first_chunk = group["chunks"][0] if group["chunks"] else None
             citations.append(
@@ -716,7 +916,7 @@ Content:
                     chunk_id=first_chunk["chunk_id"] if first_chunk else f"{group['document_id']}:0",
                     document_id=group["document_id"],
                     title=title,
-                    source_type=source_type,
+                    source_type=group.get("source_type") or "unknown",
                     source_path=group.get("source_path"),
                     note_id=group.get("note_id"),
                     heading_path=first_chunk["heading_path"] if first_chunk else [],
@@ -725,44 +925,11 @@ Content:
                 )
             )
 
-        lines.append("### 확인 가능한 내용")
-        lines.append("")
-
-        content_lines: list[str] = []
-        for group in groups:
-            if len(content_lines) >= 5:
-                break
-            source_id = group["source_id"]
-            snippets = group["snippets"][:3]
-            if snippets:
-                for snippet in snippets:
-                    if len(content_lines) >= 5:
-                        break
-                    content_lines.append(f"* [{source_id}] {snippet}")
-            else:
-                content_lines.append("* 색인된 문서 조각에서 충분한 본문 내용을 확인하지 못했습니다.")
-
-        if content_lines:
-            lines.extend(content_lines)
-        else:
-            lines.append("* 색인된 문서 조각에서 충분한 본문 내용을 확인하지 못했습니다.")
-
-        lines.append("")
-        lines.append("### 추가 확인 필요")
-        lines.append("")
-        lines.append("* 원문 문서를 열어 세부 내용을 확인하세요.")
-        if has_hwp:
-            lines.append("* 이 문서는 HWP 파일에서 추출되었습니다. 표, 서식, 일부 본문이 누락될 수 있습니다. 정확한 분석이 필요하면 도구 메뉴의 한글 파일 변환 기능으로 HWPX 변환 후 다시 색인하는 것을 권장합니다.")
-
-        lines.append("")
-        lines.append("### 참고 출처")
+        lines.append("### 🔗 참고 출처")
         lines.append("")
         for group in groups:
             source_id = group["source_id"]
             lines.append(f"* [{source_id}] {group['title'] or '제목 없음'}")
-
-        if has_hwp:
-            warnings.append("RAG_HWP_SOURCE_QUALITY")
 
         return "\n".join(lines), citations, warnings
 
@@ -845,6 +1012,15 @@ Content:
         if not text:
             return ""
 
+        lines = text.splitlines()
+        has_table = any(line.strip().startswith("|") for line in lines)
+        if has_table:
+            table_lines = [l.strip() for l in lines if l.strip()]
+            result = "\n".join(table_lines)
+            if len(result) <= max_len:
+                return result
+            return result[: max_len - 3].rstrip() + "..."
+
         cleaned = " ".join(text.split())
         if len(cleaned) <= max_len:
             return cleaned
@@ -879,3 +1055,80 @@ Content:
 6. 가능한 경우 핵심 문장 끝에 [S1] 형식의 출처를 표시하고, 어려우면 마지막에 "참고 출처" 섹션을 추가하세요."""
 
         return original_prompt.system_prompt + retry_instructions
+
+    def _remove_repeated_sentences(self, answer_text: str) -> tuple[str, int]:
+        """Detect and remove repeated sentences from answer text.
+        
+        Returns (cleaned_text, removed_count).
+        """
+        if not answer_text:
+            return answer_text, 0
+
+        lines = answer_text.split("\n")
+        seen_sentences: dict[str, int] = {}
+        cleaned_lines: list[str] = []
+        removed_count = 0
+
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or stripped.startswith("---") or stripped.startswith("* [S"):
+                cleaned_lines.append(line)
+                continue
+
+            normalized = re.sub(r"\s+", " ", stripped).strip().lower()
+            if len(normalized) < 15:
+                cleaned_lines.append(line)
+                continue
+
+            if normalized in seen_sentences:
+                seen_sentences[normalized] += 1
+                removed_count += 1
+                logger.debug(f"[AiRagService] Repeated sentence removed: {stripped[:60]}...")
+                continue
+
+            seen_sentences[normalized] = 1
+            cleaned_lines.append(line)
+
+        cleaned_text = "\n".join(cleaned_lines)
+        return cleaned_text, removed_count
+
+    def _validate_citations(
+        self, citations: list[RagCitation], answer_text: str
+    ) -> bool:
+        """Validate that cited source IDs in answer match actual evidence citations."""
+        if not citations or not answer_text:
+            return True
+
+        cited_ids = self._extract_cited_source_ids(answer_text)
+        if not cited_ids:
+            return True
+
+        valid_source_ids = {c.source_id for c in citations}
+        unknown_ids = cited_ids - valid_source_ids
+        if unknown_ids:
+            logger.warning(f"[AiRagService] Unknown citation IDs in answer: {unknown_ids}")
+            return False
+        return True
+
+    def _rebuild_citations_after_postprocess(
+        self, citations: list[RagCitation], answer_text: str
+    ) -> list[RagCitation]:
+        """Rebuild cited_in_answer flags after text post-processing."""
+        cited_ids = self._extract_cited_source_ids(answer_text)
+        updated = []
+        for c in citations:
+            updated.append(
+                RagCitation(
+                    source_id=c.source_id,
+                    chunk_id=c.chunk_id,
+                    document_id=c.document_id,
+                    title=c.title,
+                    source_type=c.source_type,
+                    source_path=c.source_path,
+                    note_id=c.note_id,
+                    heading_path=c.heading_path,
+                    chunk_order=c.chunk_order,
+                    cited_in_answer=c.source_id in cited_ids,
+                )
+            )
+        return updated
