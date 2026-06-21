@@ -8,6 +8,7 @@ from services.document_chunker import (
     build_indexed_document,
     chunk_markdown_document,
     chunk_structured_document,
+    _make_chunk_id,
 )
 from services.folder_import_service import FolderImportService
 from services.hwp_policy import HWP_RAG_FILE_MESSAGE
@@ -219,6 +220,10 @@ class AiDocumentIndexService:
             source_path=str(path),
             note_id=None,
         )
+        order_offset = len(chunks)
+        for sc in structured_chunks:
+            sc.chunk_order += order_offset
+            sc.chunk_id = _make_chunk_id(document_id, sc.chunk_order, sc.chunk_text)
         combined_chunks = chunks + structured_chunks
         logger.info(
             "[AiDocumentIndexService] HWPX parsing completed: path=%s, total_chunks=%d",
