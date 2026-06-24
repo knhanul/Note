@@ -6057,7 +6057,8 @@ Window {
 
                             // Editor mode toggle (WYSIWYG / Markdown)
                             RowLayout {
-                                visible: window.selectedNoteId !== "" && !!noteController && !!window.currentNote
+                                visible: (window.selectedNoteId !== "" && !!noteController && !!window.currentNote)
+                                    || (window.activeContentMode === "ai_prompts" && window.selectedAIPromptDocId !== "" && !!window.currentAIPromptDocument)
                                 spacing: Metrics.xs
 
                                 Rectangle {

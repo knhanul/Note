@@ -242,6 +242,56 @@ class AiDocumentIndexService:
         )
         raise RuntimeError(HWP_RAG_FILE_MESSAGE)
 
+    def index_pdf_file(
+        self,
+        file_path: str | Path,
+        document_id: Optional[str] = None,
+    ) -> "IndexedDocument":
+        import fitz  # PyMuPDF
+
+        path = Path(file_path).resolve()
+        logger.info(
+            "[AiDocumentIndexService] Indexing PDF file: path=%s",
+            path,
+        )
+        doc = fitz.open(str(path))
+        page_texts = []
+        for page_index, page in enumerate(doc, start=1):
+            text = page.get_text("text").strip()
+            if text:
+                page_texts.append(f"[페이지 {page_index}]\n{text}")
+        doc.close()
+        body = "\n\n".join(page_texts)
+
+        if not body.strip():
+            logger.warning(
+                "[AiDocumentIndexService] PDF text extraction returned empty: path=%s, pages=%d",
+                path,
+                len(page_texts),
+            )
+
+        if document_id is None:
+            document_id = _make_file_document_id("pdf_file", path)
+
+        document = MarkdownDocument(
+            metadata=MarkdownMetadata(title=path.stem),
+            body_markdown=body,
+            source_path=str(path),
+        )
+        logger.info(
+            "[AiDocumentIndexService] PDF indexed: path=%s, document_id=%s, body_len=%d",
+            path,
+            document_id,
+            len(body),
+        )
+        return self.index_markdown_document(
+            document=document,
+            document_id=document_id,
+            source_type="pdf_file",
+            source_path=str(path),
+            note_id=None,
+        )
+
     @staticmethod
     def _read_text_with_fallback(path: Path) -> str:
         for encoding in ("utf-8", "utf-8-sig", "cp949", "euc-kr", "latin-1"):
@@ -253,6 +303,14 @@ class AiDocumentIndexService:
 
     def _index_vectors_for_chunks(self, document_id: str, chunks: list) -> None:
         if not self._embedding or not self._vector_store or not self._vector_store.enabled:
+            logger.warning(
+                "[AiDocumentIndexService] Vector indexing skipped (vector store disabled or embedding service unavailable): "
+                "document_id=%s, has_embedding=%s, has_vector_store=%s, vector_store_enabled=%s",
+                document_id,
+                self._embedding is not None,
+                self._vector_store is not None,
+                self._vector_store.enabled if self._vector_store else False,
+            )
             return
 
         if not chunks:

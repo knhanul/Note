@@ -105,6 +105,7 @@ def hwpx_to_markdown(hwpx_path: str, assets_dir: str | None = None) -> str:
         base_dir = hwpx_file.parent.resolve()
         target_assets_dir = _resolve_assets_dir(hwpx_file, assets_dir)
         image_map, extracted_images = _extract_images_from_zip(zf, target_assets_dir, base_dir)
+        _enrich_image_map_with_manifest(zf, image_map)
 
         _detect_header_footer(zf)
 
@@ -139,6 +140,7 @@ def parse_hwpx_document(hwpx_path: str, assets_dir: str | None = None) -> HWPXDo
         base_dir = hwpx_file.parent.resolve()
         target_assets_dir = _resolve_assets_dir(hwpx_file, assets_dir)
         image_map, extracted_images = _extract_images_from_zip(zf, target_assets_dir, base_dir)
+        _enrich_image_map_with_manifest(zf, image_map)
 
         _detect_header_footer(zf)
 
@@ -290,6 +292,60 @@ def _detect_header_footer(zf: zipfile.ZipFile) -> bool:
         logger.debug("Failed to detect header/footer in HWPX")
 
     return False
+
+
+def _enrich_image_map_with_manifest(zf: zipfile.ZipFile, image_map: dict[str, str]) -> None:
+    """Parse HWPX manifest (content.hpf) to map itemIDs to image paths.
+
+    HWPX section XML references images by numeric itemID (e.g. '1312416266').
+    The manifest file maps these IDs to bindata file paths (e.g. 'bindata/image1.jpg').
+    This function enriches image_map with those ID-to-path mappings.
+    """
+    manifest_candidates = [
+        name for name in zf.namelist()
+        if name.lower().endswith(".hpf")
+        or "manifest" in name.lower() and name.lower().endswith(".xml")
+    ]
+    if not manifest_candidates:
+        logger.debug("No HWPX manifest file found for image ID mapping")
+        return
+
+    logger.debug("HWPX manifest candidates: %s", manifest_candidates)
+
+    for manifest_path in manifest_candidates:
+        try:
+            xml_text = _read_xml(zf, manifest_path)
+            if not xml_text.strip():
+                continue
+            root = ET.fromstring(xml_text)
+            for elem in root.iter():
+                tag = elem.tag
+                if not isinstance(tag, str):
+                    continue
+                local = tag.split("}", 1)[-1].lower() if "}" in tag else tag.lower()
+                if local != "item":
+                    continue
+                item_id = None
+                item_href = None
+                for raw_key, raw_value in elem.attrib.items():
+                    key = raw_key.split("}", 1)[-1].lower() if "}" in raw_key else raw_key.lower()
+                    if key == "id":
+                        item_id = (raw_value or "").strip()
+                    elif key in ("href", "src", "path"):
+                        item_href = (raw_value or "").strip()
+                if not item_id or not item_href:
+                    continue
+                # Try to match the href to an existing image_map entry
+                href_lower = item_href.replace("\\", "/").strip().lower()
+                href_name = Path(href_lower).name.lower()
+                href_stem = Path(href_lower).stem.lower()
+                for key in (href_lower, href_name, href_stem, item_id.lower()):
+                    if key in image_map:
+                        image_map[item_id.lower()] = image_map[key]
+                        logger.debug("Manifest mapped itemID '%s' -> '%s' via key '%s'", item_id, image_map[key], key)
+                        break
+        except Exception:
+            logger.debug("Failed to parse HWPX manifest: %s", manifest_path)
 
 
 def _resolve_assets_dir(hwpx_path: Path, assets_dir: str | None) -> Path:
@@ -781,12 +837,26 @@ def _extract_blocks_from_paragraph(
 def _resolve_image_ref(node: ET.Element, image_map: dict[str, str]) -> str | None:
     candidates: list[str] = []
 
+    # First, look for binaryItemIDRef in child elements (e.g. <hc:img binaryItemIDRef="image1"/>)
+    # This is the primary image reference mechanism in HWPX
+    for child in node.iter():
+        for raw_key, raw_value in child.attrib.items():
+            key = raw_key.split("}", 1)[-1].lower() if "}" in raw_key else raw_key.lower()
+            if key == "binaryitemidref":
+                value = (raw_value or "").strip()
+                if value:
+                    candidates.append(value)
+
+    # Also check the node's own attributes for other reference types
     for raw_key, raw_value in node.attrib.items():
         key = raw_key.split("}", 1)[-1].lower() if "}" in raw_key else raw_key.lower()
         value = (raw_value or "").strip()
         if not value:
             continue
-        if any(token in key for token in ("id", "ref", "href", "bin", "src", "embed", "item")):
+        # Skip numeric id/instid attributes on the pic element itself
+        if key in ("id", "instid") and value.isdigit():
+            continue
+        if any(token in key for token in ("ref", "href", "bin", "src", "embed", "item")):
             candidates.append(value)
 
     for candidate in candidates:

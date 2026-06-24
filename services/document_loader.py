@@ -228,7 +228,11 @@ class DocumentLoader:
         markdown, warnings = convert_hwpx_to_markdown_text(str(path))
         structured_doc = preprocess_hwpx_file(path)
         if structured_doc.warnings:
-            warnings.extend(structured_doc.warnings)
+            user_warnings = [
+                w for w in structured_doc.warnings
+                if not w.startswith("TABLE_")
+            ]
+            warnings.extend(user_warnings)
         stats = self._build_hwp_stats(markdown)
         content = self._build_hwp_context(
             file_name=path.name,

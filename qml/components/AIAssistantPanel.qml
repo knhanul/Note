@@ -2045,6 +2045,43 @@ Rectangle {
 
 
 
+    function validateInputMode(action, selectionText, userInput, sourceContent) {
+
+        if (!action) return null
+
+        var mode = action.input_mode || "auto"
+        var hasSelection = selectionText && selectionText.trim().length > 0
+        var hasUserInput = userInput && userInput.trim().length > 0
+        var hasNote = sourceContent && sourceContent.trim().length > 0
+
+        if (mode === "selection_required") {
+            if (!hasSelection) {
+                return "이 기능은 문서에서 문장을 선택(드래그)한 후 실행해야 합니다.\n\n실행 방법: 편집기에서 마우스로 문장을 드래그하여 선택한 뒤 실행 버튼을 눌러주세요."
+            }
+        } else if (mode === "note_required") {
+            if (!hasNote) {
+                return "이 기능은 현재 열린 문서가 필요합니다.\n\n실행 방법: 노트를 열거나 외부 문서를 불러온 후 실행해주세요."
+            }
+        } else if (mode === "note_and_chat") {
+            if (!hasNote) {
+                return "이 기능은 현재 열린 문서와 입력창의 질문이 모두 필요합니다.\n\n실행 방법: 노트를 열고 입력창에 질문을 입력한 후 실행해주세요."
+            }
+            if (!hasUserInput) {
+                return "이 기능은 입력창에 질문을 입력해야 합니다.\n\n실행 방법: 하단 입력창에 질문을 입력한 후 실행해주세요."
+            }
+        } else if (mode === "chat_only") {
+            if (!hasUserInput) {
+                return "이 기능은 입력창에 질문을 입력해야 합니다.\n\n실행 방법: 하단 입력창에 질문을 입력한 후 실행해주세요."
+            }
+        } else {
+            if (!hasNote && !hasUserInput) {
+                return "실행할 내용이 없습니다.\n\n실행 방법: 노트를 열거나 입력창에 질문을 입력한 후 실행해주세요."
+            }
+        }
+
+        return null
+    }
+
     function executeCurrentNoteAction(selectionText) {
 
         var action = root.selectedAction
@@ -2076,6 +2113,28 @@ Rectangle {
         var sourceTitle = sourceDocument.title || ""
 
         var sourceContent = sourceDocument.content || ""
+
+
+
+        // Pre-execution validation based on input_mode
+
+        if (!isDefaultAction(action.action_id) && action.action_id !== "current_note_qa") {
+
+            var validationMsg = validateInputMode(action, selectionText || "", userInput, sourceContent)
+
+            if (validationMsg) {
+
+                preconditionDialog.title = "실행 조건 알림"
+
+                preconditionDialog.text = validationMsg
+
+                preconditionDialog.open()
+
+                return
+
+            }
+
+        }
 
 
 
@@ -8337,6 +8396,12 @@ Rectangle {
 
         }
 
+    }
+
+    MessageDialog {
+        id: preconditionDialog
+        title: "실행 조건 알림"
+        buttons: MessageDialog.Ok
     }
 
 }

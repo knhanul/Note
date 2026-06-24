@@ -422,7 +422,7 @@ class PromptService:
             "archived": int(current.get("archived", 0)),
             "variables_json": variables_json,
             "content_hash": content_hash,
-        })
+        }, force=True)
         self._repo.insert_history(prompt_doc_id, content_md)
         return True
 

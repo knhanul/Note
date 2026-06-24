@@ -187,6 +187,13 @@ class AiRagApplicationService:
 
         return (Path.cwd() / "app_data" / "ai" / "chroma").resolve()
 
+    def _is_vector_store_active(self) -> bool:
+        return (
+            self._vector_store is not None
+            and self._vector_store.enabled
+            and self._embedding_service is not None
+        )
+
     def index_current_note(
         self,
         note_id: str,
@@ -296,6 +303,10 @@ class AiRagApplicationService:
                     doc = self._index_service.index_hwpx_file(path)
                     indexed_count += 1
                     document_ids.append(doc.document_id)
+                elif ext == ".pdf":
+                    doc = self._index_service.index_pdf_file(path)
+                    indexed_count += 1
+                    document_ids.append(doc.document_id)
                 elif ext == ".hwp":
                     skipped_hwp_paths.append(str(path_obj))
                     warnings.append(HWP_RAG_FILE_MESSAGE)
@@ -311,13 +322,24 @@ class AiRagApplicationService:
                 warnings.append(f"파일 색인 실패: {path} - {e}")
                 failed_count += 1
 
-        return {
+        result = {
             "indexed_count": indexed_count,
             "failed_count": failed_count,
             "warnings": warnings,
             "document_ids": document_ids,
             "skipped_hwp_count": len(skipped_hwp_paths),
         }
+
+        if indexed_count > 0 and not self._is_vector_store_active():
+            result["warnings"].append(
+                "벡터 DB가 비활성화되어 문서가 색인되었지만 벡터 검색에 사용할 수 없습니다. "
+                "chromadb 패키지 설치 상태를 확인해 주세요."
+            )
+            logger.warning(
+                "[AiRagApplicationService] Vector store is inactive - documents indexed without vector embeddings"
+            )
+
+        return result
 
     def list_indexed_documents(
         self,
@@ -343,7 +365,7 @@ class AiRagApplicationService:
                 "document_ids": [],
             }
 
-        supported_extensions = {".md", ".markdown", ".txt", ".html", ".htm", ".docx", ".hwpx"}
+        supported_extensions = {".md", ".markdown", ".txt", ".html", ".htm", ".docx", ".hwpx", ".pdf"}
         candidate_paths: list[str] = []
         skipped_hwp: list[str] = []
 
@@ -381,6 +403,14 @@ class AiRagApplicationService:
             }
 
         result = self.index_external_files(candidate_paths, progress_callback=progress_callback)
+        logger.info(
+            "[AiRagApplicationService] Folder indexing complete: folder=%s, candidates=%d, indexed=%d, failed=%d, warnings=%s",
+            folder,
+            len(candidate_paths),
+            result.get("indexed_count", 0),
+            result.get("failed_count", 0),
+            result.get("warnings", []),
+        )
         if skipped_hwp:
             warning_text = format_hwp_folder_skip_message(len(skipped_hwp))
             result.setdefault("warnings", []).append(warning_text)
