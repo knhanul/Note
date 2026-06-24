@@ -688,7 +688,7 @@ class PromptRepository:
             ).fetchone()
             return self._row_to_dict(row)
 
-    def upsert_prompt_document(self, record: dict[str, Any]) -> None:
+    def upsert_prompt_document(self, record: dict[str, Any], *, force: bool = False) -> None:
         with self._connect() as conn:
             existing = conn.execute(
                 "SELECT source_type, readonly, archived FROM ai_prompt_documents WHERE prompt_doc_id = ?",
@@ -696,10 +696,10 @@ class PromptRepository:
             ).fetchone()
             existing_dict = dict(existing) if existing else None
 
-            # Check if existing is user-created - protect user prompts
-            if existing_dict and existing_dict.get("source_type") == "user":
+            # Check if existing is user-created - protect user prompts from seed imports
+            if not force and existing_dict and existing_dict.get("source_type") == "user":
                 logger.info(
-                    f"[PromptRepository] Skip user prompt: prompt_doc_id={record.get('prompt_doc_id')}, "
+                    f"[PromptRepository] Skip user prompt (seed protection): prompt_doc_id={record.get('prompt_doc_id')}, "
                     f"source_type=user"
                 )
                 return

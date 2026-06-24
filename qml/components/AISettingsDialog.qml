@@ -76,6 +76,7 @@ Rectangle {
         arr.push(trimmed)
         root.categoryList = arr
         saveCategoryList()
+        root.categoriesChanged()
         return true
     }
 
@@ -85,6 +86,7 @@ Rectangle {
         arr.splice(index, 1)
         root.categoryList = arr
         saveCategoryList()
+        root.categoriesChanged()
     }
 
     function renameCategory(index, newName) {
@@ -99,6 +101,7 @@ Rectangle {
         arr[index] = trimmed
         root.categoryList = arr
         saveCategoryList()
+        root.categoriesChanged()
         // Update actions that had the old category name
         var c = typeof aiActionController !== "undefined" && aiActionController !== null ? aiActionController : null
         if (c && oldName !== trimmed) {
@@ -123,6 +126,7 @@ Rectangle {
         arr[index] = tmp
         root.categoryList = arr
         saveCategoryList()
+        root.categoriesChanged()
     }
 
     function moveCategoryDown(index) {
@@ -133,6 +137,7 @@ Rectangle {
         arr[index] = tmp
         root.categoryList = arr
         saveCategoryList()
+        root.categoriesChanged()
     }
 
     function getCategoryActionCount(categoryName) {
@@ -154,6 +159,7 @@ Rectangle {
     property string editorGuardMessage: ""
 
     signal closed()
+    signal categoriesChanged()
 
     Component.onCompleted: {
         if (!root.hasPromptController() && root.settingsMenuIndex === 1)
@@ -756,6 +762,13 @@ Rectangle {
                             id: actionManagementPanel
                             anchors.fill: parent
                             visible: typeof aiActionController !== "undefined" && aiActionController !== null
+
+                            Connections {
+                                target: root
+                                onCategoriesChanged: {
+                                    actionManagementPanel.reloadCategories()
+                                }
+                            }
                         }
 
                         ColumnLayout {
