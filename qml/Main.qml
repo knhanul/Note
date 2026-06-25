@@ -197,7 +197,7 @@ Window {
     property bool aiPanelOpen: true
     property bool promptRulesExpanded: false
     property bool promptVarsExpanded: false
-    property string promptSampleDocId: "prompt_sample_current_doc"
+    property string promptSampleDocId: "prompt_sample_guide"
     property var promptWarningMessages: []
 
     // AI Prompt Workspace Mode
@@ -971,7 +971,7 @@ Window {
             return false
         if (doc.prompt_doc_id && doc.prompt_doc_id === window.promptSampleDocId)
             return true
-        return doc.source_type && doc.source_type === "sample"
+        return doc.source_type && (doc.source_type === "sample" || doc.source_type === "sample_guide")
     }
 
     function updatePromptWarnings(markdown) {
