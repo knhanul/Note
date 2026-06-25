@@ -62,6 +62,7 @@ def configure_qml_engine(engine: QQmlApplicationEngine, config: AppConfig, servi
     engine.rootContext().setContextProperty("appLogoPath", config.logo_path)
     engine.rootContext().setContextProperty("appVariant", app_variant)
     engine.rootContext().setContextProperty("uiScale", services.settings_service.get_ui_scale())
+    engine.rootContext().setContextProperty("appImagePath", str(config.base_dir / "assets" / "images" / "markdown_grammar.png"))
 
 
 def load_main_qml(engine: QQmlApplicationEngine, config: AppConfig) -> None:

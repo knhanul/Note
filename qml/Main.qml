@@ -2781,6 +2781,9 @@ Window {
                     toolInfoDialog.open()
                 }
             }
+            onHelpClicked: {
+                markdownHelpDialog.open()
+            }
         }
 
         RowLayout {
@@ -7923,6 +7926,13 @@ Window {
         onClosed: {
             visible = false
         }
+    }
+
+    // ── Markdown Help Dialog ───────────────────────────────────────────────
+    MarkdownHelpDialog {
+        id: markdownHelpDialog
+        visible: false
+        z: 20010
     }
 
     // ── Batch Folder Picker Dialog ──────────────────────────────────────────────

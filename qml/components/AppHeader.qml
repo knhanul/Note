@@ -14,6 +14,7 @@ Rectangle {
     signal settingsClicked()
     signal hwpConversionToolClicked()
     signal ollamaModelToolClicked()
+    signal helpClicked()
 
     property string currentNoteExportIconSource: ""
     property string printIconSource: ""
@@ -280,6 +281,40 @@ Rectangle {
                 cursorShape: Qt.PointingHandCursor
                 onClicked: root.settingsClicked()
             }
+        }
+
+        Rectangle {
+            id: helpIconButton
+            Layout.preferredHeight: 32
+            Layout.preferredWidth: 32
+            radius: Metrics.radiusSm
+            color: helpIconMA.containsMouse ? Colors.bgSecondary : "transparent"
+            border.width: 1
+            border.color: helpIconMA.containsMouse ? Colors.borderLight : "transparent"
+
+            Image {
+                anchors.fill: parent
+                anchors.margins: 4
+                source: "../assets/icons/grammar_icon.png"
+                fillMode: Image.PreserveAspectFit
+                smooth: true
+                mipmap: true
+            }
+
+            ToolTip.visible: helpIconMA.containsMouse
+            ToolTip.text: "도움말"
+            ToolTip.delay: 500
+
+            MouseArea {
+                id: helpIconMA
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.helpClicked()
+            }
+
+            Accessible.role: Accessible.Button
+            Accessible.name: "AI 마크다운 문법 도움말 열기"
         }
     }
 

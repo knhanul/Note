@@ -11,3 +11,4 @@ WebNoteEditor 1.0 WebNoteEditor.qml
 UiScaleDialog 1.0 UiScaleDialog.qml
 AISettingsDialog 1.0 AISettingsDialog.qml
 AIAssistantPanel 1.0 AIAssistantPanel.qml
+MarkdownHelpDialog 1.0 MarkdownHelpDialog.qml
