@@ -552,6 +552,24 @@ Rectangle {
 
     property var ragRunStartTime: 0
 
+    // 현재문서 AI 실행 진행 상태 문구 및 경과 시간(초)
+
+    property string currentAiStatusText: ""
+
+    property int currentAiElapsedSec: 0
+
+    Timer {
+        id: currentAiElapsedTimer
+        interval: 1000
+        repeat: true
+        running: root.aiRunning
+        onTriggered: {
+            if (root.aiRunStartTime > 0) {
+                root.currentAiElapsedSec = Math.floor((new Date().getTime() - root.aiRunStartTime) / 1000)
+            }
+        }
+    }
+
 
 
     onAiModeIndexChanged: {
@@ -2140,9 +2158,9 @@ Rectangle {
 
         var selectedNoteIdBefore = ""
 
-        if (typeof selectedNoteId !== "undefined") {
+        if (typeof window !== "undefined" && window.selectedNoteId) {
 
-            selectedNoteIdBefore = selectedNoteId
+            selectedNoteIdBefore = window.selectedNoteId
 
         }
 
@@ -2318,9 +2336,9 @@ Rectangle {
 
         var selectedNoteIdAfter = ""
 
-        if (typeof selectedNoteId !== "undefined") {
+        if (typeof window !== "undefined" && window.selectedNoteId) {
 
-            selectedNoteIdAfter = selectedNoteId
+            selectedNoteIdAfter = window.selectedNoteId
 
         }
 
@@ -4042,9 +4060,9 @@ Rectangle {
 
             console.log("[AIAssistantPanel] ensureStreamingNote: opening note in editor, selectedNoteId=" + noteId)
 
-            if (typeof selectedNoteId !== "undefined") {
+            if (typeof window !== "undefined") {
 
-                selectedNoteId = noteId
+                window.selectedNoteId = noteId
 
             }
 
@@ -4468,11 +4486,31 @@ Rectangle {
 
 
 
+        ac.statusChanged.connect(function(status) {
+
+            if (root.aiRunning) {
+
+                root.currentAiStatusText = status
+
+            }
+
+        })
+
+
+
         ac.runningChanged.connect(function(running) {
 
             root.aiRunning = running
 
-            if (!running) {
+            if (running) {
+
+                root.currentAiElapsedSec = 0
+
+                root.currentAiStatusText = "AI 모델을 준비하고 있어요…"
+
+            } else {
+
+                root.currentAiStatusText = ""
 
                 console.log("[AIAssistantPanel] Task finished, currentStreamingContent.length=" + root.currentStreamingContent.length)
 
@@ -6882,7 +6920,7 @@ Rectangle {
 
                                     Text {
 
-                                        text: root.aiRunning ? "실행 중..." : (root.currentAiRunStatus.lastSuccess ? "실행 완료" : (root.currentAiRunStatus.lastErrorMessage ? "실행 실패" : ""))
+                                        text: root.aiRunning ? ((root.currentAiStatusText !== "" ? root.currentAiStatusText : "실행 중...") + (root.currentAiElapsedSec > 0 ? " · 경과 " + root.currentAiElapsedSec + "초" : "")) : (root.currentAiRunStatus.lastSuccess ? "실행 완료" : (root.currentAiRunStatus.lastErrorMessage ? "실행 실패" : ""))
 
                                         font.family: Typography.fontPrimary
 
@@ -6950,9 +6988,9 @@ Rectangle {
 
                                         onClicked: {
 
-                                            if (root.currentAiRunStatus.lastResultNoteId && typeof selectedNoteId !== "undefined") {
+                                            if (root.currentAiRunStatus.lastResultNoteId && typeof window !== "undefined") {
 
-                                                selectedNoteId = root.currentAiRunStatus.lastResultNoteId
+                                                window.selectedNoteId = root.currentAiRunStatus.lastResultNoteId
 
                                             }
 
@@ -7824,9 +7862,9 @@ Rectangle {
 
                                                 onClicked: {
 
-                                                    if (root.ragRunStatus.lastResultNoteId && typeof selectedNoteId !== "undefined") {
+                                                    if (root.ragRunStatus.lastResultNoteId && typeof window !== "undefined") {
 
-                                                        selectedNoteId = root.ragRunStatus.lastResultNoteId
+                                                        window.selectedNoteId = root.ragRunStatus.lastResultNoteId
 
                                                     }
 

@@ -27,7 +27,7 @@ class ToolController(QObject):
     @pyqtSlot()
     def launchHwpConversionTool(self):
         """Launch the HWP to HWPX conversion tool."""
-        tool_path = self._tools_dir / "hwp_to_hwpx_converter.exe"
+        tool_path = self._tools_dir / "HWP2HWPX_Converter.exe"
         
         if not tool_path.exists():
             error_msg = f"도구를 찾을 수 없습니다: {tool_path}"

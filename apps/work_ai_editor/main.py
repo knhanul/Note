@@ -25,18 +25,12 @@ from services.ai_rag_application_service import AiRagApplicationService
 
 # Setup logging to file for executable builds
 def setup_logging():
-    """Setup logging to console and file."""
+    """Setup logging to file for executable builds, console for script mode."""
     log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     date_format = '%Y-%m-%d %H:%M:%S'
     
-    # Console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(logging.Formatter(log_format, date_format))
-    
-    # File handler for executable builds
+    # File handler for executable builds (no console)
     if getattr(sys, 'frozen', False):
-        # Running as executable
         prog_dir = Path(sys.executable).parent
         logs_dir = prog_dir / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
@@ -48,14 +42,18 @@ def setup_logging():
         
         logging.basicConfig(
             level=logging.DEBUG,
-            handlers=[console_handler, file_handler],
+            handlers=[file_handler],
             format=log_format,
             datefmt=date_format
         )
         local_logger = logging.getLogger(__name__)
         local_logger.info(f"[Logging] Log file: {log_file}")
     else:
-        # Running as script
+        # Running as script - console output
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        console_handler.setFormatter(logging.Formatter(log_format, date_format))
+        
         logging.basicConfig(
             level=logging.INFO,
             handlers=[console_handler],

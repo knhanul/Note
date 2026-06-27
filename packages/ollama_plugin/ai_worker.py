@@ -97,7 +97,7 @@ class AIWorker(QRunnable):
             self.signals.finished.emit()
             return
 
-        self.signals.statusChanged.emit("실행 중...")
+        self.signals.statusChanged.emit("입력 내용을 분석하는 중이에요… (긴 문서는 시간이 걸릴 수 있어요)")
 
         logger.info(
             f"[AIWorker] Starting task: action_id={self.action_id}, model={self.model}, "
@@ -253,6 +253,7 @@ class AIWorker(QRunnable):
                                     # Skip empty tokens for first token detection
                                     if first_token_time is None and token:
                                         first_token_time = time.time() - start_time
+                                        self.signals.statusChanged.emit("답변을 작성하고 있어요…")
                                         logger.info(
                                             f"[AIWorker] First token received: {first_token_time:.2f}s, "
                                             f"action_id={self.action_id}"

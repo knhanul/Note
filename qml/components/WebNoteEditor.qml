@@ -273,8 +273,8 @@ ColumnLayout {
                         openNoteId = openNoteId.substring(0, splitIdx)
                     if (noteController && openNoteId) {
                         var opened = noteController.selectNote(openNoteId)
-                        if (opened && typeof selectedNoteId !== "undefined") {
-                            selectedNoteId = openNoteId
+                        if (opened && typeof window !== "undefined") {
+                            window.selectedNoteId = openNoteId
                         }
                     }
                 }

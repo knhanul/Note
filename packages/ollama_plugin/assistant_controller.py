@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from pathlib import Path
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot, pyqtProperty
 
@@ -215,12 +216,37 @@ class AssistantController(QObject):
         policy["title"] = (action or {}).get("name", "")
         return policy
 
+    def _resolve_num_thread(self, settings) -> int:
+        """Resolve CPU thread count for inference. 0 means auto-detect physical cores."""
+        configured = getattr(settings, "num_thread", 0) or 0
+        if configured > 0:
+            return configured
+        logical = os.cpu_count() or 0
+        if logical <= 0:
+            return 0
+        # Most office CPUs expose hyperthreaded logical cores; physical cores are
+        # typically half and give the best CPU inference throughput.
+        physical = max(1, logical // 2)
+        return physical
+
     def _build_generation_options(self, settings, policy: dict) -> dict:
-        return {
+        options = {
             "num_predict": policy.get("num_predict", RESPONSE_LENGTH_POLICIES["medium"]["num_predict"]),
             "num_ctx": settings.num_ctx,
             "temperature": settings.temperature,
         }
+        num_thread = self._resolve_num_thread(settings)
+        if num_thread > 0:
+            options["num_thread"] = num_thread
+        num_batch = getattr(settings, "num_batch", 0) or 0
+        if num_batch > 0:
+            options["num_batch"] = num_batch
+        logger.info(
+            f"[AssistantController] Generation options resolved: num_thread={options.get('num_thread', 'auto')}, "
+            f"num_batch={options.get('num_batch', 'default')}, num_ctx={options['num_ctx']}, "
+            f"num_predict={options['num_predict']}"
+        )
+        return options
 
     def _apply_prompt_hint(self, prompt: str, policy: dict) -> str:
         hint = policy.get("prompt_hint", "").strip()
@@ -260,7 +286,7 @@ class AssistantController(QObject):
         self._current_output_limit = policy.get("max_output_length", RESPONSE_LENGTH_POLICIES["medium"]["max_output_length"])
         self._current_response_policy = policy
         self.runningChanged.emit(True)
-        self.statusChanged.emit("실행 중...")
+        self.statusChanged.emit("AI 모델을 준비하고 있어요…")
 
         self._current_worker = self._worker_manager.run_task(
             prompt=prompt_to_send,

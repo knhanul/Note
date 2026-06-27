@@ -30,6 +30,8 @@ class AISettings:
     temperature: float = 0.2
     keep_alive: str = "10m"  # Keep model loaded
     enable_thinking: bool = False  # Disable thinking by default to prevent token exhaustion
+    num_thread: int = 0  # CPU threads for inference (0 = auto-detect)
+    num_batch: int = 0  # Prompt prefill batch size (0 = Ollama default)
 
 
 class AISettingsManager:
@@ -51,6 +53,8 @@ class AISettingsManager:
         temperature=0.2,
         keep_alive="10m",
         enable_thinking=False,
+        num_thread=0,
+        num_batch=0,
     )
 
     LOW_PERFORMANCE_DEFAULTS = {
@@ -97,6 +101,8 @@ class AISettingsManager:
                         temperature=data.get("temperature", self.DEFAULT_SETTINGS.temperature),
                         keep_alive=data.get("keep_alive", self.DEFAULT_SETTINGS.keep_alive),
                         enable_thinking=data.get("enable_thinking", self.DEFAULT_SETTINGS.enable_thinking),
+                        num_thread=data.get("num_thread", self.DEFAULT_SETTINGS.num_thread),
+                        num_batch=data.get("num_batch", self.DEFAULT_SETTINGS.num_batch),
                     )
                     logger.info(f"Loaded AI settings from {self._settings_file}")
                     return loaded
