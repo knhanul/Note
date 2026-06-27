@@ -2,12 +2,19 @@ import importlib
 from pathlib import Path
 import unittest
 
+try:
+    from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
+    _HAS_WEBENGINE = True
+except ImportError:
+    _HAS_WEBENGINE = False
+
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 SPECIAL_EDITOR_DIR = ROOT_DIR / "apps" / "special_editor"
 
 
 class SpecialEditorSkeletonTest(unittest.TestCase):
+    @unittest.skipUnless(_HAS_WEBENGINE, "QtWebEngineWidgets not available")
     def test_special_editor_modules_import_without_running_app(self):
         module_names = [
             "apps.special_editor",

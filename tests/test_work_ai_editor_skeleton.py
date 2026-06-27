@@ -4,12 +4,19 @@ import unittest
 
 from packages.plugin_api import PluginRegistry
 
+try:
+    from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
+    _HAS_WEBENGINE = True
+except ImportError:
+    _HAS_WEBENGINE = False
+
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 WORK_AI_EDITOR_DIR = ROOT_DIR / "apps" / "work_ai_editor"
 
 
 class WorkAiEditorSkeletonTest(unittest.TestCase):
+    @unittest.skipUnless(_HAS_WEBENGINE, "QtWebEngineWidgets not available")
     def test_work_ai_editor_modules_import_without_running_app(self):
         module_names = [
             "apps.work_ai_editor",
