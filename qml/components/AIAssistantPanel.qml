@@ -558,6 +558,9 @@ Rectangle {
 
     property int currentAiElapsedSec: 0
 
+    // 입력 문자 수: prefill(문서 분석) 단계에서 진행감을 주기 위해 표시
+    property int currentAiInputChars: 0
+
     Timer {
         id: currentAiElapsedTimer
         interval: 1000
@@ -2290,6 +2293,10 @@ Rectangle {
 
         root.currentStreamingNoteId = ""
 
+        root._streamFlushPending = false
+
+        root._firstStreamFlushDone = false
+
         root.currentStreamingContent = ""
 
         root.currentStreamingTitle = ""
@@ -2303,6 +2310,8 @@ Rectangle {
         // 실행 시작 시간 기록 및 상태 초기화
 
         root.aiRunStartTime = new Date().getTime()
+
+        root.currentAiInputChars = (sourceContent || "").length
 
         root.currentAiRunStatus = {
 
@@ -3172,6 +3181,10 @@ Rectangle {
         // Reset and prepare streaming note immediately
 
         root.currentStreamingNoteId = ""
+
+        root._streamFlushPending = false
+
+        root._firstStreamFlushDone = false
 
         root.currentStreamingContent = ""
 
@@ -4076,11 +4089,71 @@ Rectangle {
 
 
 
+    // --- Streaming UI batching -------------------------------------------
+    // Tokens are accumulated into currentStreamingContent immediately, but the
+    // expensive UI work (Python updateNote + full markdown re-render) is
+    // batched on a timer. The first token is flushed immediately so the user
+    // sees a response as fast as possible.
+    property bool _streamFlushPending: false
+    property bool _firstStreamFlushDone: false
+
+    Timer {
+        id: streamFlushTimer
+        // Longer interval for large documents to reduce full re-parse cost.
+        interval: root.currentStreamingContent.length > 20000 ? 400 : 200
+        repeat: true
+        running: root.aiRunning && root.currentStreamingNoteId !== ""
+        onTriggered: {
+            if (root._streamFlushPending) {
+                root.flushStreamingNote()
+            }
+        }
+    }
+
+    function flushStreamingNote() {
+        root._streamFlushPending = false
+        var noteId = root.currentStreamingNoteId
+        if (!noteId) return
+
+        var nc = getNoteController()
+        if (!nc) {
+            console.log("[AIAssistantPanel] flushStreamingNote: no noteController")
+            return
+        }
+
+        nc.updateNote(noteId, root.currentStreamingTitle, root.currentStreamingContent)
+
+        // Force WebNoteEditor to refresh for live streaming visibility.
+        if (root.noteEditorRef && typeof window !== "undefined" && window.selectedNoteId === noteId) {
+            if (typeof root.noteEditorRef.applyLiveMarkdown === "function") {
+                root.noteEditorRef.applyLiveMarkdown(root.currentStreamingContent)
+            } else if (typeof root.noteEditorRef.setEditorContent === "function") {
+                root.noteEditorRef.setEditorContent(root.currentStreamingContent, "")
+            }
+        }
+    }
+
+    function finishStreamingNote() {
+        // Final flush + one-time window.currentNote binding refresh.
+        if (root._streamFlushPending) {
+            flushStreamingNote()
+        }
+        var noteId = root.currentStreamingNoteId
+        if (!noteId) return
+        if (typeof window !== "undefined" && window.currentNote && window.selectedNoteId === noteId) {
+            window.currentNote = {
+                id: window.currentNote.id || noteId,
+                title: root.currentStreamingTitle,
+                content: root.currentStreamingContent,
+                content_json: window.currentNote.content_json || "",
+                tags: window.currentNote.tags || ""
+            }
+        }
+    }
+
     function updateStreamingNote(newText, isAppend) {
 
         var noteId = ensureStreamingNote()
-
-        console.log("[AIAssistantPanel] updateStreamingNote: noteId=" + noteId + ", isAppend=" + isAppend + ", textLen=" + newText.length)
 
         if (!noteId) {
 
@@ -4106,65 +4179,24 @@ Rectangle {
 
 
 
-        var nc = getNoteController()
+        // Immediate flush cases:
+        //  - first token: fastest perceived response
+        //  - full replacement (final result / RAG answer / error rewrite)
+        //  - not running (error/final paths outside streaming)
+        if (!root._firstStreamFlushDone || !isAppend || !root.aiRunning) {
 
-        if (nc) {
+            root._firstStreamFlushDone = true
 
-            console.log("[AIAssistantPanel] updateStreamingNote: calling nc.updateNote, contentLen=" + root.currentStreamingContent.length)
+            flushStreamingNote()
 
-            nc.updateNote(noteId, root.currentStreamingTitle, root.currentStreamingContent)
-
-            
-
-            // Also update current note cache by reassignment so bindings are notified.
-
-            if (typeof window !== "undefined" && window.currentNote && window.selectedNoteId === noteId) {
-
-                console.log("[AIAssistantPanel] updateStreamingNote: refreshing window.currentNote binding")
-
-                window.currentNote = {
-
-                    id: window.currentNote.id || noteId,
-
-                    title: root.currentStreamingTitle,
-
-                    content: root.currentStreamingContent,
-
-                    content_json: window.currentNote.content_json || "",
-
-                    tags: window.currentNote.tags || ""
-
-                }
-
-            }
-
-            
-
-            // Force WebNoteEditor to refresh immediately for live streaming visibility.
-
-            if (root.noteEditorRef && typeof window !== "undefined" && window.selectedNoteId === noteId) {
-
-                if (typeof root.noteEditorRef.applyLiveMarkdown === "function") {
-
-                    console.log("[AIAssistantPanel] updateStreamingNote: forcing noteEditorRef.applyLiveMarkdown")
-
-                    root.noteEditorRef.applyLiveMarkdown(root.currentStreamingContent)
-
-                } else if (typeof root.noteEditorRef.setEditorContent === "function") {
-
-                    console.log("[AIAssistantPanel] updateStreamingNote: fallback noteEditorRef.setEditorContent")
-
-                    root.noteEditorRef.setEditorContent(root.currentStreamingContent, "")
-
-                }
-
-            }
-
-        } else {
-
-            console.log("[AIAssistantPanel] updateStreamingNote: no noteController")
+            return
 
         }
+
+
+
+        // Otherwise batch: timer will flush at most every 200-400ms.
+        root._streamFlushPending = true
 
     }
 
@@ -4462,9 +4494,17 @@ Rectangle {
 
 
 
-        ac.tokenReceived.connect(function(token) {
+        // Pre-load the model in the background so the first real run skips
+        // model load time (can be tens of seconds on CPU-only office PCs).
+        if (typeof ac.warmupModel === "function") {
 
-            console.log("[AIAssistantPanel] Token received: length=" + token.length + ", currentStreamingContent.length=" + root.currentStreamingContent.length)
+            ac.warmupModel()
+
+        }
+
+
+
+        ac.tokenReceived.connect(function(token) {
 
             updateStreamingNote(token, true)
 
@@ -4511,6 +4551,9 @@ Rectangle {
             } else {
 
                 root.currentAiStatusText = ""
+
+                // Flush any pending streamed content and refresh currentNote binding once.
+                finishStreamingNote()
 
                 console.log("[AIAssistantPanel] Task finished, currentStreamingContent.length=" + root.currentStreamingContent.length)
 
@@ -4624,6 +4667,8 @@ Rectangle {
                     root.currentRagAnswerText = answerText || ""
 
                     refreshRagStreamingNoteContent()
+
+                    finishStreamingNote()
 
                 } else {
 
@@ -6920,7 +6965,7 @@ Rectangle {
 
                                     Text {
 
-                                        text: root.aiRunning ? ((root.currentAiStatusText !== "" ? root.currentAiStatusText : "실행 중...") + (root.currentAiElapsedSec > 0 ? " · 경과 " + root.currentAiElapsedSec + "초" : "")) : (root.currentAiRunStatus.lastSuccess ? "실행 완료" : (root.currentAiRunStatus.lastErrorMessage ? "실행 실패" : ""))
+                                        text: root.aiRunning ? ((root.currentAiStatusText !== "" ? root.currentAiStatusText : "실행 중...") + (!root._firstStreamFlushDone && root.currentAiInputChars > 0 ? " · 입력 " + root.currentAiInputChars + "자" : "") + (root.currentAiElapsedSec > 0 ? " · 경과 " + root.currentAiElapsedSec + "초" : "")) : (root.currentAiRunStatus.lastSuccess ? "실행 완료" : (root.currentAiRunStatus.lastErrorMessage ? "실행 실패" : ""))
 
                                         font.family: Typography.fontPrimary
 

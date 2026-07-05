@@ -3,6 +3,8 @@
 import json
 import logging
 import os
+import threading
+import urllib.request
 from pathlib import Path
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot, pyqtProperty
 
@@ -94,6 +96,9 @@ class AssistantController(QObject):
             "last_action_id": None,
             "last_reason": None,
         }
+        self._warmup_lock = threading.Lock()
+        self._warmup_in_progress = False
+        self._warmed_up_model = ""
 
     def set_note_controller(self, controller):
         """Set note controller for creating notes."""
@@ -159,7 +164,7 @@ class AssistantController(QObject):
 
     def _on_token_received(self, token: str):
         """Handle token received."""
-        logger.info(f"[AssistantController] Token received from worker: len={len(token)}, response_text_len={len(self._response_text)}")
+        logger.debug(f"[AssistantController] Token received from worker: len={len(token)}, response_text_len={len(self._response_text)}")
         limit = self._current_output_limit or 0
         if limit <= 0:
             self._response_text += token
@@ -769,6 +774,71 @@ class AssistantController(QObject):
             f"fallback_hit_count={self._legacy_fallback_stats['listActions_hits']}"
         )
         return legacy_actions
+
+    @pyqtSlot()
+    def warmupModel(self):
+        """Pre-load the chat model into Ollama memory in the background.
+
+        Sends an empty-prompt /api/generate request which makes Ollama load the
+        model without generating tokens. This removes the model load time
+        (often tens of seconds on CPU-only office PCs) from the first real run.
+        Failures are logged and silently ignored.
+        """
+        settings = self._settings_manager.settings
+        model = settings.chat_model
+        if not model:
+            logger.info("[AssistantController] warmupModel: no chat model selected, skipping")
+            return
+        if self._worker_manager.is_running():
+            logger.info("[AssistantController] warmupModel: task running, skipping")
+            return
+
+        with self._warmup_lock:
+            if self._warmup_in_progress:
+                logger.info("[AssistantController] warmupModel: already in progress, skipping")
+                return
+            if self._warmed_up_model == model:
+                logger.info(f"[AssistantController] warmupModel: model already warmed up: {model}")
+                return
+            self._warmup_in_progress = True
+
+        base_url = settings.base_url.rstrip("/")
+        keep_alive = settings.keep_alive
+
+        def _do_warmup():
+            import time
+            start = time.time()
+            try:
+                payload = {
+                    "model": model,
+                    "prompt": "",
+                    "stream": False,
+                }
+                if keep_alive:
+                    payload["keep_alive"] = keep_alive
+                request = urllib.request.Request(
+                    f"{base_url}/api/generate",
+                    data=json.dumps(payload).encode("utf-8"),
+                    method="POST",
+                )
+                request.add_header("Content-Type", "application/json")
+                with urllib.request.urlopen(request, timeout=180) as response:
+                    response.read()
+                elapsed = time.time() - start
+                with self._warmup_lock:
+                    self._warmed_up_model = model
+                logger.info(
+                    f"[AssistantController] Model warmup complete: model={model}, elapsed={elapsed:.2f}s"
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"[AssistantController] Model warmup failed (ignored): {e}")
+            finally:
+                with self._warmup_lock:
+                    self._warmup_in_progress = False
+
+        thread = threading.Thread(target=_do_warmup, name="ollama-warmup", daemon=True)
+        thread.start()
+        logger.info(f"[AssistantController] Model warmup started: model={model}")
 
     @pyqtSlot(str)
     def testPrompt(self, prompt: str):

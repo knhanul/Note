@@ -428,13 +428,12 @@ ColumnLayout {
         var js = "window.__liveMdChunks = " + JSON.stringify(chunks) + ";"
         js += "window.__liveMd = window.__liveMdChunks.join('');"
         js += "if (window.editorAPI && window.editorAPI.setMarkdown) { window.editorAPI.setMarkdown(window.__liveMd); }"
-        // Multiple scroll attempts with increasing delays for reliability during streaming
-        js += "setTimeout(function() { if (window.editorAPI && window.editorAPI.scrollToBottom) { window.editorAPI.scrollToBottom(); } }, 50);"
-        js += "setTimeout(function() { if (window.editorAPI && window.editorAPI.scrollToBottom) { window.editorAPI.scrollToBottom(); } }, 150);"
-        js += "setTimeout(function() { if (window.editorAPI && window.editorAPI.scrollToBottom) { window.editorAPI.scrollToBottom(); } }, 300);"
-        // Fallback: scroll the WebEngineView itself
-        js += "setTimeout(function() { window.scrollTo(0, document.body.scrollHeight); }, 100);"
-        js += "setTimeout(function() { window.scrollTo(0, document.body.scrollHeight); }, 250);"
+        // Single scroll after the DOM has been updated (next frame) to keep
+        // per-flush overhead low during streaming.
+        js += "requestAnimationFrame(function() {"
+        js += "  if (window.editorAPI && window.editorAPI.scrollToBottom) { window.editorAPI.scrollToBottom(); }"
+        js += "  else { window.scrollTo(0, document.body.scrollHeight); }"
+        js += "});"
         webView.runJavaScript(js)
     }
     

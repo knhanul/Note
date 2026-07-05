@@ -261,7 +261,7 @@ class AIWorker(QRunnable):
                                     
                                     # Only emit non-empty response tokens
                                     if token:
-                                        logger.info(f"[AIWorker] Emitting token: len={len(token)}, action_id={self.action_id}")
+                                        logger.debug(f"[AIWorker] Emitting token: len={len(token)}, action_id={self.action_id}")
                                         self.signals.tokenReceived.emit(token)
                                         accumulated_response += token
                                     

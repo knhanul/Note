@@ -28,7 +28,7 @@ class AISettings:
     num_predict: int = 1024
     num_ctx: int = 4096
     temperature: float = 0.2
-    keep_alive: str = "10m"  # Keep model loaded
+    keep_alive: str = "30m"  # Keep model loaded
     enable_thinking: bool = False  # Disable thinking by default to prevent token exhaustion
     num_thread: int = 0  # CPU threads for inference (0 = auto-detect)
     num_batch: int = 0  # Prompt prefill batch size (0 = Ollama default)
@@ -51,7 +51,7 @@ class AISettingsManager:
         num_predict=1024,
         num_ctx=4096,
         temperature=0.2,
-        keep_alive="10m",
+        keep_alive="30m",
         enable_thinking=False,
         num_thread=0,
         num_batch=0,
@@ -61,7 +61,7 @@ class AISettingsManager:
         "num_predict": 1024,
         "num_ctx": 4096,
         "temperature": 0.2,
-        "keep_alive": "10m",
+        "keep_alive": "30m",
         "timeout": 300,
     }
 
@@ -163,7 +163,7 @@ class AISettingsManager:
             self.settings.num_predict = 1024
             self.settings.num_ctx = 4096
             self.settings.temperature = 0.2
-            self.settings.keep_alive = "10m"
+            self.settings.keep_alive = "30m"
             self.settings.timeout = 300
         elif mode == "high":
             self.settings.top_k = 10
