@@ -85,3 +85,30 @@ class SettingsService(QObject):
     def set_include_subfolders(self, include: bool):
         """Set include subfolders setting for note list view."""
         self.set("include_subfolders", include)
+
+    def get_ai_category_list(self) -> list:
+        """Get AI category list from settings."""
+        value = self._data.get("ai_category_list")
+        if isinstance(value, list):
+            return value
+        try:
+            parsed = json.loads(value) if isinstance(value, str) else value
+            return parsed if isinstance(parsed, list) else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    def set_ai_category_list(self, categories: list):
+        """Set AI category list in settings."""
+        if not isinstance(categories, list):
+            categories = []
+        self.set("ai_category_list", categories)
+
+    @pyqtSlot(result="QVariantList")
+    def get_ai_category_list_qml(self) -> list:
+        """Get AI category list for QML."""
+        return self.get_ai_category_list()
+
+    @pyqtSlot("QVariantList")
+    def set_ai_category_list_qml(self, categories: list):
+        """Set AI category list for QML."""
+        self.set_ai_category_list(categories)

@@ -1,7 +1,11 @@
 {
   "last_library_id": "a6663740",
+<<<<<<< HEAD
   "last_folder_id": "584571fb",
+=======
+  "last_folder_id": "debe3624",
+>>>>>>> feature/ollama
   "ai_panel_action_selection_order": "{\"categories\":[],\"actions\":{},\"favorites\":[\"polish_selection\",\"extract_todo\",\"suggest_title_tags\",\"current_note_qa\"]}",
-  "ai_category_list": "[\"입력창 전용\",\"문서 처리\",\"문장 편집\",\"발표자료 처리\",\"업무 정리\",\"엑셀 처리\",\"SQL\",\"엑셀\"]",
+  "ai_category_list": "[\"데이터·자동화\"]",
   "include_subfolders": false
 }

@@ -28,8 +28,8 @@ DEFAULT_RESPONSE_LENGTH = "medium"
 class PromptService:
     """Business logic for AI prompt documents and action-to-prompt bindings."""
 
-    def __init__(self, app_data_dir: Path, prompt_package_dir: Path | None = None):
-        self._seed_service = PromptSeedService(app_data_dir, prompt_package_dir)
+    def __init__(self, app_data_dir: Path, prompt_package_dir: Path | None = None, settings_service=None):
+        self._seed_service = PromptSeedService(app_data_dir, prompt_package_dir, settings_service)
         self._repo: PromptRepository = self._seed_service.ensure_seeded()
         self._renderer = PromptRenderer()
 

@@ -18,6 +18,7 @@ import logging
 from app_bootstrap import bootstrap_app
 from app_config import create_app_config
 from packages.ollama_plugin import AIAssistantController, AssistantController, OllamaAssistantPlugin, PromptController, AIPromptDocumentController, AIActionController
+from packages.ollama_plugin.ai_prompt_seed_service import PromptSeedService
 from packages.plugin_api import PluginRegistry, PluginContext
 from controllers.ai_rag_controller import AiRagController
 from controllers.tool_controller import ToolController
@@ -67,6 +68,7 @@ logger = logging.getLogger(__name__)
 
 def plugin_setup(engine, services, config):
     """Setup AI plugins for work_ai_editor."""
+    PromptSeedService.set_default_settings_service(services.settings_service)
     logger.info("[work_ai_editor] Setting up AI plugins...")
 
     # Setup AI Assistant Controller for QML
@@ -82,7 +84,7 @@ def plugin_setup(engine, services, config):
     engine.rootContext().setContextProperty("assistantController", assistant_controller)
     engine._assistant_controller = assistant_controller  # Prevent GC
 
-    prompt_controller = PromptController(config.app_data_dir)
+    prompt_controller = PromptController(config.app_data_dir, settings_service=services.settings_service)
     engine.rootContext().setContextProperty("promptController", prompt_controller)
     engine._prompt_controller = prompt_controller  # Prevent GC
 

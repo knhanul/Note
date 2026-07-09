@@ -37,17 +37,23 @@ class PromptSeedService:
 
     _seeded_paths: set[str] = set()
     _seed_lock = threading.Lock()
+    _default_settings_service = None
 
     DEFAULT_PROMPTS: tuple[SeedPromptSpec, ...] = ()
 
     DEFAULT_ACTIONS: tuple[dict, ...] = ()
 
-    def __init__(self, app_data_dir: Path, prompt_package_dir: Path | None = None):
+    @classmethod
+    def set_default_settings_service(cls, settings_service) -> None:
+        cls._default_settings_service = settings_service
+
+    def __init__(self, app_data_dir: Path, prompt_package_dir: Path | None = None, settings_service=None):
         self._app_data_dir = Path(app_data_dir)
         self._prompt_dir = self._app_data_dir / "ai"
         self._db_path = self._prompt_dir / self.DB_FILENAME
         self._package_prompt_dir = prompt_package_dir or Path(__file__).parent / "prompts"
         self._repo = PromptRepository(self._db_path)
+        self._settings_service = settings_service if settings_service is not None else self._default_settings_service
 
     @property
     def repository(self) -> PromptRepository:
@@ -65,26 +71,30 @@ class PromptSeedService:
         prompt_ids = self._repo.get_prompt_doc_ids()
         return len(action_ids) == 0 and len(prompt_ids) == 0
 
-    def _try_json_bootstrap(self) -> bool:
-        """Try JSON bootstrap. Returns True if bootstrap succeeded."""
+    def _try_json_bootstrap(self) -> tuple[bool, list[str]]:
+        """Try JSON bootstrap. Returns (success, category_list)."""
         from .ai_prompt_bootstrap_service import PromptBootstrapService
 
         bootstrap = PromptBootstrapService()
         data = bootstrap.load_json_pack()
         if data is None:
-            return False
+            return False, []
 
         actions = data.get("actions", [])
         prompts = data.get("prompts", [])
 
+        # Extract unique categories from actions (always extract for category reset)
+        categories = sorted(set(action.get("category", "") for action in actions if action.get("category")))
+        categories = [c for c in categories if c]  # Remove empty strings
+
         if not actions and not prompts:
             logger.info("[PromptBootstrap] JSON prompt pack has no actions/prompts. Use built-in seed fallback.")
-            return False
+            return False, categories
 
         error = bootstrap.validate_pack(data)
         if error:
             logger.warning(f"[PromptBootstrap] Failed JSON bootstrap: {error}. Use built-in seed fallback.")
-            return False
+            return False, categories
 
         try:
             self._repo.ensure_schema()
@@ -102,12 +112,12 @@ class PromptSeedService:
                     self._repo.set_binding(action_id, prompt_doc_id)
 
             logger.info(
-                f"[PromptBootstrap] Completed JSON bootstrap: actions={len(actions)}, prompts={len(prompts)}, bindings={len(bindings)}"
+                f"[PromptBootstrap] Completed JSON bootstrap: actions={len(actions)}, prompts={len(prompts)}, bindings={len(bindings)}, categories={len(categories)}"
             )
-            return True
+            return True, categories
         except Exception as e:
             logger.warning(f"[PromptBootstrap] Failed JSON bootstrap: {e}. Use built-in seed fallback.")
-            return False
+            return False, categories
 
     def ensure_seeded(self) -> PromptRepository:
         normalized_path = str(self._app_data_dir.resolve())
@@ -122,7 +132,12 @@ class PromptSeedService:
 
                 if self._is_db_missing_or_empty():
                     logger.info("[PromptBootstrap] Prompt DB missing or empty. Start JSON prompt pack bootstrap.")
-                    if self._try_json_bootstrap():
+                    success, categories = self._try_json_bootstrap()
+                    # Always reset AI category list when DB is empty (replace existing categories)
+                    if self._settings_service:
+                        self._settings_service.set_ai_category_list(categories)
+                        logger.info(f"[PromptSeedService] Reset AI category list: {categories}")
+                    if success:
                         self._seeded_paths.add(normalized_path)
                         return self._repo
 
