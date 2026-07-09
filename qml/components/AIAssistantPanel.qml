@@ -5448,13 +5448,35 @@ Rectangle {
 
                                                 Image {
 
-                                                    source: "../assets/icons/AIfolder.png"
+                                                    source: categoryDelegate.categoryName === root.favoriteCategoryName ? "" : "../assets/icons/AIfolder.png"
 
                                                     Layout.preferredWidth: 16
 
                                                     Layout.preferredHeight: 16
 
                                                     fillMode: Image.PreserveAspectFit
+
+                                                    visible: categoryDelegate.categoryName !== root.favoriteCategoryName
+
+                                                }
+
+                                                Text {
+
+                                                    text: "★"
+
+                                                    font.pixelSize: 16
+
+                                                    color: Colors.warning
+
+                                                    Layout.preferredWidth: 16
+
+                                                    Layout.preferredHeight: 16
+
+                                                    horizontalAlignment: Text.AlignHCenter
+
+                                                    verticalAlignment: Text.AlignVCenter
+
+                                                    visible: categoryDelegate.categoryName === root.favoriteCategoryName
 
                                                 }
 

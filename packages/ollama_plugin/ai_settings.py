@@ -53,12 +53,34 @@ class AISettingsManager:
         enable_thinking=False,
     )
 
-    LOW_PERFORMANCE_DEFAULTS = {
-        "num_predict": 1024,
-        "num_ctx": 4096,
-        "temperature": 0.2,
-        "keep_alive": "10m",
-        "timeout": 300,
+    PERFORMANCE_PRESETS = {
+        "low": {
+            "top_k": 3,
+            "streaming": True,
+            "num_predict": 768,
+            "num_ctx": 3072,
+            "temperature": 0.2,
+            "keep_alive": "5m",
+            "timeout": 300,
+        },
+        "normal": {
+            "top_k": 3,
+            "streaming": True,
+            "num_predict": 1024,
+            "num_ctx": 4096,
+            "temperature": 0.2,
+            "keep_alive": "10m",
+            "timeout": 500,
+        },
+        "high": {
+            "top_k": 5,
+            "streaming": True,
+            "num_predict": 2048,
+            "num_ctx": 8192,
+            "temperature": 0.3,
+            "keep_alive": "30m",
+            "timeout": 600,
+        },
     }
 
     def __init__(self, app_data_dir: Path | None = None) -> None:
@@ -140,33 +162,18 @@ class AISettingsManager:
         return self.save()
 
     def update_performance_mode(self, mode: str) -> bool:
-        """Update performance mode and adjust settings."""
+        """Update performance mode and adjust settings based on preset."""
         self.settings.performance_mode = mode
 
-        if mode == "low":
-            self.settings.top_k = 3
-            self.settings.streaming = True
-            self.settings.num_predict = self.LOW_PERFORMANCE_DEFAULTS["num_predict"]
-            self.settings.num_ctx = self.LOW_PERFORMANCE_DEFAULTS["num_ctx"]
-            self.settings.temperature = self.LOW_PERFORMANCE_DEFAULTS["temperature"]
-            self.settings.keep_alive = self.LOW_PERFORMANCE_DEFAULTS["keep_alive"]
-            self.settings.timeout = self.LOW_PERFORMANCE_DEFAULTS["timeout"]
-        elif mode == "normal":
-            self.settings.top_k = 5
-            self.settings.streaming = True
-            self.settings.num_predict = 1024
-            self.settings.num_ctx = 4096
-            self.settings.temperature = 0.2
-            self.settings.keep_alive = "10m"
-            self.settings.timeout = 300
-        elif mode == "high":
-            self.settings.top_k = 10
-            self.settings.streaming = True
-            self.settings.num_predict = self.DEFAULT_SETTINGS.num_predict * 2
-            self.settings.num_ctx = self.DEFAULT_SETTINGS.num_ctx * 2
-            self.settings.temperature = self.DEFAULT_SETTINGS.temperature
-            self.settings.keep_alive = "30m"
-            self.settings.timeout = self.DEFAULT_SETTINGS.timeout * 2
+        preset = self.PERFORMANCE_PRESETS.get(mode)
+        if preset:
+            self.settings.top_k = preset["top_k"]
+            self.settings.streaming = preset["streaming"]
+            self.settings.num_predict = preset["num_predict"]
+            self.settings.num_ctx = preset["num_ctx"]
+            self.settings.temperature = preset["temperature"]
+            self.settings.keep_alive = preset["keep_alive"]
+            self.settings.timeout = preset["timeout"]
 
         return self.save()
 

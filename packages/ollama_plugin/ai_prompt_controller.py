@@ -23,9 +23,9 @@ class PromptController(QObject):
     currentPromptDocumentIdChanged = pyqtSignal()
     openPromptDocumentRequested = pyqtSignal(str)  # Emit when user wants to open prompt in main editor
 
-    def __init__(self, app_data_dir: Path, prompt_package_dir: Path | None = None, parent=None):
+    def __init__(self, app_data_dir: Path, prompt_package_dir: Path | None = None, settings_service=None, parent=None):
         super().__init__(parent)
-        self._service = PromptService(app_data_dir, prompt_package_dir)
+        self._service = PromptService(app_data_dir, prompt_package_dir, settings_service)
         self._actions: list[dict] = []
         self._prompt_documents: list[dict] = []
         self._current_action_id = ""

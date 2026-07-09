@@ -118,27 +118,6 @@ Rectangle {
         return true
     }
 
-    function moveCategoryUp(index) {
-        if (index <= 0 || index >= root.categoryList.length) return
-        var arr = root.categoryList.slice()
-        var tmp = arr[index - 1]
-        arr[index - 1] = arr[index]
-        arr[index] = tmp
-        root.categoryList = arr
-        saveCategoryList()
-        root.categoriesChanged()
-    }
-
-    function moveCategoryDown(index) {
-        if (index < 0 || index >= root.categoryList.length - 1) return
-        var arr = root.categoryList.slice()
-        var tmp = arr[index + 1]
-        arr[index + 1] = arr[index]
-        arr[index] = tmp
-        root.categoryList = arr
-        saveCategoryList()
-        root.categoriesChanged()
-    }
 
     function getCategoryActionCount(categoryName) {
         var c = typeof aiActionController !== "undefined" && aiActionController !== null ? aiActionController : null
@@ -662,28 +641,41 @@ Rectangle {
                                             color: Colors.textSecondary
                                         }
 
-                                        RowLayout {
-                                            Layout.fillWidth: false
-                                            Layout.preferredWidth: 260
-                                            Layout.maximumWidth: 260
-                                            Layout.alignment: Qt.AlignLeft
-                                            spacing: Metrics.xs
-                                            height: 24
+                                        // Helper functions
+                                        function getModeLabel(mode) {
+                                            if (mode === "low") return "저사양"
+                                            if (mode === "normal") return "일반"
+                                            if (mode === "high") return "고성능"
+                                            return ""
+                                        }
+                                        function getModeDesc(mode) {
+                                            if (mode === "low") return "저사양 PC와 간단한 질문에 적합합니다."
+                                            if (mode === "normal") return "대부분의 작업에 적합한 기본 추천 모드입니다."
+                                            if (mode === "high") return "긴 문서와 복잡한 질문을 더 깊게 분석합니다."
+                                            return ""
+                                        }
+                                        function getModeValues(mode) {
+                                            if (mode === "low") return { topK: 3, numPredict: 768, numCtx: 3072, temp: "0.2", keepAlive: "5분", timeout: "300초(5분)" }
+                                            if (mode === "normal") return { topK: 3, numPredict: 1024, numCtx: 4096, temp: "0.2", keepAlive: "10분", timeout: "500초(약 8분)" }
+                                            if (mode === "high") return { topK: 5, numPredict: 2048, numCtx: 8192, temp: "0.3", keepAlive: "30분", timeout: "600초(10분)" }
+                                            return { topK: 0, numPredict: 0, numCtx: 0, temp: "", keepAlive: "", timeout: "" }
+                                        }
 
+                                        // 3-segment bar selector
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: 32
+                                            spacing: 0
+
+                                            // Low
                                             Rectangle {
                                                 Layout.fillHeight: true
                                                 Layout.fillWidth: true
                                                 radius: Metrics.radiusSm
-                                                color: root.aiPerformanceMode === "low" ? Colors.success : Colors.bgTertiary
+                                                color: root.aiPerformanceMode === "low" ? Colors.primary500 : Colors.bgTertiary
                                                 border.color: Colors.borderLight
                                                 border.width: root.aiPerformanceMode === "low" ? 0 : 1
-                                                Text {
-                                                    anchors.centerIn: parent
-                                                    text: "저사양"
-                                                    font.family: Typography.fontPrimary
-                                                    font.pixelSize: Typography.caption
-                                                    color: root.aiPerformanceMode === "low" ? Colors.bgPrimary : Colors.textSecondary
-                                                }
+
                                                 MouseArea {
                                                     anchors.fill: parent
                                                     onClicked: {
@@ -694,22 +686,26 @@ Rectangle {
                                                         }
                                                     }
                                                 }
+
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    text: "저사양"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.caption
+                                                    font.weight: root.aiPerformanceMode === "low" ? Font.Bold : Font.Normal
+                                                    color: root.aiPerformanceMode === "low" ? Colors.bgPrimary : Colors.textSecondary
+                                                }
                                             }
 
+                                            // Normal
                                             Rectangle {
                                                 Layout.fillHeight: true
                                                 Layout.fillWidth: true
                                                 radius: 0
-                                                color: root.aiPerformanceMode === "normal" ? Colors.success : Colors.bgTertiary
+                                                color: root.aiPerformanceMode === "normal" ? Colors.primary500 : Colors.bgTertiary
                                                 border.color: Colors.borderLight
                                                 border.width: root.aiPerformanceMode === "normal" ? 0 : 1
-                                                Text {
-                                                    anchors.centerIn: parent
-                                                    text: "일반"
-                                                    font.family: Typography.fontPrimary
-                                                    font.pixelSize: Typography.caption
-                                                    color: root.aiPerformanceMode === "normal" ? Colors.bgPrimary : Colors.textSecondary
-                                                }
+
                                                 MouseArea {
                                                     anchors.fill: parent
                                                     onClicked: {
@@ -720,22 +716,42 @@ Rectangle {
                                                         }
                                                     }
                                                 }
+
+                                                RowLayout {
+                                                    anchors.centerIn: parent
+                                                    spacing: Metrics.xs
+
+                                                    Text {
+                                                        text: "일반"
+                                                        font.family: Typography.fontPrimary
+                                                        font.pixelSize: Typography.caption
+                                                        font.weight: root.aiPerformanceMode === "normal" ? Font.Bold : Font.Normal
+                                                        color: root.aiPerformanceMode === "normal" ? Colors.bgPrimary : Colors.textSecondary
+                                                    }
+
+                                                    Rectangle {
+                                                        width: 28; height: 14; radius: 7
+                                                        color: root.aiPerformanceMode === "normal" ? Colors.bgPrimary : Colors.primary100
+                                                        visible: root.aiPerformanceMode !== "normal"
+                                                        Text {
+                                                            anchors.centerIn: parent
+                                                            text: "추천"
+                                                            font.pixelSize: 8
+                                                            color: Colors.primary700
+                                                        }
+                                                    }
+                                                }
                                             }
 
+                                            // High
                                             Rectangle {
                                                 Layout.fillHeight: true
                                                 Layout.fillWidth: true
                                                 radius: Metrics.radiusSm
-                                                color: root.aiPerformanceMode === "high" ? Colors.success : Colors.bgTertiary
+                                                color: root.aiPerformanceMode === "high" ? Colors.primary500 : Colors.bgTertiary
                                                 border.color: Colors.borderLight
                                                 border.width: root.aiPerformanceMode === "high" ? 0 : 1
-                                                Text {
-                                                    anchors.centerIn: parent
-                                                    text: "고성능"
-                                                    font.family: Typography.fontPrimary
-                                                    font.pixelSize: Typography.caption
-                                                    color: root.aiPerformanceMode === "high" ? Colors.bgPrimary : Colors.textSecondary
-                                                }
+
                                                 MouseArea {
                                                     anchors.fill: parent
                                                     onClicked: {
@@ -745,6 +761,91 @@ Rectangle {
                                                             syncAssistantSettings()
                                                         }
                                                     }
+                                                }
+
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    text: "고성능"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.caption
+                                                    font.weight: root.aiPerformanceMode === "high" ? Font.Bold : Font.Normal
+                                                    color: root.aiPerformanceMode === "high" ? Colors.bgPrimary : Colors.textSecondary
+                                                }
+                                            }
+                                        }
+
+                                        // Short description of selected mode
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: parent.getModeDesc(root.aiPerformanceMode)
+                                            font.family: Typography.fontPrimary
+                                            font.pixelSize: Typography.caption
+                                            color: Colors.textSecondary
+                                            wrapMode: Text.WordWrap
+                                        }
+
+                                        // Always-visible settings values box
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: settingsValuesContent.implicitHeight + Metrics.sm * 2
+                                            color: Colors.bgSecondary
+                                            radius: Metrics.radiusSm
+
+                                            ColumnLayout {
+                                                id: settingsValuesContent
+                                                anchors.fill: parent
+                                                anchors.margins: Metrics.sm
+                                                spacing: Metrics.xs
+
+                                                property var vals: root.aiPerformanceMode ? parent.parent.getModeValues(root.aiPerformanceMode) : ({})
+
+                                                Text {
+                                                    Layout.fillWidth: true
+                                                    text: "• 참고 자료 범위: " + (settingsValuesContent.vals.topK || 0) + "개 — 문서 기반 답변 시 참고할 자료 수"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.caption
+                                                    color: Colors.textSecondary
+                                                    wrapMode: Text.WordWrap
+                                                }
+                                                Text {
+                                                    Layout.fillWidth: true
+                                                    text: "• 답변 길이: " + (settingsValuesContent.vals.numPredict || 0) + " — 한 번에 생성할 수 있는 최대 분량"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.caption
+                                                    color: Colors.textSecondary
+                                                    wrapMode: Text.WordWrap
+                                                }
+                                                Text {
+                                                    Layout.fillWidth: true
+                                                    text: "• 읽을 수 있는 내용 길이: " + (settingsValuesContent.vals.numCtx || 0) + " — 한 번에 참고할 수 있는 대화·문서 범위"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.caption
+                                                    color: Colors.textSecondary
+                                                    wrapMode: Text.WordWrap
+                                                }
+                                                Text {
+                                                    Layout.fillWidth: true
+                                                    text: "• 답변 창의성: " + (settingsValuesContent.vals.temp || "") + " — 낮을수록 일관된 답변, 높을수록 다양한 표현"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.caption
+                                                    color: Colors.textSecondary
+                                                    wrapMode: Text.WordWrap
+                                                }
+                                                Text {
+                                                    Layout.fillWidth: true
+                                                    text: "• AI 대기 유지: " + (settingsValuesContent.vals.keepAlive || "") + " — 답변 후 모델을 메모리에 유지하는 시간"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.caption
+                                                    color: Colors.textSecondary
+                                                    wrapMode: Text.WordWrap
+                                                }
+                                                Text {
+                                                    Layout.fillWidth: true
+                                                    text: "• 최대 처리 시간: " + (settingsValuesContent.vals.timeout || "") + " — 너무 오래 걸리는 작업을 중단하는 제한 시간"
+                                                    font.family: Typography.fontPrimary
+                                                    font.pixelSize: Typography.caption
+                                                    color: Colors.textSecondary
+                                                    wrapMode: Text.WordWrap
                                                 }
                                             }
                                         }
@@ -963,48 +1064,6 @@ Rectangle {
                                                         font.family: Typography.fontPrimary
                                                         font.pixelSize: 10
                                                         color: Colors.textSecondary
-                                                    }
-                                                }
-
-                                                // Move up
-                                                Rectangle {
-                                                    width: 24; height: 24; radius: 12
-                                                    color: moveUpMA.containsMouse ? Colors.bgTertiary : "transparent"
-                                                    visible: root.editingCategoryIndex !== catIndex
-                                                    Layout.alignment: Qt.AlignVCenter
-                                                    Text {
-                                                        anchors.centerIn: parent
-                                                        text: "\u25B2"
-                                                        font.pixelSize: 10
-                                                        color: catIndex > 0 ? Colors.textSecondary : Colors.textTertiary
-                                                    }
-                                                    MouseArea {
-                                                        id: moveUpMA
-                                                        anchors.fill: parent
-                                                        hoverEnabled: true
-                                                        cursorShape: Qt.PointingHandCursor
-                                                        onClicked: root.moveCategoryUp(catIndex)
-                                                    }
-                                                }
-
-                                                // Move down
-                                                Rectangle {
-                                                    width: 24; height: 24; radius: 12
-                                                    color: moveDownMA.containsMouse ? Colors.bgTertiary : "transparent"
-                                                    visible: root.editingCategoryIndex !== catIndex
-                                                    Layout.alignment: Qt.AlignVCenter
-                                                    Text {
-                                                        anchors.centerIn: parent
-                                                        text: "\u25BC"
-                                                        font.pixelSize: 10
-                                                        color: catIndex < root.categoryList.length - 1 ? Colors.textSecondary : Colors.textTertiary
-                                                    }
-                                                    MouseArea {
-                                                        id: moveDownMA
-                                                        anchors.fill: parent
-                                                        hoverEnabled: true
-                                                        cursorShape: Qt.PointingHandCursor
-                                                        onClicked: root.moveCategoryDown(catIndex)
                                                     }
                                                 }
 
