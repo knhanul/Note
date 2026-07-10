@@ -13,7 +13,7 @@ class _ImportWorker(QObject):
     """Worker that runs import in a background thread."""
 
     progress = pyqtSignal(int, int, str)  # current, total, message
-    finished = pyqtSignal(int, str, str, int, int, int)  # ok, message, rootFolderId, noteCount, folderCount, failedCount
+    finished = pyqtSignal(int, str, str, int, int, int, list)  # ok, message, rootFolderId, noteCount, folderCount, failedCount, importedNoteIds
 
     def __init__(self, library_service,
                  src_dir, parent_folder_id, include_subfolders):
@@ -65,6 +65,7 @@ class _ImportWorker(QObject):
                 note_count,
                 folder_count,
                 failed,
+                [],
             )
         except Exception as exc:  # noqa: BLE001
             import traceback
@@ -77,13 +78,72 @@ class _ImportWorker(QObject):
                 0,
                 0,
                 0,
+                [],
             )
+
+
+class _FileImportWorker(QObject):
+    """Worker that imports individual files in a background thread."""
+
+    progress = pyqtSignal(int, int, str)  # current, total, message
+    finished = pyqtSignal(int, str, str, int, int, int, list)  # ok, message, rootFolderId, noteCount, folderCount, failedCount, importedNoteIds
+
+    def __init__(self, library_service, file_paths, folder_id):
+        super().__init__()
+        self._library = library_service
+        self._file_paths = file_paths
+        self._folder_id = folder_id
+
+    def run(self):
+        try:
+            print("[_FileImportWorker] run() started")
+            db = self._library.get_current_database()
+            if db is None:
+                raise RuntimeError("열린 서재가 없습니다.")
+
+            folder_service = FolderService(db)
+            note_service = NoteService(db)
+
+            target_folder_id = self._folder_id
+            if not target_folder_id or target_folder_id.startswith("smart:"):
+                folders = folder_service.get_all()
+                for f in folders:
+                    if not f.get("is_smart"):
+                        target_folder_id = f.get("id", "")
+                        break
+            if not target_folder_id:
+                raise RuntimeError("가져갈 폴더가 없습니다. 먼저 폴더를 생성해주세요.")
+
+            importer = FolderImportService(folder_service, note_service)
+            result = importer.import_files(
+                self._file_paths,
+                target_folder_id,
+                progress_callback=lambda c, t, m: self.progress.emit(c, t, m),
+            )
+
+            note_count = result.get("noteCount", 0)
+            failed = result.get("failedCount", 0)
+            imported_note_ids = result.get("importedNoteIds", [])
+
+            message = f"노트 {note_count}개를 가져왔습니다."
+            if failed:
+                message += f" (실패 {failed}개)"
+
+            print("[_FileImportWorker] run() finished, emitting finished")
+            self.finished.emit(
+                1, message, target_folder_id, note_count, 0, failed, imported_note_ids
+            )
+        except Exception as exc:
+            import traceback
+            traceback.print_exc()
+            print("[_FileImportWorker] run() exception, emitting finished")
+            self.finished.emit(0, str(exc), "", 0, 0, 0, [])
 
 
 class _ImportThread(QThread):
     """Thread that owns and runs the import worker."""
 
-    def __init__(self, worker: _ImportWorker, parent=None):
+    def __init__(self, worker, parent=None):
         super().__init__(parent)
         self._worker = worker
         worker.moveToThread(self)
@@ -96,7 +156,7 @@ class FolderImportController(QObject):
     """QML bridge for folder-tree import operations."""
 
     importProgress = pyqtSignal(int, int, str)  # current, total, message
-    importFinished = pyqtSignal(int, str, str, int, int, int)  # ok, message, rootFolderId, noteCount, folderCount, failedCount
+    importFinished = pyqtSignal(int, str, str, int, int, int, list)  # ok, message, rootFolderId, noteCount, folderCount, failedCount, importedNoteIds
 
     def __init__(
         self,
@@ -201,8 +261,9 @@ class FolderImportController(QObject):
         # Clean up previous thread if any
         if self._thread is not None:
             print(f"[FolderImportController] cleaning up previous thread")
-            self._thread.quit()
-            self._thread.wait(3000)
+            if self._thread.isRunning():
+                self._thread.quit()
+                self._thread.wait(10000)
             self._thread = None
 
         worker = _ImportWorker(
@@ -221,14 +282,54 @@ class FolderImportController(QObject):
         print(f"[FolderImportController] starting thread")
         self._thread.start()
 
-    def _onImportFinished(self, ok, message, rootFolderId, noteCount, folderCount, failedCount):
-        """Handle import completion - refresh UI."""
-        print(f"[FolderImportController] _onImportFinished called")
+    @pyqtSlot(str, str)
+    def importFilesAsync(self, file_paths_json: str, folder_id: str) -> None:
+        """Start async file import in a background thread.
+
+        ``file_paths_json`` is a JSON array of file path strings.
+        ``folder_id`` is the target folder ID (must be a real folder).
+        """
+        import json as json_mod
+        paths = json_mod.loads(file_paths_json) if file_paths_json else []
+        if not paths:
+            self.importFinished.emit(0, "가져올 파일이 선택되지 않았습니다.", "", 0, 0, 0, [])
+            return
+
+        if self._thread is not None:
+            if self._thread.isRunning():
+                self._thread.quit()
+                self._thread.wait(10000)
+            self._thread = None
+
+        worker = _FileImportWorker(
+            self._library, paths, folder_id
+        )
+        self._thread = _ImportThread(worker, self)
+
+        worker.progress.connect(self.importProgress)
+        worker.finished.connect(self._onImportFinished)
+        worker.finished.connect(self.importFinished)
+        worker.finished.connect(self._thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        self._thread.finished.connect(self._thread.deleteLater)
+
+        print(f"[FolderImportController] starting file import thread")
+        self._thread.start()
+
+    def _get_first_regular_folder(self, folder_service: FolderService) -> str:
+        """Get the first non-smart folder ID, or empty string."""
+        folders = folder_service.get_all()
+        for f in folders:
+            if not f.get("is_smart"):
+                return f.get("id", "")
+        return ""
+
+    def _refresh_ui(self, root_folder_id: str = "") -> None:
+        """Refresh folder and note lists after import."""
         try:
             self._folder_ctrl.foldersChanged.emit()
-            # Select the created folder to show imported notes
-            if rootFolderId:
-                self._folder_ctrl.selectFolder(rootFolderId)
+            if root_folder_id:
+                self._folder_ctrl.selectFolder(root_folder_id)
             else:
                 self._folder_ctrl.currentFolderChanged.emit()
         except Exception:
@@ -242,3 +343,8 @@ class FolderImportController(QObject):
                 self._note_ctrl.tagsChanged.emit()
         except Exception:
             pass
+
+    def _onImportFinished(self, ok, message, rootFolderId, noteCount, folderCount, failedCount, importedNoteIds=None):
+        """Handle import completion - clear thread ref. UI refresh is handled by QML."""
+        print(f"[FolderImportController] _onImportFinished called")
+        self._thread = None

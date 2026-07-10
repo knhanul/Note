@@ -2647,21 +2647,23 @@ Window {
             window.importProgressTotal = total
             window.importStatusMessage = message + " (" + current + "/" + total + ")"
         }
-        function onImportFinished(ok, message, rootFolderId, noteCount, folderCount, failedCount) {
+        function onImportFinished(ok, message, rootFolderId, noteCount, folderCount, failedCount, importedNoteIds) {
             window.importBusy = false
             if (ok) {
                 window.importStatusError = false
                 window.importStatusMessage = message || "가져오기 완료"
                 if (folderController) {
-                    // Refresh folder list first
                     folderController.foldersChanged()
-                    // Also refresh notes list
                     if (noteController) {
                         noteController.notesChanged()
-                        noteController.filteredNotesChanged()
-                    }
-                    if (rootFolderId) {
-                        folderController.selectFolder(rootFolderId)
+                        if (rootFolderId) {
+                            folderController.selectFolder(rootFolderId)
+                        }
+                        noteController.reloadNotes()
+                        if (importedNoteIds && importedNoteIds.length > 0) {
+                            var lastNoteId = importedNoteIds[importedNoteIds.length - 1]
+                            noteController.selectNote(lastNoteId)
+                        }
                     }
                 }
             } else {
@@ -2721,6 +2723,7 @@ Window {
             currentNoteExportIconSource: "../assets/icons/export.svg"
             printIconSource: "../assets/icons/print.svg"
             printButtonEnabled: window.activeContentMode === "notes" && (window.selectedNoteId !== "" || window.isDraftNewNote)
+            currentNoteExportEnabled: window.activeContentMode === "notes" && (window.selectedNoteId !== "" || window.isDraftNewNote)
             importIconSource: "../assets/icons/import.svg"
             exportIconSource: "../assets/icons/export.svg"
             onPrintCurrentNoteClicked: window.openPrintDialog()
@@ -2742,6 +2745,9 @@ Window {
             }
             onImportClicked: {
                 importOptionsDialog.visible = true
+            }
+            onImportFilesClicked: {
+                fileImportDialog.open()
             }
             onCurrentNoteExportClicked: {
                 if (!(window.selectedNoteId !== "" || window.isDraftNewNote)) {
@@ -7760,6 +7766,57 @@ Window {
                 return
             }
             window.runFolderImport(raw, window.importIncludeSubfolders)
+        }
+    }
+
+    FileDialog {
+        id: fileImportDialog
+        title: "가져올 파일 선택"
+        nameFilters: [
+            "HWPX 문서 (*.hwpx)",
+            "파워포인트 (*.pptx)",
+            "워드 문서 (*.docx)",
+            "PDF (*.pdf)",
+            "엑셀 (*.xlsx *.xlsm *.csv)",
+            "텍스트/마크다운 (*.txt *.md *.markdown)",
+            "지원 문서 (*.hwpx *.pptx *.docx *.pdf *.xlsx *.xlsm *.csv *.txt *.md *.markdown)",
+            "모든 파일 (*.*)"
+        ]
+        fileMode: FileDialog.OpenFiles
+        onAccepted: {
+            var paths = []
+            for (var i = 0; i < selectedFiles.length; i++) {
+                paths.push(fileUrlToLocalPath(selectedFiles[i]))
+            }
+            if (paths.length === 0) {
+                window.importStatusError = true
+                window.importStatusMessage = "선택된 파일 경로를 읽지 못했습니다."
+                importStatusTimer.restart()
+                return
+            }
+
+            if (!folderImportController) {
+                window.importStatusError = true
+                window.importStatusMessage = "가져오기 컨트롤러를 찾을 수 없습니다."
+                importStatusTimer.restart()
+                return
+            }
+
+            var parentId = ""
+            if (folderController) {
+                var fid = folderController.currentFolderId || ""
+                if (fid && !folderController.isSmartFolder(fid)) {
+                    parentId = fid
+                }
+            }
+
+            window.importBusy = true
+            window.importStatusError = false
+            window.importStatusMessage = "가져오는 중..."
+            window.importProgressValue = 0
+            window.importProgressTotal = paths.length
+
+            folderImportController.importFilesAsync(JSON.stringify(paths), parentId)
         }
     }
 

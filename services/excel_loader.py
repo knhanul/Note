@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -77,8 +78,10 @@ class ExcelLoader:
 
     # ── workbook loaders ─────────────────────────────────────────────────
     def _load_workbook(self, path: Path) -> Dict[str, Any]:
-        wb = load_workbook(filename=str(path), data_only=True, read_only=True)
-        wb_formula = load_workbook(filename=str(path), data_only=False, read_only=True)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            wb = load_workbook(filename=str(path), data_only=True, read_only=True)
+            wb_formula = load_workbook(filename=str(path), data_only=False, read_only=True)
         sheet_names = wb.sheetnames
         if not sheet_names:
             return {

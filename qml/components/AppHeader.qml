@@ -8,6 +8,7 @@ Rectangle {
 
     signal logoClicked()
     signal importClicked()
+    signal importFilesClicked()
     signal printCurrentNoteClicked()
     signal currentNoteExportClicked()
     signal exportClicked()
@@ -21,6 +22,7 @@ Rectangle {
     property string importIconSource: ""
     property string exportIconSource: ""
     property bool printButtonEnabled: true
+    property bool currentNoteExportEnabled: true
 
     function openMenuAt(menuRef, anchorItem) {
         if (!menuRef || !anchorItem) return
@@ -347,6 +349,7 @@ Rectangle {
 
         MenuItem {
             text: "노트 변환"
+            enabled: root.currentNoteExportEnabled
             width: noteActionsMenu.implicitWidth
             implicitHeight: 34
             font.family: Typography.fontPrimary
@@ -373,7 +376,20 @@ Rectangle {
         }
 
         MenuItem {
-            text: "노트 가져오기"
+            text: "파일 가져오기"
+            width: fileActionsMenu.implicitWidth
+            implicitHeight: 34
+            font.family: Typography.fontPrimary
+            font.pixelSize: Typography.bodySmall
+            onTriggered: root.importFilesClicked()
+            background: Rectangle {
+                color: control.down ? Colors.primary100 : (control.hovered ? Colors.bgSecondary : "transparent")
+                radius: Metrics.radiusSm
+            }
+        }
+
+        MenuItem {
+            text: "폴더 가져오기"
             width: fileActionsMenu.implicitWidth
             implicitHeight: 34
             font.family: Typography.fontPrimary
@@ -386,7 +402,7 @@ Rectangle {
         }
 
         MenuItem {
-            text: "노트 보내기"
+            text: "폴더 일괄 내보내기"
             width: fileActionsMenu.implicitWidth
             implicitHeight: 34
             font.family: Typography.fontPrimary

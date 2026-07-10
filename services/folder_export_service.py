@@ -7,6 +7,7 @@ single-note PDF path is implemented through QML WebEngine print, not Python.
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -17,6 +18,8 @@ from packages.import_export.markdown_export_service import (
 from services.current_note_export_service import CurrentNoteExportService
 from services.folder_service import FolderService
 from services.note_service import NoteService
+
+logger = logging.getLogger(__name__)
 
 
 class FolderExportService:
@@ -186,11 +189,13 @@ class FolderExportService:
                 created_at=note.get("created_at"),
                 updated_at=note.get("updated_at"),
             )
-        except Exception:
+        except Exception as exc:
+            logger.error("[FolderExport] 노트 변환 실패: title=%s, fmt=%s, error=%s", note.get("title"), fmt, exc)
             return None
 
         produced = Path(output_path)
-        target = sub_dir / f"{unique_name}.{fmt}"
+        actual_ext = produced.suffix.lstrip(".")
+        target = sub_dir / f"{unique_name}.{actual_ext}"
         if produced != target:
             try:
                 if target.exists():

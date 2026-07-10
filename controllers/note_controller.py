@@ -456,6 +456,11 @@ class NoteController(QObject):
         self.filteredNotesChanged.emit()
 
     @pyqtSlot()
+    def reloadNotes(self):
+        """Force reload notes for the current folder from the database."""
+        self._on_folder_changed()
+
+    @pyqtSlot()
     def loadMoreNotes(self):
         """Load next page of notes (infinite scroll)."""
         current_folder_id = self._folder_controller.currentFolderId

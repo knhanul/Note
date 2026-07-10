@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import base64
 import html
+import logging
 import re
+import subprocess
+import sys
 import tempfile
 from io import BytesIO
 from pathlib import Path
@@ -13,6 +16,8 @@ from packages.import_export.markdown_export_service import (
     build_markdown_export_content,
     make_safe_markdown_filename,
 )
+
+logger = logging.getLogger(__name__)
 
 
 _DATA_URL_PATTERN = re.compile(
@@ -73,7 +78,11 @@ class CurrentNoteExportService:
         if fmt == "docx":
             return self._export_docx(target_dir, base_name, title or "", markdown or "")
         if fmt == "hwpx":
-            return self._export_hwpx_via_md2hwpx(target_dir, base_name, title or "", markdown or "")
+            try:
+                return self._export_hwpx_via_md2hwpx(target_dir, base_name, title or "", markdown or "")
+            except Exception as exc:
+                logger.error("[HWPX Export] md2hwpx 변환 실패: title=%s, error=%s", title, exc)
+                return self._export_docx(target_dir, base_name, title or "", markdown or "")
         # pdf is handled in QML WebEngine print path for best WYSIWYG quality.
         raise ValueError("PDF export is handled by WebEngine path")
 

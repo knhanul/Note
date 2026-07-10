@@ -43,7 +43,7 @@ _EXT_TO_MIME = {
 class FolderImportService:
     """Imports a directory tree of documents into the current library."""
 
-    SUPPORTED_EXTS = {".md", ".markdown", ".txt", ".html", ".htm", ".docx", ".hwp", ".hwpx"}
+    SUPPORTED_EXTS = {".md", ".markdown", ".txt", ".html", ".htm", ".docx", ".hwp", ".hwpx", ".pdf", ".pptx", ".xlsx", ".xlsm", ".csv"}
     IMPORT_MODE_FAST_TEXT = "fast_text"
     IMPORT_MODE_STRUCTURED = "structured"
     IMPORT_MODE_AUTO = "auto"
@@ -222,6 +222,40 @@ class FolderImportService:
             "failures": failures,
         }
 
+    def import_files(
+        self,
+        file_paths: List[str],
+        folder_id: str,
+        import_mode: str = DEFAULT_IMPORT_MODE,
+        progress_callback=None,
+    ) -> Dict[str, Any]:
+        """Import individual files as notes into the specified folder."""
+        if not file_paths:
+            raise ValueError("가져올 파일이 지정되지 않았습니다.")
+        mode = self._normalize_import_mode(import_mode)
+
+        imported_notes: List[str] = []
+        failures: List[Dict[str, str]] = []
+        total_files = len(file_paths)
+
+        for idx, fpath_str in enumerate(file_paths):
+            fpath = Path(fpath_str)
+            processed = idx + 1
+            self._process_file(
+                fpath, folder_id, processed, total_files,
+                mode, progress_callback, imported_notes, failures,
+            )
+
+        return {
+            "rootFolderId": folder_id,
+            "rootLabel": "",
+            "noteCount": len(imported_notes),
+            "folderCount": 0,
+            "failedCount": len(failures),
+            "failures": failures,
+            "importedNoteIds": imported_notes,
+        }
+
     # ── helpers ────────────────────────────────────────────────────────────
     def _process_file(
         self,
@@ -316,6 +350,26 @@ class FolderImportService:
             for w in warnings:
                 print(f"[FolderImport] HWPX Warning: {w}")
             return title, filename_line + markdown, tags
+        if ext in (".xlsx", ".xlsm", ".csv"):
+            from services.excel_loader import ExcelLoader
+            loader = ExcelLoader()
+            result = loader.load(fpath)
+            if result.get("ok"):
+                return title, filename_line + (result.get("content") or ""), tags
+            else:
+                error_msg = result.get("error", "엑셀 파일을 읽지 못했습니다.")
+                print(f"[FolderImport] Excel import error: {error_msg}")
+                return title, filename_line + f"[엑셀 가져오기 실패: {error_msg}]", tags
+        if ext in (".pptx", ".pdf"):
+            from services.document_loader import DocumentLoader
+            loader = DocumentLoader()
+            result = loader.load(fpath)
+            if result.get("ok"):
+                return title, filename_line + (result.get("content") or ""), tags
+            else:
+                error_msg = result.get("error", f"{ext} 파일을 읽지 못했습니다.")
+                print(f"[FolderImport] {ext} import error: {error_msg}")
+                return title, filename_line + f"[가져오기 실패: {error_msg}]", tags
         return title, filename_line, tags
 
     @staticmethod
