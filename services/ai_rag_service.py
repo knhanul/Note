@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol, Optional
+from typing import Any, Callable, Protocol, Optional
 import re
 import time
 import logging
@@ -30,6 +30,7 @@ class RagQueryOptions:
     timeout_sec: float = 300.0
     max_tokens: int | None = 4096
     is_low_mode: bool = False
+    on_token: Optional[Callable[[str], None]] = None
 
 
 @dataclass
@@ -238,6 +239,7 @@ class AiRagService:
             temperature=options.temperature,
             timeout_sec=options.timeout_sec,
             max_tokens=options.max_tokens,
+            on_token=options.on_token,
         )
 
         llm_result = self._llm.generate_from_payload(prompt_payload, llm_options)
@@ -272,7 +274,13 @@ class AiRagService:
                     total_chars=len(retry_system_prompt) + len(retry_user_prompt),
                 )
 
-                retry_result = self._llm.generate_from_payload(retry_payload, llm_options)
+                retry_options = LlmGenerateOptions(
+                    model=llm_options.model,
+                    temperature=llm_options.temperature,
+                    timeout_sec=llm_options.timeout_sec,
+                    max_tokens=llm_options.max_tokens,
+                )
+                retry_result = self._llm.generate_from_payload(retry_payload, retry_options)
                 logger.info(f"[AiRagService] Retry completed: answer_len={len(retry_result.text)}")
                 warnings.extend(retry_result.warnings)
                 retry_citations = self._build_citations(retry_payload, retry_result.text, warnings)
@@ -418,6 +426,7 @@ class AiRagService:
             temperature=options.temperature,
             timeout_sec=options.timeout_sec,
             max_tokens=options.max_tokens,
+            on_token=options.on_token,
         )
 
         llm_result = self._llm.generate_from_payload(prompt_payload, llm_options)

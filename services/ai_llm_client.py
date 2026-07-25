@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 
 @dataclass
@@ -9,6 +9,7 @@ class LlmGenerateOptions:
     top_p: float | None = None
     max_tokens: int | None = None
     timeout_sec: float = 60.0
+    on_token: Optional[Callable[[str], None]] = None
 
 
 @dataclass

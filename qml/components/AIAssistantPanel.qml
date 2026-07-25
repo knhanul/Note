@@ -4102,7 +4102,7 @@ Rectangle {
         // Longer interval for large documents to reduce full re-parse cost.
         interval: root.currentStreamingContent.length > 20000 ? 400 : 200
         repeat: true
-        running: root.aiRunning && root.currentStreamingNoteId !== ""
+        running: (root.aiRunning || root.ragRequestRunning) && root.currentStreamingNoteId !== ""
         onTriggered: {
             if (root._streamFlushPending) {
                 root.flushStreamingNote()
@@ -4655,6 +4655,25 @@ Rectangle {
         if (ragCtrl) {
 
             console.log("[AIAssistantPanel] Connecting RAG signals...")
+
+            ragCtrl.ragTokenReceived.connect(function(token) {
+
+                if (!root.currentStreamingIsRag || !root.ragRequestRunning)
+                    return
+
+                root.currentRagAnswerText += token
+
+                var header = formatRagResultHeader()
+                root.currentStreamingContent = header + root.currentRagAnswerText
+
+                if (!root._firstStreamFlushDone) {
+                    root._firstStreamFlushDone = true
+                    flushStreamingNote()
+                } else {
+                    root._streamFlushPending = true
+                }
+
+            })
 
             ragCtrl.ragAnswerReady.connect(function(answerText) {
 

@@ -80,7 +80,7 @@ class FakeAppService:
         return results[:limit]
 
     def ask_indexed_documents(
-        self, question: str, prompt_id: str = "default_answer", options: Any = None
+        self, question: str, prompt_id: str = "default_answer", options: Any = None, on_token: Any = None
     ) -> RagAnswer:
         self._last_answer = RagAnswer(
             answer_text="Fake answer from FakeAppService",
@@ -105,7 +105,7 @@ class FakeAppService:
         return self._last_answer
 
     def ask_indexed_document(
-        self, document_id: str, question: str, options: Any = None
+        self, document_id: str, question: str, options: Any = None, on_token: Any = None
     ) -> RagAnswer:
         self._last_answer = RagAnswer(
             answer_text=f"Fake answer for {document_id}",
@@ -230,6 +230,7 @@ class FakeAppService:
 
 class AiRagController(QObject):
     ragAnswerReady = pyqtSignal(str)
+    ragTokenReceived = pyqtSignal(str)
     ragCitationsChanged = pyqtSignal()
     ragWarningsChanged = pyqtSignal()
     indexStatusChanged = pyqtSignal(str)
@@ -238,6 +239,7 @@ class AiRagController(QObject):
     searchResultsChanged = pyqtSignal()
     _askCompleted = pyqtSignal(object)
     _askFailed = pyqtSignal(str)
+    _askToken = pyqtSignal(str)
     indexingCancelled = pyqtSignal()
 
     def __init__(self, app_service: AiRagApplicationService | None = None, parent=None):
@@ -252,6 +254,7 @@ class AiRagController(QObject):
         self._cancel_requested = False
         self._askCompleted.connect(self._on_ask_completed)
         self._askFailed.connect(self._on_ask_failed)
+        self._askToken.connect(self._on_ask_token)
 
     @pyqtSlot(object)
     def _on_ask_completed(self, answer: RagAnswer) -> None:
@@ -266,6 +269,12 @@ class AiRagController(QObject):
     def _on_ask_failed(self, message: str) -> None:
         self._ask_in_progress = False
         self.errorOccurred.emit(message)
+
+    @pyqtSlot(str)
+    def _on_ask_token(self, token: str) -> None:
+        # Relay streaming tokens (emitted from the worker thread via queued
+        # connection) to QML so partial answers can be rendered immediately.
+        self.ragTokenReceived.emit(token)
 
     def _get_app_service(self) -> AiRagApplicationService:
         if self._app_service is None:
@@ -366,7 +375,11 @@ class AiRagController(QObject):
 
             def _worker() -> None:
                 try:
-                    answer = self._get_app_service().ask_indexed_documents(normalized_question, normalized_prompt_id)
+                    answer = self._get_app_service().ask_indexed_documents(
+                        normalized_question,
+                        normalized_prompt_id,
+                        on_token=lambda token: self._askToken.emit(token),
+                    )
                     self._askCompleted.emit(answer)
                 except Exception as worker_error:
                     logger.error(f"[AiRagController] askIndexedDocuments worker failed: {worker_error}")

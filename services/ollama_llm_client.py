@@ -42,11 +42,14 @@ class OllamaLlmClient(LlmClient):
         if options is None:
             options = LlmGenerateOptions(model=self.default_model)
 
+        on_token = options.on_token if callable(options.on_token) else None
+        use_stream = on_token is not None
+
         payload: dict[str, Any] = {
             "model": options.model,
             "prompt": user_prompt,
             "system": system_prompt,
-            "stream": False,
+            "stream": use_stream,
         }
 
         if options.temperature is not None:
@@ -70,13 +73,36 @@ class OllamaLlmClient(LlmClient):
 
             timeout = options.timeout_sec if options.timeout_sec is not None else 60.0
             with urllib.request.urlopen(request, timeout=timeout) as response:
-                raw_response = json.loads(response.read().decode("utf-8"))
-                text = raw_response.get("response", "")
+                if use_stream:
+                    text_parts: list[str] = []
+                    for line in response:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            chunk = json.loads(line.decode("utf-8"))
+                        except (json.JSONDecodeError, UnicodeDecodeError):
+                            continue
+                        token = chunk.get("response", "")
+                        if token:
+                            text_parts.append(token)
+                            try:
+                                on_token(token)
+                            except Exception as cb_error:  # noqa: BLE001
+                                logger.debug(
+                                    f"[OllamaLlmClient] on_token callback failed: {cb_error}"
+                                )
+                        if chunk.get("done", False):
+                            raw_response = chunk
+                    text = "".join(text_parts)
+                else:
+                    raw_response = json.loads(response.read().decode("utf-8"))
+                    text = raw_response.get("response", "")
 
                 if not text:
                     warnings.append("[OLLAMA_EMPTY_RESPONSE]")
 
-                model_name = raw_response.get("model", options.model)
+                model_name = (raw_response or {}).get("model", options.model)
 
                 return LlmGenerateResult(
                     text=text,

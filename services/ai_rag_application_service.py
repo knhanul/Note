@@ -453,13 +453,19 @@ class AiRagApplicationService:
         )
 
     def ask_indexed_documents(
-        self, question: str, prompt_id: str = "default_answer", options: RagQueryOptions | None = None
+        self,
+        question: str,
+        prompt_id: str = "default_answer",
+        options: RagQueryOptions | None = None,
+        on_token: Callable[[str], None] | None = None,
     ) -> RagAnswer:
         self._ensure_initialized()
 
         # Pre-flight check: fail fast if Ollama is not reachable or the model is missing.
         if options is None:
             options = RagQueryOptions()
+        if on_token is not None:
+            options.on_token = on_token
         model = options.model or self._default_model
         if isinstance(self._llm_client, OllamaLlmClient):
             health = self._llm_client.check_model(model)
@@ -486,9 +492,17 @@ class AiRagApplicationService:
         return self._last_answer
 
     def ask_indexed_document(
-        self, document_id: str, question: str, options: RagQueryOptions | None = None
+        self,
+        document_id: str,
+        question: str,
+        options: RagQueryOptions | None = None,
+        on_token: Callable[[str], None] | None = None,
     ) -> RagAnswer:
         self._ensure_initialized()
+        if on_token is not None:
+            if options is None:
+                options = RagQueryOptions()
+            options.on_token = on_token
         self._last_answer = self._rag_service.answer_question_in_document(document_id, question, options)
         return self._last_answer
 
