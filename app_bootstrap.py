@@ -59,6 +59,12 @@ def configure_qml_engine(engine: QQmlApplicationEngine, config: AppConfig, servi
     engine.rootContext().setContextProperty("settingsService", services.settings_service)
 
     engine.rootContext().setContextProperty("appName", config.app_name)
+    engine.rootContext().setContextProperty("appVersion", config.app_version)
+    engine.rootContext().setContextProperty("appBuildDate", config.build_date)
+    engine.rootContext().setContextProperty("appCreator", config.creator)
+    engine.rootContext().setContextProperty("appAccentColor", config.accent_color)
+    engine.rootContext().setContextProperty("aboutImagePath", config.about_image_path)
+    engine.rootContext().setContextProperty("aboutIconPath", config.about_icon_path)
     engine.rootContext().setContextProperty("appLogoPath", config.logo_path)
     engine.rootContext().setContextProperty("appVariant", app_variant)
     engine.rootContext().setContextProperty("uiScale", services.settings_service.get_ui_scale())

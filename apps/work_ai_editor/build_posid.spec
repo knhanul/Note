@@ -12,20 +12,26 @@ block_cipher = None
 base_dir = Path(r'E:\Pjt\Note')
 spec_dir = base_dir / 'apps' / 'work_ai_editor'
 
+app_datas = [
+    (str(base_dir / 'qml'), 'qml'),
+    (str(base_dir / 'assets'), 'assets'),
+    (str(base_dir / 'packages'), 'packages'),
+    (str(base_dir / 'services'), 'services'),
+    (str(base_dir / 'controllers'), 'controllers'),
+    (str(base_dir / 'app_bootstrap.py'), '.'),
+    (str(base_dir / 'app_config.py'), '.'),
+    (str(base_dir / 'app_splash.py'), '.'),
+]
+if (base_dir / 'tools').exists():
+    app_datas.append((str(base_dir / 'tools'), 'tools'))
+if (base_dir / 'build_info.json').exists():
+    app_datas.append((str(base_dir / 'build_info.json'), '.'))
+
 a = Analysis(
     [str(spec_dir / 'main_posid.py')],
     pathex=[str(base_dir)],
     binaries=[],
-    datas=[
-        (str(base_dir / 'qml'), 'qml'),
-        (str(base_dir / 'assets'), 'assets'),
-        (str(base_dir / 'packages'), 'packages'),
-        (str(base_dir / 'services'), 'services'),
-        (str(base_dir / 'controllers'), 'controllers'),
-        (str(base_dir / 'app_bootstrap.py'), '.'),
-        (str(base_dir / 'app_config.py'), '.'),
-        (str(base_dir / 'tools'), 'tools'),
-    ],
+    datas=app_datas,
     hiddenimports=[
         'PyQt6.QtCore',
         'PyQt6.QtGui',

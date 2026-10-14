@@ -2767,28 +2767,11 @@ Window {
             onSettingsClicked: {
                 uiScaleDialog.visible = true
             }
-            onHwpConversionToolClicked: {
-                var toolCtrl = typeof toolController !== "undefined" && toolController !== null ? toolController : null
-                if (toolCtrl) {
-                    toolCtrl.launchHwpConversionTool()
-                } else {
-                    toolInfoDialog.title = "도구 오류"
-                    toolInfoDialog.text = "도구 컨트롤러를 사용할 수 없습니다."
-                    toolInfoDialog.open()
-                }
-            }
-            onOllamaModelToolClicked: {
-                var toolCtrl = typeof toolController !== "undefined" && toolController !== null ? toolController : null
-                if (toolCtrl) {
-                    toolCtrl.launchOllamaModelTool()
-                } else {
-                    toolInfoDialog.title = "도구 오류"
-                    toolInfoDialog.text = "도구 컨트롤러를 사용할 수 없습니다."
-                    toolInfoDialog.open()
-                }
-            }
             onHelpClicked: {
                 markdownHelpDialog.open()
+            }
+            onAboutClicked: {
+                aboutDialog.open()
             }
         }
 
@@ -7992,6 +7975,12 @@ Window {
         z: 20010
     }
 
+    // ── About Dialog ───────────────────────────────────────────────────────
+    AboutDialog {
+        id: aboutDialog
+        visible: false
+    }
+
     // ── Batch Folder Picker Dialog ──────────────────────────────────────────────
     Rectangle {
         id: batchFolderPickerBackdrop
@@ -8848,13 +8837,6 @@ Window {
             folderDeleteFailDialog.failReason = reason
             folderDeleteFailDialog.visible = true
         }
-    }
-
-    // Tool info dialog for external tool placeholders
-    MessageDialog {
-        id: toolInfoDialog
-        title: "도구 준비 중"
-        buttons: MessageDialog.Ok
     }
 
     // Prompt delete confirmation dialog

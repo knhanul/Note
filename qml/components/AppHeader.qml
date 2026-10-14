@@ -13,9 +13,8 @@ Rectangle {
     signal currentNoteExportClicked()
     signal exportClicked()
     signal settingsClicked()
-    signal hwpConversionToolClicked()
-    signal ollamaModelToolClicked()
     signal helpClicked()
+    signal aboutClicked()
 
     property string currentNoteExportIconSource: ""
     property string printIconSource: ""
@@ -212,52 +211,6 @@ Rectangle {
         }
 
         Rectangle {
-            id: toolsMenuButton
-            Layout.preferredHeight: 32
-            Layout.preferredWidth: toolsMenuLabel.implicitWidth + toolsMenuArrow.implicitWidth + Metrics.md * 2
-            radius: Metrics.radiusSm
-            color: (toolsMenuMA.containsMouse || toolsActionsMenu.visible) ? Colors.bgSecondary : "transparent"
-            border.width: 1
-            border.color: (toolsMenuMA.containsMouse || toolsActionsMenu.visible) ? Colors.borderLight : "transparent"
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.margins: Metrics.sm
-                spacing: Metrics.xs
-
-                Text {
-                    id: toolsMenuLabel
-                    text: "도구"
-                    font.family: Typography.fontPrimary
-                    font.pixelSize: Typography.bodySmall
-                    font.weight: Typography.weightMedium
-                    color: Colors.textPrimary
-                }
-
-                Text {
-                    id: toolsMenuArrow
-                    text: "▼"
-                    font.pixelSize: 12
-                    color: Colors.textSecondary
-                }
-            }
-
-            MouseArea {
-                id: toolsMenuMA
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                    if (toolsActionsMenu.visible) {
-                        toolsActionsMenu.close()
-                    } else {
-                        root.openMenuAt(toolsActionsMenu, toolsMenuButton)
-                    }
-                }
-            }
-        }
-
-        Rectangle {
             id: settingsTextButton
             Layout.preferredHeight: 32
             Layout.preferredWidth: settingsLabel.implicitWidth + Metrics.md * 2
@@ -317,6 +270,42 @@ Rectangle {
 
             Accessible.role: Accessible.Button
             Accessible.name: "AI 마크다운 문법 도움말 열기"
+        }
+
+        Rectangle {
+            id: aboutIconButton
+            Layout.preferredHeight: 32
+            Layout.preferredWidth: 32
+            radius: Metrics.radiusSm
+            color: aboutIconMA.containsMouse ? Colors.bgSecondary : "transparent"
+            border.width: 1
+            border.color: aboutIconMA.containsMouse ? Colors.borderLight : "transparent"
+
+            Image {
+                anchors.fill: parent
+                anchors.margins: 5
+                source: (typeof aboutIconPath !== "undefined" && aboutIconPath !== "")
+                        ? "file:///" + aboutIconPath.replace(/\\/g, "/")
+                        : ""
+                fillMode: Image.PreserveAspectFit
+                smooth: true
+                mipmap: true
+            }
+
+            ToolTip.visible: aboutIconMA.containsMouse
+            ToolTip.text: "정보"
+            ToolTip.delay: 500
+
+            MouseArea {
+                id: aboutIconMA
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.aboutClicked()
+            }
+
+            Accessible.role: Accessible.Button
+            Accessible.name: "프로그램 정보 열기"
         }
     }
 
@@ -408,50 +397,6 @@ Rectangle {
             font.family: Typography.fontPrimary
             font.pixelSize: Typography.bodySmall
             onTriggered: root.exportClicked()
-            background: Rectangle {
-                color: control.down ? Colors.primary100 : (control.hovered ? Colors.bgSecondary : "transparent")
-                radius: Metrics.radiusSm
-            }
-        }
-    }
-
-    Menu {
-        id: toolsActionsMenu
-        parent: root
-        visible: false
-        implicitWidth: 200
-        padding: Metrics.xs
-        background: Rectangle {
-            color: Colors.bgPrimary
-            radius: Metrics.radiusLg
-            border.color: Colors.borderLight
-            border.width: 1
-        }
-
-        MenuItem {
-            text: "한글 파일 변환"
-            width: toolsActionsMenu.implicitWidth
-            implicitHeight: 34
-            font.family: Typography.fontPrimary
-            font.pixelSize: Typography.bodySmall
-            onTriggered: root.hwpConversionToolClicked()
-            ToolTip.visible: hovered
-            ToolTip.text: "HWP 파일을 HWPX로 변환하는 외부 도구를 실행합니다."
-            background: Rectangle {
-                color: control.down ? Colors.primary100 : (control.hovered ? Colors.bgSecondary : "transparent")
-                radius: Metrics.radiusSm
-            }
-        }
-
-        MenuItem {
-            text: "Ollama 모델 등록"
-            width: toolsActionsMenu.implicitWidth
-            implicitHeight: 34
-            font.family: Typography.fontPrimary
-            font.pixelSize: Typography.bodySmall
-            onTriggered: root.ollamaModelToolClicked()
-            ToolTip.visible: hovered
-            ToolTip.text: "누니노트에서 사용할 Ollama 모델 등록 도구를 실행합니다."
             background: Rectangle {
                 color: control.down ? Colors.primary100 : (control.hovered ? Colors.bgSecondary : "transparent")
                 radius: Metrics.radiusSm

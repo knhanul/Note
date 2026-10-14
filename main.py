@@ -12,15 +12,25 @@ Version: 1.0.0
 
 import sys
 import os
+import json
 from pathlib import Path
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtQml import QQmlApplicationEngine
 from PyQt6.QtGui import QFontDatabase, QFont, QIcon
 
-from app_bootstrap import bootstrap_app
 from app_config import create_app_config
-from services.settings_service import SettingsService
+from app_splash import show_splash
+
+
+def _load_ui_scale(base_dir: Path) -> float:
+    """Read ui_scale from the settings file without importing the services package."""
+    try:
+        data = json.loads((base_dir / "nuni_note_settings.json").read_text(encoding="utf-8"))
+        return float(data.get("ui_scale", 1.0))
+    except Exception:
+        return 1.0
 
 
 def setup_fonts(app: QApplication, ui_scale: float = 1.0):
@@ -47,10 +57,9 @@ def setup_fonts(app: QApplication, ui_scale: float = 1.0):
 
 def main():
     """Application entry point."""
-    # Load UI scale from settings
-    settings_service = SettingsService()
-    ui_scale = settings_service.get_ui_scale()
-    
+    base_dir = Path(__file__).parent.resolve()
+    ui_scale = _load_ui_scale(base_dir)
+
     # Enable High DPI scaling
     os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
     os.environ["QT_SCALE_FACTOR_ROUNDING_POLICY"] = "RoundPreferFloor"
@@ -58,8 +67,10 @@ def main():
     # Use Basic style for customizable ScrollBar
     os.environ["QT_QUICK_CONTROLS_STYLE"] = "Basic"
 
-    base_dir = Path(__file__).parent.resolve()
     config = create_app_config(base_dir, sys.argv)
+
+    # Required before QApplication so QtWebEngine can load later (deferred imports)
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
 
     app = QApplication(sys.argv)
     app.setApplicationName(config.app_name)
@@ -68,11 +79,20 @@ def main():
 
     if config.icon_path.exists():
         app.setWindowIcon(QIcon(str(config.icon_path)))
-    
+
+    # Show the splash image first while the rest of the app is still loading
+    splash = show_splash(config.splash_image_path)
+
+    # Heavy module loading happens while the splash is visible
+    from app_bootstrap import bootstrap_app
+
     setup_fonts(app, ui_scale)
-    
+
     engine = QQmlApplicationEngine()
     bootstrap_app(engine, config)
+
+    if splash is not None:
+        splash.close()
 
     sys.exit(app.exec())
 

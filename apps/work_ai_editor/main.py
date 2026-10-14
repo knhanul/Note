@@ -9,20 +9,15 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QFontDatabase, QIcon
 from PyQt6.QtQml import QQmlApplicationEngine
 from PyQt6.QtWidgets import QApplication
 
 import logging
 
-from app_bootstrap import bootstrap_app
 from app_config import create_app_config
-from packages.ollama_plugin import AIAssistantController, AssistantController, OllamaAssistantPlugin, PromptController, AIPromptDocumentController, AIActionController
-from packages.ollama_plugin.ai_prompt_seed_service import PromptSeedService
-from packages.plugin_api import PluginRegistry, PluginContext
-from controllers.ai_rag_controller import AiRagController
-from controllers.tool_controller import ToolController
-from services.ai_rag_application_service import AiRagApplicationService
+from app_splash import show_splash
 
 # Setup logging to file for executable builds
 def setup_logging():
@@ -68,6 +63,14 @@ logger = logging.getLogger(__name__)
 
 def plugin_setup(engine, services, config):
     """Setup AI plugins for work_ai_editor."""
+    # Deferred imports: these modules load while the splash screen is visible
+    from packages.ollama_plugin import AIAssistantController, AssistantController, OllamaAssistantPlugin, PromptController, AIPromptDocumentController, AIActionController
+    from packages.ollama_plugin.ai_prompt_seed_service import PromptSeedService
+    from packages.plugin_api import PluginRegistry, PluginContext
+    from controllers.ai_rag_controller import AiRagController
+    from controllers.tool_controller import ToolController
+    from services.ai_rag_application_service import AiRagApplicationService
+
     PromptSeedService.set_default_settings_service(services.settings_service)
     logger.info("[work_ai_editor] Setting up AI plugins...")
 
@@ -187,6 +190,9 @@ def main():
 
     config = create_app_config(PROJECT_ROOT, sys.argv)
 
+    # Required before QApplication so QtWebEngine can load later (deferred imports)
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
+
     app = QApplication(sys.argv)
     app.setApplicationName(config.app_name)
     app.setOrganizationName(config.organization_name)
@@ -195,10 +201,19 @@ def main():
     if config.icon_path.exists():
         app.setWindowIcon(QIcon(str(config.icon_path)))
 
+    # Show the splash image first while the rest of the app is still loading
+    splash = show_splash(config.splash_image_path)
+
+    # Heavy module loading happens while the splash is visible
+    from app_bootstrap import bootstrap_app
+
     setup_fonts(app)
 
     engine = QQmlApplicationEngine()
     bootstrap_app(engine, config, plugin_setup=plugin_setup, app_variant="work_ai_editor")
+
+    if splash is not None:
+        splash.close()
 
     sys.exit(app.exec())
 
