@@ -81,6 +81,8 @@ class AssistantController(QObject):
         self._current_worker: AIWorker | None = None
         self._response_text = ""
         self._response_truncated = False
+        self._task_error = ""
+        self._task_cancelled = False
         self._current_output_limit = RESPONSE_LENGTH_POLICIES["medium"]["max_output_length"]
         self._current_response_policy = RESPONSE_LENGTH_POLICIES["medium"].copy()
         self._retrieved_context = ""
@@ -141,14 +143,18 @@ class AssistantController(QObject):
 
     def _on_worker_finished(self):
         """Handle worker finished."""
-        self.runningChanged.emit(False)
         self._current_worker = None
         self._worker_manager.clear_worker()
+
+        if self._task_error or self._task_cancelled:
+            self.runningChanged.emit(False)
+            return
 
         # Check for empty response - this happens when worker emitted error for empty response
         if not self._response_text or len(self._response_text) == 0:
             logger.warning("[AssistantController] Empty response detected, emitting error instead of resultReady")
             self.errorOccurred.emit("AI 응답이 비어 있습니다. 모델 또는 응답 파싱을 확인해 주세요.")
+            self.runningChanged.emit(False)
             return
 
         if self._response_truncated and not self._response_text.rstrip().endswith(TRUNCATION_NOTICE.strip()):
@@ -160,10 +166,14 @@ class AssistantController(QObject):
             f"action_id={self._current_response_policy.get('action_id', '')}"
         )
         self.resultReady.emit(self._response_text)
+        # Let QML apply the final result before it flushes/saves the note.
+        self.runningChanged.emit(False)
         logger.info("[AssistantController] Worker finished")
 
     def _on_token_received(self, token: str):
         """Handle token received."""
+        if self._task_cancelled or self._task_error:
+            return
         logger.debug(f"[AssistantController] Token received from worker: len={len(token)}, response_text_len={len(self._response_text)}")
         limit = self._current_output_limit or 0
         if limit <= 0:
@@ -195,13 +205,16 @@ class AssistantController(QObject):
 
     def _on_error(self, error: str):
         """Handle error."""
+        if self._task_cancelled:
+            return
+        self._task_error = error
         self.errorOccurred.emit(error)
-        self.runningChanged.emit(False)
-        self._current_worker = None
         logger.error(f"[AssistantController] Error: {error}")
 
     def _on_status_changed(self, status: str):
         """Handle status changed."""
+        if self._task_cancelled:
+            return
         self.statusChanged.emit(status)
 
     def _normalize_response_length(self, value: str | None) -> str:
@@ -288,6 +301,8 @@ class AssistantController(QObject):
         )
         self._response_text = ""
         self._response_truncated = False
+        self._task_error = ""
+        self._task_cancelled = False
         self._current_output_limit = policy.get("max_output_length", RESPONSE_LENGTH_POLICIES["medium"]["max_output_length"])
         self._current_response_policy = policy
         self.runningChanged.emit(True)
@@ -304,12 +319,14 @@ class AssistantController(QObject):
             first_token_timeout=settings.first_token_timeout,
             idle_timeout=settings.idle_timeout,
             action_id=action_id,
+            auto_start=False,
         )
 
         self._current_worker.signals.finished.connect(self._on_worker_finished)
         self._current_worker.signals.tokenReceived.connect(self._on_token_received)
         self._current_worker.signals.errorOccurred.connect(self._on_error)
         self._current_worker.signals.statusChanged.connect(self._on_status_changed)
+        self._worker_manager.start_current()
 
     @pyqtSlot(str, str)
     def runTask(self, action_id: str, content: str):
@@ -804,6 +821,8 @@ class AssistantController(QObject):
 
         base_url = settings.base_url.rstrip("/")
         keep_alive = settings.keep_alive
+        # Match generation's context allocation so Ollama can reuse this runner.
+        warmup_options = self._build_generation_options(settings, self._resolve_response_policy(None))
 
         def _do_warmup():
             import time
@@ -813,6 +832,7 @@ class AssistantController(QObject):
                     "model": model,
                     "prompt": "",
                     "stream": False,
+                    "options": warmup_options,
                 }
                 if keep_alive:
                     payload["keep_alive"] = keep_alive
@@ -849,9 +869,10 @@ class AssistantController(QObject):
     def cancel(self):
         """Cancel the current operation."""
         if self._worker_manager.is_running():
+            self._task_cancelled = True
             self._worker_manager.cancel_current()
+            self.errorOccurred.emit("생성을 중지했습니다. 지금까지 받은 답변은 보관됩니다.")
         self.statusChanged.emit("중지됨")
-        self.runningChanged.emit(False)
         logger.info("[AssistantController] Task cancelled")
 
     @pyqtSlot()

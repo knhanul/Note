@@ -81,6 +81,9 @@ class AIWorker(QRunnable):
 
     def run(self):
         """Run the AI operation."""
+        if self._is_cancelled:
+            self.signals.finished.emit()
+            return
         start_time = time.time()
         first_token_time = None
         accumulated_response = ""
@@ -121,20 +124,23 @@ class AIWorker(QRunnable):
             response_text = self._execute_request(start_time, first_token_time, accumulated_response, chunk_count, fallback_attempted)
             
             # Check if response is empty and fallback not yet attempted
-            if not response_text and not fallback_attempted and self.stream:
+            if not response_text and not fallback_attempted and self.stream and not self._is_cancelled:
                 logger.info("[AIWorker] Empty response with stream=True, retrying with stream=False")
                 fallback_attempted = True
                 response_text = self._execute_request(start_time, first_token_time, accumulated_response, chunk_count, fallback_attempted)
             
             # Handle empty response after all attempts
-            if not response_text:
+            if self._is_cancelled:
+                self.signals.statusChanged.emit("중지됨")
+            elif not response_text:
                 logger.warning(f"[AIWorker] Empty response after all attempts, action_id={self.action_id}")
                 self.signals.errorOccurred.emit("AI 응답이 비어 있습니다. 모델 또는 응답 파싱을 확인해 주세요.")
                 self.signals.finished.emit()
                 return
             
-            self.signals.statusChanged.emit("완료")
-            self.signals.resultReady.emit("응답 완료")
+            else:
+                self.signals.statusChanged.emit("완료")
+                self.signals.resultReady.emit(response_text)
 
         except urllib.error.URLError as e:
             logger.error(f"[AIWorker] Connection error: {e}")
@@ -211,9 +217,7 @@ class AIWorker(QRunnable):
                         error_msg += f" - {error_data}"
                     except:
                         pass
-                    self.signals.errorOccurred.emit(error_msg)
-                    self.signals.finished.emit()
-                    return ""
+                    raise RuntimeError(error_msg)
 
                 if use_stream:
                     buffer = ""
@@ -221,7 +225,6 @@ class AIWorker(QRunnable):
                     for line in response:
                         if self._is_cancelled:
                             self.signals.statusChanged.emit("중지됨")
-                            self.signals.finished.emit()
                             return ""
 
                         if line:
@@ -230,6 +233,8 @@ class AIWorker(QRunnable):
                                 line, buffer = buffer.split("\n", 1)
                                 try:
                                     chunk = json.loads(line)
+                                    if chunk.get("error"):
+                                        raise RuntimeError(chunk["error"])
                                     chunk_count += 1
                                     
                                     # Debug log first 3 chunks
@@ -310,6 +315,7 @@ class AIWorker(QRunnable):
                                                 f"thinking_chars={thinking_chars}, done_reason={done_reason}. "
                                                 f"Consider increasing num_predict or disabling think."
                                             )
+                                        return accumulated_response
                                 except json.JSONDecodeError:
                                     continue
 
@@ -317,6 +323,10 @@ class AIWorker(QRunnable):
                 else:
                     body = response.read().decode("utf-8")
                     data = json.loads(body)
+                    if data.get("error"):
+                        raise RuntimeError(data["error"])
+                    if self._is_cancelled:
+                        return ""
                     first_token_time = time.time() - start_time
                     
                     # Handle both ms and ns duration values
@@ -394,6 +404,7 @@ class AIWorkerManager:
         first_token_timeout: int = 180,
         idle_timeout: int = 60,
         action_id: str = "",
+        auto_start: bool = True,
     ) -> AIWorker:
         """Run an AI task."""
         if self._current_worker and self._current_worker.signals:
@@ -413,9 +424,15 @@ class AIWorkerManager:
             action_id=action_id,
         )
         self._current_worker = worker
-        self._pool.start(worker)
+        if auto_start:
+            self.start_current()
         logger.info(f"[AIWorkerManager] Task started: action_id={action_id}")
         return worker
+
+    def start_current(self):
+        """Start after the controller has connected all streaming signals."""
+        if self._current_worker:
+            self._pool.start(self._current_worker)
 
     def cancel_current(self):
         """Cancel the current task."""

@@ -75,6 +75,7 @@ export default function App() {
   const modeRef = useRef('wysiwyg')
   const markdownDraftRef = useRef('')
   const markdownTextareaRef = useRef(null)
+  const editorScrollRef = useRef(null)
 
   useEffect(() => {
     console.log('[editorMode state changed to]:', editorMode)
@@ -517,6 +518,20 @@ export default function App() {
         publishPayload(editor)
       },
 
+      // The incoming Markdown is already authoritative. Avoid serializing the
+      // entire document back to Markdown/JSON on every streaming frame.
+      setStreamingMarkdown(markdown, noteId) {
+        if (noteId !== currentNoteIdRef.current) return false
+        const nextMarkdown = markdown || ''
+        clearDebounce()
+        setMarkdownDraft(nextMarkdown)
+        if (modeRef.current !== 'markdown') {
+          editor.commands.setContent(nextMarkdown, false)
+        }
+        window.__editorLastPayload = buildMarkdownPayload(nextMarkdown)
+        return true
+      },
+
       getMarkdown() {
         if (modeRef.current === 'markdown') return markdownDraftRef.current || ''
         return editor.storage.markdown.getMarkdown()
@@ -658,10 +673,10 @@ export default function App() {
           }
           return
         }
-        const { view, state } = editor
-        const coords = view.coordsAtPos(state.doc.content.size)
-        if (coords) {
-          view.dom.scrollIntoView({ block: 'end', behavior: 'smooth' })
+        const scroller = editorScrollRef.current
+        if (scroller) {
+          // Smooth scrolling restarts with every chunk and lags behind output.
+          scroller.scrollTop = scroller.scrollHeight
         }
       },
     }
@@ -701,7 +716,7 @@ export default function App() {
           <BubbleMenuBar editor={editor} />
         </div>
       )}
-      <div className="flex-1 overflow-auto min-h-0">
+      <div ref={editorScrollRef} className="flex-1 overflow-auto min-h-0">
         {editorMode === 'wysiwyg' ? (
           <>
             {console.log('[Render] Rendering WYSIWYG editor')}

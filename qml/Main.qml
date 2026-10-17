@@ -5715,6 +5715,12 @@ Window {
                             contentJson: window.activeContentMode === "notes" ? (window.currentNote ? (window.currentNote.content_json || "") : "") : ""
                             saveStatus: noteController ? noteController.saveStatus : "saved"
                             editorZoom: window.editorZoom
+                            aiGenerationActive: window.activeContentMode === "notes"
+                                                && noteId === aiAssistantPanel.currentStreamingNoteId
+                                                && (aiAssistantPanel.aiRunning || aiAssistantPanel.ragRequestRunning)
+                            aiGenerationStatus: aiAssistantPanel.generationStatusText
+                            aiElapsedSeconds: aiAssistantPanel.currentAiElapsedSec
+                            aiReceivedChars: aiAssistantPanel.receivedAnswerChars
                             readOnly: window.activeContentMode === "ai_prompts" && (window.currentAIPromptDocument && window.currentAIPromptDocument.readonly)
 
                             // Primary handler: receives title + markdown + JSON in one shot
@@ -6170,6 +6176,7 @@ Window {
 
             // AI Assistant Panel - visible only in work_ai_editor
             AIAssistantPanel {
+                id: aiAssistantPanel
                 visible: typeof appVariant !== "undefined" && appVariant === "work_ai_editor" && window.aiPanelOpen
                 Layout.fillHeight: true
                 Layout.minimumWidth: 320

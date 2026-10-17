@@ -557,6 +557,13 @@ Rectangle {
     property string currentAiStatusText: ""
 
     property int currentAiElapsedSec: 0
+    property int receivedAnswerChars: 0
+    property bool promptPreviewExpanded: false
+    readonly property string generationStatusText: !currentStreamingIsRag && currentAiRunStatus.lastErrorMessage
+        ? currentAiRunStatus.lastErrorMessage
+        : (receivedAnswerChars > 0 ? "답변을 작성하고 있어요…"
+           : (currentStreamingIsRag ? "참고문서를 검색하고 답변을 준비하고 있어요…"
+              : (currentAiStatusText || "AI 모델과 입력 내용을 준비하고 있어요…")))
 
     // 입력 문자 수: prefill(문서 분석) 단계에서 진행감을 주기 위해 표시
     property int currentAiInputChars: 0
@@ -565,10 +572,11 @@ Rectangle {
         id: currentAiElapsedTimer
         interval: 1000
         repeat: true
-        running: root.aiRunning
+        running: root.aiRunning || root.ragRequestRunning
         onTriggered: {
-            if (root.aiRunStartTime > 0) {
-                root.currentAiElapsedSec = Math.floor((new Date().getTime() - root.aiRunStartTime) / 1000)
+            var started = root.currentStreamingIsRag ? root.ragRunStartTime : root.aiRunStartTime
+            if (started > 0) {
+                root.currentAiElapsedSec = Math.floor((new Date().getTime() - started) / 1000)
             }
         }
     }
@@ -2048,6 +2056,7 @@ Rectangle {
 
 
     function runSelectedAction() {
+        if (root.aiRunning || root.ragRequestRunning || root.ragIndexingRunning) return
 
         // 참고문서 AI 탭에서는 RAG 전용 경로로 실행
         if (root.aiModeIndex === 1) {
@@ -2294,6 +2303,8 @@ Rectangle {
         root.currentStreamingNoteId = ""
 
         root._streamFlushPending = false
+        root.receivedAnswerChars = 0
+        root.currentAiElapsedSec = 0
 
         root._firstStreamFlushDone = false
 
@@ -3050,6 +3061,7 @@ Rectangle {
 
 
     function askIndexedDocuments(questionText) {
+        if (root.aiRunning || root.ragRequestRunning || root.ragIndexingRunning) return
 
         var ragCtrl = getAiRagController()
 
@@ -3181,6 +3193,8 @@ Rectangle {
         // Reset and prepare streaming note immediately
 
         root.currentStreamingNoteId = ""
+        root.receivedAnswerChars = 0
+        root.currentAiElapsedSec = 0
 
         root._streamFlushPending = false
 
@@ -4035,6 +4049,7 @@ Rectangle {
         root.currentStreamingTitle = title
 
         root.currentStreamingContent = header
+        root._streamHeader = header
 
         
 
@@ -4096,6 +4111,9 @@ Rectangle {
     // sees a response as fast as possible.
     property bool _streamFlushPending: false
     property bool _firstStreamFlushDone: false
+    property string _streamHeader: ""
+    property string _lastFlushedNoteId: ""
+    property string _lastFlushedContent: ""
 
     Timer {
         id: streamFlushTimer
@@ -4114,6 +4132,10 @@ Rectangle {
         root._streamFlushPending = false
         var noteId = root.currentStreamingNoteId
         if (!noteId) return
+        // A final result often repeats the last token batch. Do not erase the
+        // controller's pending save or re-render identical content.
+        if (noteId === root._lastFlushedNoteId && root.currentStreamingContent === root._lastFlushedContent)
+            return
 
         var nc = getNoteController()
         if (!nc) {
@@ -4122,6 +4144,8 @@ Rectangle {
         }
 
         nc.updateNote(noteId, root.currentStreamingTitle, root.currentStreamingContent)
+        root._lastFlushedNoteId = noteId
+        root._lastFlushedContent = root.currentStreamingContent
 
         // Force WebNoteEditor to refresh for live streaming visibility.
         if (root.noteEditorRef && typeof window !== "undefined" && window.selectedNoteId === noteId) {
@@ -4172,7 +4196,7 @@ Rectangle {
         } else {
 
             // Full replacement: keep the header, replace content after ## 답변
-            var header = root.currentStreamingIsRag ? formatRagResultHeader() : formatAiResultHeader()
+            var header = root._streamHeader
             root.currentStreamingContent = header + newText
 
         }
@@ -4183,7 +4207,7 @@ Rectangle {
         //  - first token: fastest perceived response
         //  - full replacement (final result / RAG answer / error rewrite)
         //  - not running (error/final paths outside streaming)
-        if (!root._firstStreamFlushDone || !isAppend || !root.aiRunning) {
+        if (!root._firstStreamFlushDone || !isAppend || !(root.aiRunning || root.ragRequestRunning)) {
 
             root._firstStreamFlushDone = true
 
@@ -4506,6 +4530,7 @@ Rectangle {
 
         ac.tokenReceived.connect(function(token) {
 
+            root.receivedAnswerChars += token.length
             updateStreamingNote(token, true)
 
         })
@@ -4561,15 +4586,13 @@ Rectangle {
 
                 // Check if response is empty
 
-                var isTrulyEmpty = (root.currentStreamingContent.indexOf(root.currentStreamingTitle) === 0 &&
-
-                                   root.currentStreamingContent.length <= root.currentStreamingTitle.length + 20)
-
-
-
                 if (root.currentStreamingNoteId !== "") {
 
-                    if (isTrulyEmpty) {
+                    if (root.currentAiRunStatus.lastErrorMessage) {
+                        // Keep the failure/cancellation reported before finished.
+                        var failedNoteController = getNoteController()
+                        if (failedNoteController) failedNoteController.saveCurrentNote()
+                    } else if (root.receivedAnswerChars === 0) {
 
                         console.log("[AIAssistantPanel] AI 답변 생성 실패")
 
@@ -4662,8 +4685,9 @@ Rectangle {
                     return
 
                 root.currentRagAnswerText += token
+                root.receivedAnswerChars += token.length
 
-                var header = formatRagResultHeader()
+                var header = root._streamHeader
                 root.currentStreamingContent = header + root.currentRagAnswerText
 
                 if (!root._firstStreamFlushDone) {
@@ -5122,6 +5146,8 @@ Rectangle {
                 Rectangle {
 
                     height: 28
+                    width: Math.min(parent.width, modelBadgeRow.implicitWidth + 16)
+                    clip: true
 
                     radius: Metrics.radiusFull
 
@@ -5132,6 +5158,7 @@ Rectangle {
                     border.width: 1
 
                     Row {
+                        id: modelBadgeRow
 
                         anchors.centerIn: parent
 
@@ -5158,6 +5185,7 @@ Rectangle {
                 Rectangle {
 
                     height: 28
+                    width: performanceBadgeRow.implicitWidth + 16
 
                     radius: Metrics.radiusFull
 
@@ -5168,6 +5196,7 @@ Rectangle {
                     border.width: 1
 
                     Row {
+                        id: performanceBadgeRow
 
                         anchors.centerIn: parent
 
@@ -5204,6 +5233,7 @@ Rectangle {
                 Button {
 
                     id: currentDocTabButton
+                    enabled: !root.aiRunning && !root.ragRequestRunning
 
                     Layout.fillWidth: true
 
@@ -5263,6 +5293,7 @@ Rectangle {
                 Button {
 
                     id: referenceDocTabButton
+                    enabled: !root.aiRunning && !root.ragRequestRunning
 
                     Layout.fillWidth: true
 
@@ -5325,6 +5356,7 @@ Rectangle {
                 visible: !canUseAI()
 
                 width: parent.width
+                height: connectionHint.implicitHeight + Metrics.md * 2
 
                 radius: Metrics.radiusMd
 
@@ -5339,6 +5371,7 @@ Rectangle {
 
 
                 Text {
+                    id: connectionHint
 
                     anchors.fill: parent
 
@@ -5448,9 +5481,7 @@ Rectangle {
 
                                 width: parent.width
 
-                                height: 300
-
-                                implicitHeight: 300
+                                height: Math.max(150, Math.min(260, root.height * 0.25))
 
                                 color: "transparent"
 
@@ -5461,6 +5492,7 @@ Rectangle {
                                 ListView {
 
                                     id: categoryFolderView
+                                    enabled: !root.aiRunning && !root.ragRequestRunning
 
                                     width: parent.width
 
@@ -5969,6 +6001,7 @@ Rectangle {
                                 Column {
 
                                     id: currentDocumentSourceColumn
+                                    enabled: !root.aiRunning && !root.ragRequestRunning
 
                                     width: parent.width - (Metrics.sm * 2)
 
@@ -6702,21 +6735,24 @@ Rectangle {
 
 
 
-                            RowLayout {
+                            ColumnLayout {
 
                                 width: parent.width
-
                                 spacing: Metrics.sm
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: "요청 내용"
+                                    font.family: Typography.fontPrimary
+                                    font.pixelSize: Typography.bodySmall
+                                    font.weight: Font.DemiBold
+                                    color: Colors.textPrimary
+                                }
 
                                 Rectangle {
 
                                     Layout.fillWidth: true
-
-                                    Layout.minimumHeight: 84
-
-                                    Layout.preferredHeight: Math.max(84, Math.min(220, actionInput.contentHeight + 20))
-
-                                    Layout.maximumHeight: 220
+                                    Layout.preferredHeight: 120
 
                                     color: Colors.surface
 
@@ -6726,13 +6762,17 @@ Rectangle {
 
                                     clip: true
 
-                                    TextArea {
-
-                                id: actionInput
-
+                                    ScrollView {
+                                        id: actionInputScroll
                                         anchors.fill: parent
+                                        anchors.margins: 4
+                                        clip: true
+                                        contentWidth: availableWidth
+                                        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
-                                        anchors.margins: 6
+                                        TextArea {
+                                            id: actionInput
+                                            width: actionInputScroll.availableWidth
 
                                 placeholderText: root.selectedAction ? (root.selectedAction.action_id === "current_note_qa" ? "현재 문서에 대해 질문하세요." : getInputModePlaceholder(root.selectedAction.input_mode, root.selectedAction.input_placeholder)) : "AI 기능을 선택하세요"
 
@@ -6764,21 +6804,20 @@ Rectangle {
                                         background: Rectangle {
                                             color: Colors.bgPrimary
                                             border.color: Colors.primary500
-                                            border.width: 2
+                                            border.width: actionInput.activeFocus ? 2 : 0
                                             radius: Metrics.radiusSm
                                         }
 
+                                        }
                                     }
 
                                 }
 
                                 Button {
 
-                                    Layout.preferredWidth: 56
-
-                                    Layout.preferredHeight: 34
-
-                                    text: root.aiRunning ? "중지" : "실행"
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 38
+                                    text: root.aiRunning ? "답변 생성 중지" : "AI 실행  ·  Ctrl+Enter"
 
                                     enabled: canUseAI() && root.selectedAction && !!root.selectedAction.action_id
 
@@ -6863,11 +6902,18 @@ Rectangle {
                                     width: parent.width - (Metrics.sm * 2)
 
                                     anchors.horizontalCenter: parent.horizontalCenter
+                                    anchors.top: parent.top
+                                    anchors.topMargin: Metrics.sm
 
                                     anchors.margins: Metrics.sm
 
                                     spacing: Metrics.xs
 
+                                    ToolButton {
+                                        width: parent.width
+                                        text: (root.promptPreviewExpanded ? "▾ " : "▸ ") + "프롬프트 미리보기"
+                                        onClicked: root.promptPreviewExpanded = !root.promptPreviewExpanded
+                                    }
 
 
                                     Text {
@@ -6886,7 +6932,9 @@ Rectangle {
 
                                     color: Colors.textPrimary
 
-                                    visible: typeof root.selectedAction !== 'undefined' && root.selectedAction && typeof root.selectedAction.current_prompt !== 'undefined'
+                                    width: parent.width
+                                    wrapMode: Text.Wrap
+                                    visible: root.promptPreviewExpanded && root.selectedAction && !!root.selectedAction.current_prompt
 
                                 }
 
@@ -6902,7 +6950,7 @@ Rectangle {
 
                                     ScrollBar.vertical.policy: ScrollBar.AsNeeded
 
-                                    visible: typeof root.selectedAction !== 'undefined' && root.selectedAction && typeof root.selectedAction.current_prompt !== 'undefined' && typeof root.selectedAction.current_prompt.content_md !== 'undefined'
+                                    visible: root.promptPreviewExpanded && root.selectedAction && !!root.selectedAction.current_prompt && typeof root.selectedAction.current_prompt.content_md !== 'undefined'
 
 
 
@@ -6979,6 +7027,8 @@ Rectangle {
                                 width: parent.width - (Metrics.md * 2)
 
                                 anchors.horizontalCenter: parent.horizontalCenter
+                                anchors.top: parent.top
+                                anchors.topMargin: Metrics.md
 
                                 anchors.margins: Metrics.sm
 
@@ -6986,13 +7036,16 @@ Rectangle {
 
 
 
-                                Row {
+                                Column {
 
-                                    spacing: Metrics.xs
+                                    width: parent.width
+                                    spacing: Metrics.sm
 
                                     Text {
 
                                         text: root.currentAiRunStatus.lastActionName || "AI 실행"
+                                        width: parent.width
+                                        wrapMode: Text.Wrap
 
                                         font.family: Typography.fontPrimary
 
@@ -7006,7 +7059,9 @@ Rectangle {
 
                                     Text {
 
-                                        text: root.aiRunning ? ((root.currentAiStatusText !== "" ? root.currentAiStatusText : "실행 중...") + (!root._firstStreamFlushDone && root.currentAiInputChars > 0 ? " · 입력 " + root.currentAiInputChars + "자" : "") + (root.currentAiElapsedSec > 0 ? " · 경과 " + root.currentAiElapsedSec + "초" : "")) : (root.currentAiRunStatus.lastSuccess ? "실행 완료" : (root.currentAiRunStatus.lastErrorMessage ? "실행 실패" : ""))
+                                        width: parent.width
+                                        wrapMode: Text.Wrap
+                                        text: root.aiRunning ? root.generationStatusText : (root.currentAiRunStatus.lastSuccess ? "실행 완료" : (root.currentAiRunStatus.lastErrorMessage ? "실행 중단" : "요청 내용을 입력하고 AI를 실행하세요."))
 
                                         font.family: Typography.fontPrimary
 
@@ -7020,8 +7075,26 @@ Rectangle {
 
 
 
+                                ProgressBar {
+                                    width: parent.width
+                                    visible: root.aiRunning
+                                    indeterminate: root.aiRunning
+                                }
+
+                                Text {
+                                    width: parent.width
+                                    wrapMode: Text.Wrap
+                                    visible: root.aiRunning
+                                    text: root.currentAiElapsedSec + "초 경과 · "
+                                          + (root.receivedAnswerChars > 0 ? root.receivedAnswerChars + "자 수신" : "입력 " + root.currentAiInputChars + "자")
+                                    color: Colors.textSecondary
+                                    font.pixelSize: Typography.caption
+                                }
+
                                 Text {
 
+                                    width: parent.width
+                                    wrapMode: Text.Wrap
                                     text: root.currentAiRunStatus.lastSuccess ?
 
                                           (root.currentAiRunStatus.lastElapsedMs > 0 ? "소요시간: " + (root.currentAiRunStatus.lastElapsedMs / 1000).toFixed(1) + "초" : "") :
@@ -7043,6 +7116,8 @@ Rectangle {
                                 Text {
 
                                     text: "리소스: " + root.currentAiRunStatus.lastResourceText
+                                    width: parent.width
+                                    wrapMode: Text.Wrap
 
                                     font.family: Typography.fontPrimary
 
@@ -7059,6 +7134,8 @@ Rectangle {
                                 Text {
 
                                     text: "결과 노트: " + (root.currentAiRunStatus.lastResultNoteTitle || root.currentAiRunStatus.lastResultNoteId || "생성 중...")
+                                    width: parent.width
+                                    wrapMode: Text.Wrap
 
                                     font.family: Typography.fontPrimary
 
@@ -7982,7 +8059,9 @@ Rectangle {
 
             anchors.fill: parent
 
-            visible: root.aiRunning || root.ragRequestRunning || root.ragIndexingRunning
+            // Generation stays visible in the editor and can be stopped from
+            // the request controls. Only index changes require this overlay.
+            visible: root.ragIndexingRunning
 
             opacity: visible ? 1 : 0
 
@@ -8533,4 +8612,3 @@ Rectangle {
 }
 
 }
-

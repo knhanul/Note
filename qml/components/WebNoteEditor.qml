@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Layouts
 import QtWebEngine
 import QtQuick.Dialogs
@@ -19,6 +20,17 @@ ColumnLayout {
     property real editorZoom: 1.0   // 0.5 ~ 3.0
     property string editorMode: "wysiwyg" // wysiwyg | markdown
     property bool readOnly: false
+    property bool aiGenerationActive: false
+    property string aiGenerationStatus: ""
+    property int aiElapsedSeconds: 0
+    property int aiReceivedChars: 0
+    property bool followAiOutput: true
+    property string _pendingLiveMarkdown: ""
+    property string _pendingLiveNoteId: ""
+
+    onAiGenerationActiveChanged: {
+        if (aiGenerationActive) followAiOutput = true
+    }
 
     function getCurrentSelectionText(callback) {
         if (typeof callback !== "function") return
@@ -136,6 +148,56 @@ ColumnLayout {
     }
 
     spacing: 0
+
+    Rectangle {
+        Layout.fillWidth: true
+        implicitHeight: generationRow.implicitHeight + 20
+        visible: root.aiGenerationActive
+        color: Colors.primary50
+        border.color: Colors.borderLight
+
+        RowLayout {
+            id: generationRow
+            anchors.fill: parent
+            anchors.margins: 10
+            spacing: 10
+
+            BusyIndicator {
+                Layout.preferredWidth: 26
+                Layout.preferredHeight: 26
+                running: root.aiGenerationActive
+            }
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 3
+                Label {
+                    Layout.fillWidth: true
+                    text: root.aiGenerationStatus
+                    color: Colors.textPrimary
+                    font.family: Typography.fontPrimary
+                    font.pixelSize: Typography.bodySmall
+                    wrapMode: Text.Wrap
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: root.aiElapsedSeconds + "초 경과 · "
+                          + (root.aiReceivedChars > 0 ? root.aiReceivedChars + "자 수신" : "첫 답변을 기다리는 중")
+                    color: Colors.textSecondary
+                    font.pixelSize: Typography.caption
+                    wrapMode: Text.Wrap
+                }
+            }
+            CheckBox {
+                text: "자동 스크롤"
+                checked: root.followAiOutput
+                onToggled: {
+                    root.followAiOutput = checked
+                    if (checked)
+                        webView.runJavaScript("if (window.editorAPI) window.editorAPI.scrollToBottom();")
+                }
+            }
+        }
+    }
 
     // Web-based WYSIWYG Editor (TipTap - toolbar built into React component)
     Rectangle {
@@ -384,6 +446,8 @@ ColumnLayout {
             repeat: false
             onTriggered: {
                 setEditorContent(root.content, root.contentJson)
+                if (root._pendingLiveNoteId === root.noteId && root._pendingLiveMarkdown !== "")
+                    root.applyLiveMarkdown(root._pendingLiveMarkdown)
             }
         }
     }
@@ -415,9 +479,12 @@ ColumnLayout {
     }
 
     // Force live markdown refresh for same-note streaming updates.
-    // Uses editorAPI.setMarkdown which does not ignore same noteId updates.
+    // Uses the streaming API, retaining the latest frame until the editor is ready.
     function applyLiveMarkdown(md) {
         if (!md || md.length === 0) return
+        root._pendingLiveMarkdown = md
+        root._pendingLiveNoteId = root.noteId
+        if (!root._editorReady) return
         // Use chunk-based assignment to avoid JSON.stringify/runJavaScript length limits
         var chunkSize = 50000
         var chunks = []
@@ -427,13 +494,14 @@ ColumnLayout {
         // Build JavaScript to concatenate chunks
         var js = "window.__liveMdChunks = " + JSON.stringify(chunks) + ";"
         js += "window.__liveMd = window.__liveMdChunks.join('');"
-        js += "if (window.editorAPI && window.editorAPI.setMarkdown) { window.editorAPI.setMarkdown(window.__liveMd); }"
+        js += "if (window.editorAPI && window.editorAPI.setStreamingMarkdown) { window.editorAPI.setStreamingMarkdown(window.__liveMd, " + JSON.stringify(root.noteId) + "); }"
         // Single scroll after the DOM has been updated (next frame) to keep
         // per-flush overhead low during streaming.
-        js += "requestAnimationFrame(function() {"
-        js += "  if (window.editorAPI && window.editorAPI.scrollToBottom) { window.editorAPI.scrollToBottom(); }"
-        js += "  else { window.scrollTo(0, document.body.scrollHeight); }"
-        js += "});"
+        if (root.followAiOutput) {
+            js += "requestAnimationFrame(function() {"
+            js += "  if (window.editorAPI && window.editorAPI.scrollToBottom) { window.editorAPI.scrollToBottom(); }"
+            js += "});"
+        }
         webView.runJavaScript(js)
     }
     
@@ -616,6 +684,8 @@ ColumnLayout {
     }
 
     onNoteIdChanged: {
+        root._pendingLiveMarkdown = ""
+        root._pendingLiveNoteId = ""
         // Reset debounce so pending autosave for previous note doesn't fire against new one
         autosaveTimer.stop()
         if (webView.loadProgress === 100) {
